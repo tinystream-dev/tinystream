@@ -380,6 +380,11 @@ type ContrastWarning {
 	minimum: Float!
 }
 
+type CreatedInvite {
+	invite: Invite!
+	link: String!
+}
+
 type DecodedScheme {
 	name: String
 	code: String!
@@ -646,6 +651,21 @@ type Inbox {
 	unread: Int!
 }
 
+type Invite {
+	id: Int!
+	label: String!
+	createdAt: Int!
+	expiresAt: Int!
+	maxUses: Int!
+	uses: Int!
+	revoked: Boolean!
+}
+
+type InvitePreview {
+	expiresAt: Int!
+	remainingUses: Int!
+}
+
 """
 A scalar that can represent any JSON value.
 """
@@ -821,6 +841,9 @@ type Mutation {
 	startPasskeyRegistration(name: String): PasskeyChallenge!
 	finishPasskeyRegistration(challenge: String!, credential: JSON!): [Passkey!]!
 	deletePasskey(id: Int!): [Passkey!]!
+	createInvite(label: String!, maxUses: Int!, expiresInHours: Int!): CreatedInvite!
+	revokeInvite(id: Int!): Boolean!
+	acceptInvite(token: String!, username: String!, password: String!): SignedIn!
 	createUser(input: NewUser!): User!
 	updateUser(id: Int!, input: UserPatch!): User!
 	deleteUser(id: Int!): Int!
@@ -1263,6 +1286,8 @@ type Query {
 	viewer: User
 	server: Server!
 	signInProfiles: [SignInProfile!]!
+	invites: [Invite!]!
+	invite(token: String!): InvitePreview
 	users: [User!]!
 	user(id: Int!): User
 	permissionDefaults: Permissions!

@@ -103,6 +103,7 @@ type ManagedUser = User & { createdAt: number; lastSeen: number | null; override
 const setOnly = (o: Record<string, unknown>) => Object.fromEntries(Object.entries(o).filter(([, v]) => v != null)) as Overrides
 import { relative } from '../lib/downloads'
 import { useMe, useStatus } from '../lib/hooks'
+import { Invites } from './Invites'
 import { Avatar, AvatarPicker } from './Avatar'
 import { ask, toast, toastError } from './feedback'
 import { Card, useSettings } from './SettingsKit'
@@ -218,6 +219,8 @@ export function People() {
           })}
         </div>
       </Card>
+
+      <Invites />
 
       {defaults && users && (
         <Card title="Default permissions">

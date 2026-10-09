@@ -50,7 +50,7 @@ async fn keys_of(state: &AppState, user_id: i64) -> ApiResult<Vec<(i64, Security
     Ok(rows.into_iter().filter_map(|(id, c)| Some((id, serde_json::from_str(&c).ok()?))).collect())
 }
 
-async fn sign_in(ctx: &Context<'_>, user_id: i64) -> ApiResult<SignedIn> {
+pub(super) async fn sign_in(ctx: &Context<'_>, user_id: i64) -> ApiResult<SignedIn> {
     let state = ctx.state();
     let token = auth::create_session(state, user_id).await?;
     ctx.append_http_header(header::SET_COOKIE, auth::session_cookie(&token));

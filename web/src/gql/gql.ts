@@ -53,6 +53,9 @@ type Documents = {
     "\n  mutation ApplyRenames($ids: [Int!]!) {\n    applyRenames(ids: $ids) {\n      renamed\n      problems\n    }\n  }\n": typeof types.ApplyRenamesDocument,
     "\n  mutation DismissRenames($ids: [Int!]!) {\n    dismissRenames(ids: $ids)\n  }\n": typeof types.DismissRenamesDocument,
     "\n  mutation UndoFileChanges($batch: String!) {\n    undoFileChanges(batch: $batch) {\n      undone\n      problems\n    }\n  }\n": typeof types.UndoFileChangesDocument,
+    "\n  query Invites {\n    invites { id label createdAt expiresAt maxUses uses revoked }\n  }\n": typeof types.InvitesDocument,
+    "\n  mutation CreateInvite($label: String!, $maxUses: Int!, $expiresInHours: Int!) {\n    createInvite(label: $label, maxUses: $maxUses, expiresInHours: $expiresInHours) { link }\n  }\n": typeof types.CreateInviteDocument,
+    "\n  mutation RevokeInvite($id: Int!) { revokeInvite(id: $id) }\n": typeof types.RevokeInviteDocument,
     "\n  query SignInProfiles {\n    signInProfiles {\n      key\n      avatar\n      passkey\n    }\n  }\n": typeof types.SignInProfilesDocument,
     "\n  mutation Setup($username: String!, $password: String!) {\n    setup(username: $username, password: $password) {\n      user {\n        id\n      }\n    }\n  }\n": typeof types.SetupDocument,
     "\n  mutation SignIn($username: String, $profile: String, $password: String!) {\n    signIn(username: $username, profile: $profile, password: $password) {\n      user {\n        id\n      }\n    }\n  }\n": typeof types.SignInDocument,
@@ -176,6 +179,8 @@ type Documents = {
     "\n  query Home {\n    home {\n      continueWatching {\n        position\n        upNext\n        newEpisode\n        watchedAt\n        video {\n          id\n          label\n          name\n          still\n          duration\n          title {\n            id\n            name\n            poster\n            backdrop\n          }\n        }\n      }\n      recentlyAdded {\n        library\n        titles {\n          ...Card\n        }\n      }\n      popularHere {\n        people\n        title {\n          ...Card\n        }\n      }\n    }\n  }\n": typeof types.HomeDocument,
     "\n  query ComingUp($from: Int!, $to: Int!) {\n    calendar(from: $from, to: $to) {\n      ...CalendarEntryFields\n    }\n  }\n": typeof types.ComingUpDocument,
     "\n  query MusicHome {\n    musicHome {\n      recentlyPlayed {\n        ...AlbumCard\n      }\n      recentlyAdded {\n        ...AlbumCard\n      }\n    }\n  }\n": typeof types.MusicHomeDocument,
+    "\n  query Invite($token: String!) { invite(token: $token) { expiresAt remainingUses } }\n": typeof types.InviteDocument,
+    "\n  mutation AcceptInvite($token: String!, $username: String!, $password: String!) {\n    acceptInvite(token: $token, username: $username, password: $password) { user { id } }\n  }\n": typeof types.AcceptInviteDocument,
     "\n  query Library($name: String!) {\n    library(name: $name) {\n      titles {\n        ...Card\n      }\n    }\n  }\n": typeof types.LibraryDocument,
     "\n  query ListenRoom($code: String!) {\n    listenRoom(code: $code) {\n      code\n      hostName\n      signedIn\n      isHost\n      canShare\n      canInvite\n      tracks {\n        ...MusicTrack\n      }\n    }\n  }\n": typeof types.ListenRoomDocument,
     "\n  query Playlist($id: Int!) {\n    playlist(id: $id) {\n      ...PlaylistCard\n      tracks {\n        ...MusicTrack\n      }\n    }\n  }\n": typeof types.PlaylistDocument,
@@ -247,6 +252,9 @@ const documents: Documents = {
     "\n  mutation ApplyRenames($ids: [Int!]!) {\n    applyRenames(ids: $ids) {\n      renamed\n      problems\n    }\n  }\n": types.ApplyRenamesDocument,
     "\n  mutation DismissRenames($ids: [Int!]!) {\n    dismissRenames(ids: $ids)\n  }\n": types.DismissRenamesDocument,
     "\n  mutation UndoFileChanges($batch: String!) {\n    undoFileChanges(batch: $batch) {\n      undone\n      problems\n    }\n  }\n": types.UndoFileChangesDocument,
+    "\n  query Invites {\n    invites { id label createdAt expiresAt maxUses uses revoked }\n  }\n": types.InvitesDocument,
+    "\n  mutation CreateInvite($label: String!, $maxUses: Int!, $expiresInHours: Int!) {\n    createInvite(label: $label, maxUses: $maxUses, expiresInHours: $expiresInHours) { link }\n  }\n": types.CreateInviteDocument,
+    "\n  mutation RevokeInvite($id: Int!) { revokeInvite(id: $id) }\n": types.RevokeInviteDocument,
     "\n  query SignInProfiles {\n    signInProfiles {\n      key\n      avatar\n      passkey\n    }\n  }\n": types.SignInProfilesDocument,
     "\n  mutation Setup($username: String!, $password: String!) {\n    setup(username: $username, password: $password) {\n      user {\n        id\n      }\n    }\n  }\n": types.SetupDocument,
     "\n  mutation SignIn($username: String, $profile: String, $password: String!) {\n    signIn(username: $username, profile: $profile, password: $password) {\n      user {\n        id\n      }\n    }\n  }\n": types.SignInDocument,
@@ -370,6 +378,8 @@ const documents: Documents = {
     "\n  query Home {\n    home {\n      continueWatching {\n        position\n        upNext\n        newEpisode\n        watchedAt\n        video {\n          id\n          label\n          name\n          still\n          duration\n          title {\n            id\n            name\n            poster\n            backdrop\n          }\n        }\n      }\n      recentlyAdded {\n        library\n        titles {\n          ...Card\n        }\n      }\n      popularHere {\n        people\n        title {\n          ...Card\n        }\n      }\n    }\n  }\n": types.HomeDocument,
     "\n  query ComingUp($from: Int!, $to: Int!) {\n    calendar(from: $from, to: $to) {\n      ...CalendarEntryFields\n    }\n  }\n": types.ComingUpDocument,
     "\n  query MusicHome {\n    musicHome {\n      recentlyPlayed {\n        ...AlbumCard\n      }\n      recentlyAdded {\n        ...AlbumCard\n      }\n    }\n  }\n": types.MusicHomeDocument,
+    "\n  query Invite($token: String!) { invite(token: $token) { expiresAt remainingUses } }\n": types.InviteDocument,
+    "\n  mutation AcceptInvite($token: String!, $username: String!, $password: String!) {\n    acceptInvite(token: $token, username: $username, password: $password) { user { id } }\n  }\n": types.AcceptInviteDocument,
     "\n  query Library($name: String!) {\n    library(name: $name) {\n      titles {\n        ...Card\n      }\n    }\n  }\n": types.LibraryDocument,
     "\n  query ListenRoom($code: String!) {\n    listenRoom(code: $code) {\n      code\n      hostName\n      signedIn\n      isHost\n      canShare\n      canInvite\n      tracks {\n        ...MusicTrack\n      }\n    }\n  }\n": types.ListenRoomDocument,
     "\n  query Playlist($id: Int!) {\n    playlist(id: $id) {\n      ...PlaylistCard\n      tracks {\n        ...MusicTrack\n      }\n    }\n  }\n": types.PlaylistDocument,
@@ -555,6 +565,18 @@ export function graphql(source: "\n  mutation DismissRenames($ids: [Int!]!) {\n 
  * The graphql function is used to parse GraphQL queries into a document that can be used by GraphQL clients.
  */
 export function graphql(source: "\n  mutation UndoFileChanges($batch: String!) {\n    undoFileChanges(batch: $batch) {\n      undone\n      problems\n    }\n  }\n"): typeof import('./graphql').UndoFileChangesDocument;
+/**
+ * The graphql function is used to parse GraphQL queries into a document that can be used by GraphQL clients.
+ */
+export function graphql(source: "\n  query Invites {\n    invites { id label createdAt expiresAt maxUses uses revoked }\n  }\n"): typeof import('./graphql').InvitesDocument;
+/**
+ * The graphql function is used to parse GraphQL queries into a document that can be used by GraphQL clients.
+ */
+export function graphql(source: "\n  mutation CreateInvite($label: String!, $maxUses: Int!, $expiresInHours: Int!) {\n    createInvite(label: $label, maxUses: $maxUses, expiresInHours: $expiresInHours) { link }\n  }\n"): typeof import('./graphql').CreateInviteDocument;
+/**
+ * The graphql function is used to parse GraphQL queries into a document that can be used by GraphQL clients.
+ */
+export function graphql(source: "\n  mutation RevokeInvite($id: Int!) { revokeInvite(id: $id) }\n"): typeof import('./graphql').RevokeInviteDocument;
 /**
  * The graphql function is used to parse GraphQL queries into a document that can be used by GraphQL clients.
  */
@@ -1047,6 +1069,14 @@ export function graphql(source: "\n  query ComingUp($from: Int!, $to: Int!) {\n 
  * The graphql function is used to parse GraphQL queries into a document that can be used by GraphQL clients.
  */
 export function graphql(source: "\n  query MusicHome {\n    musicHome {\n      recentlyPlayed {\n        ...AlbumCard\n      }\n      recentlyAdded {\n        ...AlbumCard\n      }\n    }\n  }\n"): typeof import('./graphql').MusicHomeDocument;
+/**
+ * The graphql function is used to parse GraphQL queries into a document that can be used by GraphQL clients.
+ */
+export function graphql(source: "\n  query Invite($token: String!) { invite(token: $token) { expiresAt remainingUses } }\n"): typeof import('./graphql').InviteDocument;
+/**
+ * The graphql function is used to parse GraphQL queries into a document that can be used by GraphQL clients.
+ */
+export function graphql(source: "\n  mutation AcceptInvite($token: String!, $username: String!, $password: String!) {\n    acceptInvite(token: $token, username: $username, password: $password) { user { id } }\n  }\n"): typeof import('./graphql').AcceptInviteDocument;
 /**
  * The graphql function is used to parse GraphQL queries into a document that can be used by GraphQL clients.
  */

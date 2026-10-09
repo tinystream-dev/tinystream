@@ -9,6 +9,7 @@ mod discovery;
 mod events;
 mod image_cache;
 mod images;
+mod invites;
 mod library;
 mod listen;
 mod media;
