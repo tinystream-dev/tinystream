@@ -9,6 +9,7 @@ import { graphql } from '../gql'
 import { useFollow } from '../nav'
 import { receive, refresh as refreshNotifications } from '../notifications'
 import { useMe } from '../queries'
+import { useMusic } from '../music/context'
 import { useApi } from '../session'
 import { toast } from './Feedback'
 
@@ -16,6 +17,15 @@ const EventsSubscription = graphql(`
   subscription Events {
     events {
       __typename
+      ... on QueueChanged {
+        by
+      }
+      ... on PlaybackChanged {
+        client
+        trackId
+        position
+        paused
+      }
       ... on ConfigChanged {
         error
       }
@@ -51,6 +61,7 @@ const EventsSubscription = graphql(`
 `)
 
 export function LiveUpdates() {
+  const music = useMusic()
   const api = useApi()
   const qc = useQueryClient()
   const signedIn = !!useMe()
@@ -69,6 +80,12 @@ export function LiveUpdates() {
       {},
       ({ events: e }) => {
         switch (e.__typename) {
+          case 'QueueChanged':
+            void music.refreshFromServer().catch(() => {})
+            break
+          case 'PlaybackChanged':
+            void music.followRemote(e.client, e.trackId, e.position, e.paused)
+            break
           case 'LibraryChanged':
           case 'ScanFinished':
             invalidate(['home'], ['libraries'], ['library', e.library], ['settings'], ['music'])
@@ -124,7 +141,7 @@ export function LiveUpdates() {
       },
       onConnected,
     )
-  }, [api, qc, signedIn])
+  }, [api, qc, signedIn, music])
 
   return null
 }

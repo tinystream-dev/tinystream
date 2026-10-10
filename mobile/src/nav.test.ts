@@ -11,6 +11,8 @@ test('web links land on the app’s screens', () => {
   expect(place('/watch/7')).toEqual({ path: 'watch/7', root: true })
   expect(place('/library/My%20Anime')).toEqual({ tab: '(library)', path: 'library?name=My%20Anime' })
   expect(place('/settings?tab=users')).toEqual({ tab: '(profile)', path: 'settings/users' })
+  expect(place('/album/12')).toEqual({ tab: '(music)', path: 'album/12' })
+  expect(place('/music')).toEqual({ tab: '(music)', path: 'music' })
   expect(place('/requests')).toEqual({ path: 'requests' })
   expect(place('/together/abc')).toBeNull()
 })

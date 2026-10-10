@@ -1,0 +1,15 @@
+[package]
+name = "tinystream-decoder-android"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+uniffi = "0.32"
+thiserror = "2"
+tinystream-decoder-core = { path = "../../../decoder/core", features = ["opus"] }

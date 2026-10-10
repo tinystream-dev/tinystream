@@ -15,6 +15,7 @@ fn main() {
         "web/src",
         "web/public",
         "web/decoder",
+        "decoder/core",
         "web/scripts",
         "web/package.json",
         "web/vite.config.ts",

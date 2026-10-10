@@ -129,7 +129,7 @@ function useLiveUpdates(enabled: boolean) {
             break
           case 'QueueChanged':
             // Another app moved the queue on; follow it unless we're the ones playing.
-            if (e.by !== 'tinystream') void refreshFromServer()
+            void refreshFromServer().catch(() => {})
             break
           case 'PlaybackChanged':
             void followRemote(e.client, e.trackId ?? null, e.position, e.paused)

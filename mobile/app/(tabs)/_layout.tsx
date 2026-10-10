@@ -6,6 +6,7 @@ import { haptic } from '../../modules/haptics'
 import { useSwitcher } from '../../src/components/Switcher'
 import { Tabs } from '../../src/components/Tabs'
 import { GlassScope } from '../../src/effects/Glass'
+import { MusicOverlay } from '../../src/music/NowPlaying'
 import { graphql } from '../../src/gql'
 import { usePendingLink } from '../../src/nav'
 import { useInbox } from '../../src/notifications'
@@ -73,6 +74,7 @@ export default function TabsLayout() {
           }}
         />
       </Tabs>
+      <MusicOverlay />
     </GlassScope>
   )
 }

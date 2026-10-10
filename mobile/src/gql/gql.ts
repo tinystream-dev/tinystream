@@ -60,7 +60,7 @@ type Documents = {
     "\n  mutation AddSeries($input: NewSeries!) {\n    addSeries(input: $input) {\n      id\n    }\n  }\n": typeof types.AddSeriesDocument,
     "\n  query AiredEpisodes($provider: Provider!, $id: String!) {\n    airedEpisodes(provider: $provider, id: $id)\n  }\n": typeof types.AiredEpisodesDocument,
     "\n  mutation CreateRequest($input: NewRequest!) {\n    createRequest(input: $input) {\n      id\n    }\n  }\n": typeof types.CreateRequestDocument,
-    "\n  subscription Events {\n    events {\n      __typename\n      ... on ConfigChanged {\n        error\n      }\n      ... on ScanFinished {\n        library\n      }\n      ... on LibraryChanged {\n        library\n      }\n      ... on MetadataChanged {\n        titleId\n        status\n      }\n      ... on ListChanged {\n        list\n      }\n      ... on SeriesChanged {\n        seriesId\n      }\n      ... on EpisodesImported {\n        library\n      }\n      ... on NotificationReceived {\n        notification {\n          ...NotificationFields\n        }\n      }\n      ... on ClipChanged {\n        clipId\n      }\n    }\n  }\n": typeof types.EventsDocument,
+    "\n  subscription Events {\n    events {\n      __typename\n      ... on QueueChanged {\n        by\n      }\n      ... on PlaybackChanged {\n        client\n        trackId\n        position\n        paused\n      }\n      ... on ConfigChanged {\n        error\n      }\n      ... on ScanFinished {\n        library\n      }\n      ... on LibraryChanged {\n        library\n      }\n      ... on MetadataChanged {\n        titleId\n        status\n      }\n      ... on ListChanged {\n        list\n      }\n      ... on SeriesChanged {\n        seriesId\n      }\n      ... on EpisodesImported {\n        library\n      }\n      ... on NotificationReceived {\n        notification {\n          ...NotificationFields\n        }\n      }\n      ... on ClipChanged {\n        clipId\n      }\n    }\n  }\n": typeof types.EventsDocument,
     "\n  query TitleSeries($id: Int!) {\n    title(id: $id) {\n      series {\n        ...SeriesFields\n      }\n    }\n  }\n": typeof types.TitleSeriesDocument,
     "\n  query TitleSchedule($id: Int!) {\n    title(id: $id) {\n      series {\n        id\n        monitor\n        status\n        next {\n          ...SeriesEpisodeFields\n        }\n      }\n    }\n  }\n": typeof types.TitleScheduleDocument,
     "\n  mutation ManageTitle($titleId: Int!) {\n    manageTitle(titleId: $titleId) {\n      id\n    }\n  }\n": typeof types.ManageTitleDocument,
@@ -72,6 +72,30 @@ type Documents = {
     "\n  mutation GrabRelease($release: ReleaseInput!, $seriesId: Int, $episodes: [EpisodeNumberInput!]!) {\n    grabRelease(release: $release, seriesId: $seriesId, episodes: $episodes) {\n      id\n    }\n  }\n": typeof types.GrabReleaseDocument,
     "\n  mutation DeleteDownloaded($seriesId: Int!, $season: Int) {\n    deleteDownloaded(seriesId: $seriesId, season: $season) {\n      undone\n      problems\n    }\n  }\n": typeof types.DeleteDownloadedDocument,
     "\n  mutation LookForAgain($seriesId: Int!, $season: Int, $episode: Int) {\n    lookForAgain(seriesId: $seriesId, season: $season, episode: $episode)\n  }\n": typeof types.LookForAgainDocument,
+    "\n  fragment MusicTrack on Track {\n    id\n    title\n    artist\n    artists {\n      id\n      name\n    }\n    album\n    albumId\n    albumArtist\n    library\n    disc\n    number\n    year\n    duration\n    codec\n    suffix\n    lossless\n    bitrate\n    sampleRate\n    bitDepth\n    channels\n    size\n    file\n    flac\n    cover\n    coverTint\n    gains {\n      trackGain\n      trackPeak\n      albumGain\n      albumPeak\n      pending\n    }\n    starred\n    rating\n    playCount\n  }\n": typeof types.MusicTrackFragmentDoc,
+    "\n  fragment AlbumCard on Album {\n    id\n    name\n    artist\n    artists {\n      id\n      name\n    }\n    year\n    cover\n    trackCount\n    duration\n    compilation\n    starred\n    playCount\n    addedAt\n  }\n": typeof types.AlbumCardFragmentDoc,
+    "\n  fragment ArtistCard on Artist {\n    id\n    name\n    albumCount\n    trackCount\n    cover\n    starred\n  }\n": typeof types.ArtistCardFragmentDoc,
+    "\n  fragment PlaylistCard on Playlist {\n    id\n    name\n    comment\n    public\n    mine\n    trackCount\n    duration\n    covers\n    owner {\n      id\n      username\n    }\n  }\n": typeof types.PlaylistCardFragmentDoc,
+    "\n  query PlayQueue {\n    playQueue {\n      tracks {\n        ...MusicTrack\n      }\n      current\n      position\n      shuffled\n      repeat\n      changedBy\n      updatedAt\n    }\n  }\n": typeof types.PlayQueueDocument,
+    "\n  query Track($id: Int!) {\n    track(id: $id) {\n      ...MusicTrack\n    }\n  }\n": typeof types.TrackDocument,
+    "\n  mutation SavePlayQueue($input: QueueInput!) {\n    savePlayQueue(input: $input) {\n      updatedAt\n    }\n  }\n": typeof types.SavePlayQueueDocument,
+    "\n  mutation MeasureLoudness($trackId: Int!) {\n    measureLoudness(trackId: $trackId) {\n      ...MusicTrack\n    }\n  }\n": typeof types.MeasureLoudnessDocument,
+    "\n  mutation Played($trackId: Int!) {\n    played(trackId: $trackId)\n  }\n": typeof types.PlayedDocument,
+    "\n  mutation NowPlaying($trackId: Int, $position: Float!, $paused: Boolean!) {\n    nowPlaying(trackId: $trackId, position: $position, paused: $paused)\n  }\n": typeof types.NowPlayingDocument,
+    "\n  mutation Star($kind: MusicKind!, $id: Int!, $starred: Boolean!) {\n    star(kind: $kind, id: $id, starred: $starred)\n  }\n": typeof types.StarDocument,
+    "\n  query Lyrics($trackId: Int!) {\n    lyrics(trackId: $trackId) {\n      synced\n      source\n      lines {\n        start\n        text\n      }\n    }\n  }\n": typeof types.LyricsDocument,
+    "\n  query SimilarTracks($trackId: Int!, $exclude: [Int!]!) {\n    similarTracks(trackId: $trackId, count: 25, exclude: $exclude) {\n      ...MusicTrack\n    }\n  }\n": typeof types.SimilarTracksDocument,
+    "\n  query AlbumTracks($id: Int!) {\n    album(id: $id) {\n      tracks {\n        ...MusicTrack\n      }\n    }\n  }\n": typeof types.AlbumTracksDocument,
+    "\n  query MusicAlbums($library: String, $sort: AlbumSort!, $offset: Int!) {\n    albums(library: $library, sort: $sort, offset: $offset, limit: 60) {\n      ...AlbumCard\n    }\n  }\n": typeof types.MusicAlbumsDocument,
+    "\n  query MusicArtists($library: String) {\n    artists(library: $library) {\n      ...ArtistCard\n    }\n  }\n": typeof types.MusicArtistsDocument,
+    "\n  query MusicSongs($library: String, $query: String!, $offset: Int!) {\n    songs(library: $library, query: $query, offset: $offset, limit: 60) {\n      ...MusicTrack\n    }\n  }\n": typeof types.MusicSongsDocument,
+    "\n  query MusicPlaylists {\n    playlists {\n      ...PlaylistCard\n    }\n  }\n": typeof types.MusicPlaylistsDocument,
+    "\n  query MusicAlbum($id: Int!) {\n    album(id: $id) {\n      ...AlbumCard\n      coverTint\n      genres\n      tracks {\n        ...MusicTrack\n      }\n    }\n  }\n": typeof types.MusicAlbumDocument,
+    "\n  query MusicArtist($id: Int!) {\n    artist(id: $id) {\n      ...ArtistCard\n      coverTint\n      albums {\n        ...AlbumCard\n      }\n      appearsOn {\n        ...AlbumCard\n      }\n      topTracks(count: 200) {\n        ...MusicTrack\n      }\n    }\n  }\n": typeof types.MusicArtistDocument,
+    "\n  query MusicPlaylist($id: Int!) {\n    playlist(id: $id) {\n      ...PlaylistCard\n      tracks {\n        ...MusicTrack\n      }\n    }\n  }\n": typeof types.MusicPlaylistDocument,
+    "\n  mutation MusicCreatePlaylist($name: String!, $tracks: [Int!]!) {\n    createPlaylist(name: $name, tracks: $tracks) {\n      id\n    }\n  }\n": typeof types.MusicCreatePlaylistDocument,
+    "\n  mutation MusicUpdatePlaylist($id: Int!, $input: PlaylistInput!) {\n    updatePlaylist(id: $id, input: $input) {\n      id\n    }\n  }\n": typeof types.MusicUpdatePlaylistDocument,
+    "\n  mutation MusicDeletePlaylist($id: Int!) {\n    deletePlaylist(id: $id)\n  }\n": typeof types.MusicDeletePlaylistDocument,
     "\n  fragment InboxFields on Inbox {\n    items {\n      ...NotificationFields\n    }\n    unread\n  }\n": typeof types.InboxFieldsFragmentDoc,
     "\n  query Inbox {\n    notifications {\n      ...InboxFields\n    }\n  }\n": typeof types.InboxDocument,
     "\n  mutation MarkNotificationsRead($ids: [Int!]) {\n    markNotificationsRead(ids: $ids) {\n      ...InboxFields\n    }\n  }\n": typeof types.MarkNotificationsReadDocument,
@@ -182,7 +206,7 @@ const documents: Documents = {
     "\n  mutation AddSeries($input: NewSeries!) {\n    addSeries(input: $input) {\n      id\n    }\n  }\n": types.AddSeriesDocument,
     "\n  query AiredEpisodes($provider: Provider!, $id: String!) {\n    airedEpisodes(provider: $provider, id: $id)\n  }\n": types.AiredEpisodesDocument,
     "\n  mutation CreateRequest($input: NewRequest!) {\n    createRequest(input: $input) {\n      id\n    }\n  }\n": types.CreateRequestDocument,
-    "\n  subscription Events {\n    events {\n      __typename\n      ... on ConfigChanged {\n        error\n      }\n      ... on ScanFinished {\n        library\n      }\n      ... on LibraryChanged {\n        library\n      }\n      ... on MetadataChanged {\n        titleId\n        status\n      }\n      ... on ListChanged {\n        list\n      }\n      ... on SeriesChanged {\n        seriesId\n      }\n      ... on EpisodesImported {\n        library\n      }\n      ... on NotificationReceived {\n        notification {\n          ...NotificationFields\n        }\n      }\n      ... on ClipChanged {\n        clipId\n      }\n    }\n  }\n": types.EventsDocument,
+    "\n  subscription Events {\n    events {\n      __typename\n      ... on QueueChanged {\n        by\n      }\n      ... on PlaybackChanged {\n        client\n        trackId\n        position\n        paused\n      }\n      ... on ConfigChanged {\n        error\n      }\n      ... on ScanFinished {\n        library\n      }\n      ... on LibraryChanged {\n        library\n      }\n      ... on MetadataChanged {\n        titleId\n        status\n      }\n      ... on ListChanged {\n        list\n      }\n      ... on SeriesChanged {\n        seriesId\n      }\n      ... on EpisodesImported {\n        library\n      }\n      ... on NotificationReceived {\n        notification {\n          ...NotificationFields\n        }\n      }\n      ... on ClipChanged {\n        clipId\n      }\n    }\n  }\n": types.EventsDocument,
     "\n  query TitleSeries($id: Int!) {\n    title(id: $id) {\n      series {\n        ...SeriesFields\n      }\n    }\n  }\n": types.TitleSeriesDocument,
     "\n  query TitleSchedule($id: Int!) {\n    title(id: $id) {\n      series {\n        id\n        monitor\n        status\n        next {\n          ...SeriesEpisodeFields\n        }\n      }\n    }\n  }\n": types.TitleScheduleDocument,
     "\n  mutation ManageTitle($titleId: Int!) {\n    manageTitle(titleId: $titleId) {\n      id\n    }\n  }\n": types.ManageTitleDocument,
@@ -194,6 +218,30 @@ const documents: Documents = {
     "\n  mutation GrabRelease($release: ReleaseInput!, $seriesId: Int, $episodes: [EpisodeNumberInput!]!) {\n    grabRelease(release: $release, seriesId: $seriesId, episodes: $episodes) {\n      id\n    }\n  }\n": types.GrabReleaseDocument,
     "\n  mutation DeleteDownloaded($seriesId: Int!, $season: Int) {\n    deleteDownloaded(seriesId: $seriesId, season: $season) {\n      undone\n      problems\n    }\n  }\n": types.DeleteDownloadedDocument,
     "\n  mutation LookForAgain($seriesId: Int!, $season: Int, $episode: Int) {\n    lookForAgain(seriesId: $seriesId, season: $season, episode: $episode)\n  }\n": types.LookForAgainDocument,
+    "\n  fragment MusicTrack on Track {\n    id\n    title\n    artist\n    artists {\n      id\n      name\n    }\n    album\n    albumId\n    albumArtist\n    library\n    disc\n    number\n    year\n    duration\n    codec\n    suffix\n    lossless\n    bitrate\n    sampleRate\n    bitDepth\n    channels\n    size\n    file\n    flac\n    cover\n    coverTint\n    gains {\n      trackGain\n      trackPeak\n      albumGain\n      albumPeak\n      pending\n    }\n    starred\n    rating\n    playCount\n  }\n": types.MusicTrackFragmentDoc,
+    "\n  fragment AlbumCard on Album {\n    id\n    name\n    artist\n    artists {\n      id\n      name\n    }\n    year\n    cover\n    trackCount\n    duration\n    compilation\n    starred\n    playCount\n    addedAt\n  }\n": types.AlbumCardFragmentDoc,
+    "\n  fragment ArtistCard on Artist {\n    id\n    name\n    albumCount\n    trackCount\n    cover\n    starred\n  }\n": types.ArtistCardFragmentDoc,
+    "\n  fragment PlaylistCard on Playlist {\n    id\n    name\n    comment\n    public\n    mine\n    trackCount\n    duration\n    covers\n    owner {\n      id\n      username\n    }\n  }\n": types.PlaylistCardFragmentDoc,
+    "\n  query PlayQueue {\n    playQueue {\n      tracks {\n        ...MusicTrack\n      }\n      current\n      position\n      shuffled\n      repeat\n      changedBy\n      updatedAt\n    }\n  }\n": types.PlayQueueDocument,
+    "\n  query Track($id: Int!) {\n    track(id: $id) {\n      ...MusicTrack\n    }\n  }\n": types.TrackDocument,
+    "\n  mutation SavePlayQueue($input: QueueInput!) {\n    savePlayQueue(input: $input) {\n      updatedAt\n    }\n  }\n": types.SavePlayQueueDocument,
+    "\n  mutation MeasureLoudness($trackId: Int!) {\n    measureLoudness(trackId: $trackId) {\n      ...MusicTrack\n    }\n  }\n": types.MeasureLoudnessDocument,
+    "\n  mutation Played($trackId: Int!) {\n    played(trackId: $trackId)\n  }\n": types.PlayedDocument,
+    "\n  mutation NowPlaying($trackId: Int, $position: Float!, $paused: Boolean!) {\n    nowPlaying(trackId: $trackId, position: $position, paused: $paused)\n  }\n": types.NowPlayingDocument,
+    "\n  mutation Star($kind: MusicKind!, $id: Int!, $starred: Boolean!) {\n    star(kind: $kind, id: $id, starred: $starred)\n  }\n": types.StarDocument,
+    "\n  query Lyrics($trackId: Int!) {\n    lyrics(trackId: $trackId) {\n      synced\n      source\n      lines {\n        start\n        text\n      }\n    }\n  }\n": types.LyricsDocument,
+    "\n  query SimilarTracks($trackId: Int!, $exclude: [Int!]!) {\n    similarTracks(trackId: $trackId, count: 25, exclude: $exclude) {\n      ...MusicTrack\n    }\n  }\n": types.SimilarTracksDocument,
+    "\n  query AlbumTracks($id: Int!) {\n    album(id: $id) {\n      tracks {\n        ...MusicTrack\n      }\n    }\n  }\n": types.AlbumTracksDocument,
+    "\n  query MusicAlbums($library: String, $sort: AlbumSort!, $offset: Int!) {\n    albums(library: $library, sort: $sort, offset: $offset, limit: 60) {\n      ...AlbumCard\n    }\n  }\n": types.MusicAlbumsDocument,
+    "\n  query MusicArtists($library: String) {\n    artists(library: $library) {\n      ...ArtistCard\n    }\n  }\n": types.MusicArtistsDocument,
+    "\n  query MusicSongs($library: String, $query: String!, $offset: Int!) {\n    songs(library: $library, query: $query, offset: $offset, limit: 60) {\n      ...MusicTrack\n    }\n  }\n": types.MusicSongsDocument,
+    "\n  query MusicPlaylists {\n    playlists {\n      ...PlaylistCard\n    }\n  }\n": types.MusicPlaylistsDocument,
+    "\n  query MusicAlbum($id: Int!) {\n    album(id: $id) {\n      ...AlbumCard\n      coverTint\n      genres\n      tracks {\n        ...MusicTrack\n      }\n    }\n  }\n": types.MusicAlbumDocument,
+    "\n  query MusicArtist($id: Int!) {\n    artist(id: $id) {\n      ...ArtistCard\n      coverTint\n      albums {\n        ...AlbumCard\n      }\n      appearsOn {\n        ...AlbumCard\n      }\n      topTracks(count: 200) {\n        ...MusicTrack\n      }\n    }\n  }\n": types.MusicArtistDocument,
+    "\n  query MusicPlaylist($id: Int!) {\n    playlist(id: $id) {\n      ...PlaylistCard\n      tracks {\n        ...MusicTrack\n      }\n    }\n  }\n": types.MusicPlaylistDocument,
+    "\n  mutation MusicCreatePlaylist($name: String!, $tracks: [Int!]!) {\n    createPlaylist(name: $name, tracks: $tracks) {\n      id\n    }\n  }\n": types.MusicCreatePlaylistDocument,
+    "\n  mutation MusicUpdatePlaylist($id: Int!, $input: PlaylistInput!) {\n    updatePlaylist(id: $id, input: $input) {\n      id\n    }\n  }\n": types.MusicUpdatePlaylistDocument,
+    "\n  mutation MusicDeletePlaylist($id: Int!) {\n    deletePlaylist(id: $id)\n  }\n": types.MusicDeletePlaylistDocument,
     "\n  fragment InboxFields on Inbox {\n    items {\n      ...NotificationFields\n    }\n    unread\n  }\n": types.InboxFieldsFragmentDoc,
     "\n  query Inbox {\n    notifications {\n      ...InboxFields\n    }\n  }\n": types.InboxDocument,
     "\n  mutation MarkNotificationsRead($ids: [Int!]) {\n    markNotificationsRead(ids: $ids) {\n      ...InboxFields\n    }\n  }\n": types.MarkNotificationsReadDocument,
@@ -442,7 +490,7 @@ export function graphql(source: "\n  mutation CreateRequest($input: NewRequest!)
 /**
  * The graphql function is used to parse GraphQL queries into a document that can be used by GraphQL clients.
  */
-export function graphql(source: "\n  subscription Events {\n    events {\n      __typename\n      ... on ConfigChanged {\n        error\n      }\n      ... on ScanFinished {\n        library\n      }\n      ... on LibraryChanged {\n        library\n      }\n      ... on MetadataChanged {\n        titleId\n        status\n      }\n      ... on ListChanged {\n        list\n      }\n      ... on SeriesChanged {\n        seriesId\n      }\n      ... on EpisodesImported {\n        library\n      }\n      ... on NotificationReceived {\n        notification {\n          ...NotificationFields\n        }\n      }\n      ... on ClipChanged {\n        clipId\n      }\n    }\n  }\n"): typeof import('./graphql').EventsDocument;
+export function graphql(source: "\n  subscription Events {\n    events {\n      __typename\n      ... on QueueChanged {\n        by\n      }\n      ... on PlaybackChanged {\n        client\n        trackId\n        position\n        paused\n      }\n      ... on ConfigChanged {\n        error\n      }\n      ... on ScanFinished {\n        library\n      }\n      ... on LibraryChanged {\n        library\n      }\n      ... on MetadataChanged {\n        titleId\n        status\n      }\n      ... on ListChanged {\n        list\n      }\n      ... on SeriesChanged {\n        seriesId\n      }\n      ... on EpisodesImported {\n        library\n      }\n      ... on NotificationReceived {\n        notification {\n          ...NotificationFields\n        }\n      }\n      ... on ClipChanged {\n        clipId\n      }\n    }\n  }\n"): typeof import('./graphql').EventsDocument;
 /**
  * The graphql function is used to parse GraphQL queries into a document that can be used by GraphQL clients.
  */
@@ -487,6 +535,102 @@ export function graphql(source: "\n  mutation DeleteDownloaded($seriesId: Int!, 
  * The graphql function is used to parse GraphQL queries into a document that can be used by GraphQL clients.
  */
 export function graphql(source: "\n  mutation LookForAgain($seriesId: Int!, $season: Int, $episode: Int) {\n    lookForAgain(seriesId: $seriesId, season: $season, episode: $episode)\n  }\n"): typeof import('./graphql').LookForAgainDocument;
+/**
+ * The graphql function is used to parse GraphQL queries into a document that can be used by GraphQL clients.
+ */
+export function graphql(source: "\n  fragment MusicTrack on Track {\n    id\n    title\n    artist\n    artists {\n      id\n      name\n    }\n    album\n    albumId\n    albumArtist\n    library\n    disc\n    number\n    year\n    duration\n    codec\n    suffix\n    lossless\n    bitrate\n    sampleRate\n    bitDepth\n    channels\n    size\n    file\n    flac\n    cover\n    coverTint\n    gains {\n      trackGain\n      trackPeak\n      albumGain\n      albumPeak\n      pending\n    }\n    starred\n    rating\n    playCount\n  }\n"): typeof import('./graphql').MusicTrackFragmentDoc;
+/**
+ * The graphql function is used to parse GraphQL queries into a document that can be used by GraphQL clients.
+ */
+export function graphql(source: "\n  fragment AlbumCard on Album {\n    id\n    name\n    artist\n    artists {\n      id\n      name\n    }\n    year\n    cover\n    trackCount\n    duration\n    compilation\n    starred\n    playCount\n    addedAt\n  }\n"): typeof import('./graphql').AlbumCardFragmentDoc;
+/**
+ * The graphql function is used to parse GraphQL queries into a document that can be used by GraphQL clients.
+ */
+export function graphql(source: "\n  fragment ArtistCard on Artist {\n    id\n    name\n    albumCount\n    trackCount\n    cover\n    starred\n  }\n"): typeof import('./graphql').ArtistCardFragmentDoc;
+/**
+ * The graphql function is used to parse GraphQL queries into a document that can be used by GraphQL clients.
+ */
+export function graphql(source: "\n  fragment PlaylistCard on Playlist {\n    id\n    name\n    comment\n    public\n    mine\n    trackCount\n    duration\n    covers\n    owner {\n      id\n      username\n    }\n  }\n"): typeof import('./graphql').PlaylistCardFragmentDoc;
+/**
+ * The graphql function is used to parse GraphQL queries into a document that can be used by GraphQL clients.
+ */
+export function graphql(source: "\n  query PlayQueue {\n    playQueue {\n      tracks {\n        ...MusicTrack\n      }\n      current\n      position\n      shuffled\n      repeat\n      changedBy\n      updatedAt\n    }\n  }\n"): typeof import('./graphql').PlayQueueDocument;
+/**
+ * The graphql function is used to parse GraphQL queries into a document that can be used by GraphQL clients.
+ */
+export function graphql(source: "\n  query Track($id: Int!) {\n    track(id: $id) {\n      ...MusicTrack\n    }\n  }\n"): typeof import('./graphql').TrackDocument;
+/**
+ * The graphql function is used to parse GraphQL queries into a document that can be used by GraphQL clients.
+ */
+export function graphql(source: "\n  mutation SavePlayQueue($input: QueueInput!) {\n    savePlayQueue(input: $input) {\n      updatedAt\n    }\n  }\n"): typeof import('./graphql').SavePlayQueueDocument;
+/**
+ * The graphql function is used to parse GraphQL queries into a document that can be used by GraphQL clients.
+ */
+export function graphql(source: "\n  mutation MeasureLoudness($trackId: Int!) {\n    measureLoudness(trackId: $trackId) {\n      ...MusicTrack\n    }\n  }\n"): typeof import('./graphql').MeasureLoudnessDocument;
+/**
+ * The graphql function is used to parse GraphQL queries into a document that can be used by GraphQL clients.
+ */
+export function graphql(source: "\n  mutation Played($trackId: Int!) {\n    played(trackId: $trackId)\n  }\n"): typeof import('./graphql').PlayedDocument;
+/**
+ * The graphql function is used to parse GraphQL queries into a document that can be used by GraphQL clients.
+ */
+export function graphql(source: "\n  mutation NowPlaying($trackId: Int, $position: Float!, $paused: Boolean!) {\n    nowPlaying(trackId: $trackId, position: $position, paused: $paused)\n  }\n"): typeof import('./graphql').NowPlayingDocument;
+/**
+ * The graphql function is used to parse GraphQL queries into a document that can be used by GraphQL clients.
+ */
+export function graphql(source: "\n  mutation Star($kind: MusicKind!, $id: Int!, $starred: Boolean!) {\n    star(kind: $kind, id: $id, starred: $starred)\n  }\n"): typeof import('./graphql').StarDocument;
+/**
+ * The graphql function is used to parse GraphQL queries into a document that can be used by GraphQL clients.
+ */
+export function graphql(source: "\n  query Lyrics($trackId: Int!) {\n    lyrics(trackId: $trackId) {\n      synced\n      source\n      lines {\n        start\n        text\n      }\n    }\n  }\n"): typeof import('./graphql').LyricsDocument;
+/**
+ * The graphql function is used to parse GraphQL queries into a document that can be used by GraphQL clients.
+ */
+export function graphql(source: "\n  query SimilarTracks($trackId: Int!, $exclude: [Int!]!) {\n    similarTracks(trackId: $trackId, count: 25, exclude: $exclude) {\n      ...MusicTrack\n    }\n  }\n"): typeof import('./graphql').SimilarTracksDocument;
+/**
+ * The graphql function is used to parse GraphQL queries into a document that can be used by GraphQL clients.
+ */
+export function graphql(source: "\n  query AlbumTracks($id: Int!) {\n    album(id: $id) {\n      tracks {\n        ...MusicTrack\n      }\n    }\n  }\n"): typeof import('./graphql').AlbumTracksDocument;
+/**
+ * The graphql function is used to parse GraphQL queries into a document that can be used by GraphQL clients.
+ */
+export function graphql(source: "\n  query MusicAlbums($library: String, $sort: AlbumSort!, $offset: Int!) {\n    albums(library: $library, sort: $sort, offset: $offset, limit: 60) {\n      ...AlbumCard\n    }\n  }\n"): typeof import('./graphql').MusicAlbumsDocument;
+/**
+ * The graphql function is used to parse GraphQL queries into a document that can be used by GraphQL clients.
+ */
+export function graphql(source: "\n  query MusicArtists($library: String) {\n    artists(library: $library) {\n      ...ArtistCard\n    }\n  }\n"): typeof import('./graphql').MusicArtistsDocument;
+/**
+ * The graphql function is used to parse GraphQL queries into a document that can be used by GraphQL clients.
+ */
+export function graphql(source: "\n  query MusicSongs($library: String, $query: String!, $offset: Int!) {\n    songs(library: $library, query: $query, offset: $offset, limit: 60) {\n      ...MusicTrack\n    }\n  }\n"): typeof import('./graphql').MusicSongsDocument;
+/**
+ * The graphql function is used to parse GraphQL queries into a document that can be used by GraphQL clients.
+ */
+export function graphql(source: "\n  query MusicPlaylists {\n    playlists {\n      ...PlaylistCard\n    }\n  }\n"): typeof import('./graphql').MusicPlaylistsDocument;
+/**
+ * The graphql function is used to parse GraphQL queries into a document that can be used by GraphQL clients.
+ */
+export function graphql(source: "\n  query MusicAlbum($id: Int!) {\n    album(id: $id) {\n      ...AlbumCard\n      coverTint\n      genres\n      tracks {\n        ...MusicTrack\n      }\n    }\n  }\n"): typeof import('./graphql').MusicAlbumDocument;
+/**
+ * The graphql function is used to parse GraphQL queries into a document that can be used by GraphQL clients.
+ */
+export function graphql(source: "\n  query MusicArtist($id: Int!) {\n    artist(id: $id) {\n      ...ArtistCard\n      coverTint\n      albums {\n        ...AlbumCard\n      }\n      appearsOn {\n        ...AlbumCard\n      }\n      topTracks(count: 200) {\n        ...MusicTrack\n      }\n    }\n  }\n"): typeof import('./graphql').MusicArtistDocument;
+/**
+ * The graphql function is used to parse GraphQL queries into a document that can be used by GraphQL clients.
+ */
+export function graphql(source: "\n  query MusicPlaylist($id: Int!) {\n    playlist(id: $id) {\n      ...PlaylistCard\n      tracks {\n        ...MusicTrack\n      }\n    }\n  }\n"): typeof import('./graphql').MusicPlaylistDocument;
+/**
+ * The graphql function is used to parse GraphQL queries into a document that can be used by GraphQL clients.
+ */
+export function graphql(source: "\n  mutation MusicCreatePlaylist($name: String!, $tracks: [Int!]!) {\n    createPlaylist(name: $name, tracks: $tracks) {\n      id\n    }\n  }\n"): typeof import('./graphql').MusicCreatePlaylistDocument;
+/**
+ * The graphql function is used to parse GraphQL queries into a document that can be used by GraphQL clients.
+ */
+export function graphql(source: "\n  mutation MusicUpdatePlaylist($id: Int!, $input: PlaylistInput!) {\n    updatePlaylist(id: $id, input: $input) {\n      id\n    }\n  }\n"): typeof import('./graphql').MusicUpdatePlaylistDocument;
+/**
+ * The graphql function is used to parse GraphQL queries into a document that can be used by GraphQL clients.
+ */
+export function graphql(source: "\n  mutation MusicDeletePlaylist($id: Int!) {\n    deletePlaylist(id: $id)\n  }\n"): typeof import('./graphql').MusicDeletePlaylistDocument;
 /**
  * The graphql function is used to parse GraphQL queries into a document that can be used by GraphQL clients.
  */

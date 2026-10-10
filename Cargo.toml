@@ -27,7 +27,7 @@ exclude = [
 ]
 
 [workspace]
-members = ["ffmpeg-sys", "libtorrent-sys", "native/*", "rustyass", "rustyass/compare", "web/decoder"]
+members = ["ffmpeg-sys", "libtorrent-sys", "native/*", "rustyass", "rustyass/compare", "web/decoder", "decoder/core"]
 # The app's crates are a workspace of their own (mobile/Cargo.toml), so neither rebuilds the other.
 exclude = ["mobile"]
 

@@ -29,7 +29,7 @@ def cargoNdk = { String crate ->
         environment 'RUSTFLAGS', '-C link-arg=-Wl,-z,max-page-size=16384'
         commandLine(['cargo', 'ndk', '--platform', '34', '--output-dir', jniLibs.get().asFile.absolutePath]
             + abis.collectMany { ['--target', it] }
-            + ['build', '--release', '--locked', '--package', crate])
+            + ['build', '--locked', '--package', crate] + (gradle.startParameter.taskNames.any { it.toLowerCase().contains('release') } ? ['--release'] : []))
         outputs.dir jniLibs
         outputs.upToDateWhen { false }
     }

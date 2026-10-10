@@ -114,7 +114,7 @@ function Copyable({ label, value }: { label: string; value: string }) {
 }
 
 /** A password per music app (Subsonic), each one taken back on its own. */
-function AppPasswords() {
+export function AppPasswords() {
   const api = useApi()
   const me = useMe()
   const { server } = useSession()

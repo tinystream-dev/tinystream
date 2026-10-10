@@ -8,8 +8,8 @@ import { NavigationContext } from 'expo-router/react-navigation'
 import { createContext, useCallback, useContext, useEffect, useRef, useSyncExternalStore } from 'react'
 
 /** The tabs' stacks that hold the shared screens. */
-export type Tab = '(home)' | '(search)' | '(library)' | '(profile)'
-const TABS: Tab[] = ['(home)', '(search)', '(library)', '(profile)']
+export type Tab = '(home)' | '(search)' | '(library)' | '(music)' | '(profile)'
+const TABS: Tab[] = ['(home)', '(search)', '(library)', '(music)', '(profile)']
 
 /** A shared screen's path, e.g. `title/5` or `settings/appearance`. */
 export type Place = string
@@ -30,6 +30,12 @@ export function place(link: string): { tab?: Tab; path: Place; root?: boolean } 
       return { tab: '(library)', path: parts[1] ? `library?name=${encodeURIComponent(parts[1])}` : 'library' }
     case 'discover':
       return { tab: '(search)', path: q.get('q') ? `search?q=${encodeURIComponent(q.get('q')!)}` : 'search' }
+    case 'music':
+      return { tab: '(music)', path: 'music' }
+    case 'album':
+    case 'artist':
+    case 'playlist':
+      return parts[1] ? { tab: '(music)', path: `${parts[0]}/${parts[1]}` } : null
     case 'settings':
       return { tab: '(profile)', path: q.get('tab') ? `settings/${q.get('tab')}` : 'settings' }
     case 'calendar':
@@ -76,7 +82,7 @@ export function useGo() {
   const leave = useLeave()
   return useCallback(
     (path: Place, tab?: Tab) => {
-      const into = tab ?? current
+      const into = tab ?? (current === '(music)' ? '(home)' : current)
       leave(() => router.push(`/(tabs)/${into}/${path}` as Href))
     },
     [router, current, leave],
@@ -101,7 +107,7 @@ export function useFollow() {
       if (!to) return false
       if (to.root) leave(() => router.push(`/${to.path}` as Href))
       // A tab's own first screen is gone to; anything else is pushed onto a stack.
-      else if (to.tab && /^(|library|search)(\?|$)/.test(to.path)) router.navigate(`/(tabs)/${to.tab}/${to.path}` as Href)
+      else if (to.tab && /^(|library|search|music)(\?|$)/.test(to.path)) router.navigate(`/(tabs)/${to.tab}/${to.path}` as Href)
       else go(to.path, to.tab)
       return true
     },

@@ -52,11 +52,11 @@ jobs:
               - '!bunfig.toml'
               - '!.github/actions/android/**'
             web:
-              - '{web,packages}/**'
+              - '{web,packages,decoder}/**'
               - '{package.json,bun.lock,bunfig.toml}'
               - '.github/workflows/ci.yml'
             mobile:
-              - '{mobile,packages}/**'
+              - '{mobile,packages,decoder}/**'
               - '{package.json,bun.lock,bunfig.toml}'
               - '.github/actions/android/**'
               - '.github/workflows/ci.yml'
@@ -96,6 +96,8 @@ jobs:
           tool: wasm-bindgen@0.2.126
       # The workspace is installed from the root; web only needs its own packages.
       - run: bun install --frozen-lockfile --filter tinystream-web --filter @tinystream/shared
+        working-directory: .
+      - run: cargo test -p tinystream-decoder-core --locked
         working-directory: .
       - run: bun run typecheck
       - run: bun run build

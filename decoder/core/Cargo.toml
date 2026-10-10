@@ -1,0 +1,15 @@
+[package]
+name = "tinystream-decoder-core"
+version = "0.28.3"
+edition = "2024"
+license = "AGPL-3.0-or-later"
+rust-version = "1.94"
+publish = false
+
+[features]
+opus = ["dep:symphonia-adapter-libopus"]
+
+[dependencies]
+rubato = "5"
+symphonia = { version = "0.6", default-features = false, features = ["flac", "mp3", "aac", "alac", "isomp4", "ogg", "vorbis", "wav", "aiff", "pcm"] }
+symphonia-adapter-libopus = { version = "0.3", optional = true }

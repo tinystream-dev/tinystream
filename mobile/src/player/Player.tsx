@@ -50,6 +50,7 @@ import { resolve } from '../lib/address'
 import { authHeaders } from '../lib/graphql'
 import { useMe, useStatus } from '../queries'
 import { useApi, useConnection } from '../session'
+import { useMusic } from '../music/context'
 import { useTheme } from '../theme/ThemeProvider'
 import { type Hud, HudView } from './Hud'
 import { ChromeButton, Failure, Finale, PlayerSheet, Resting, SheetHeading, SheetItem, type Shot, ShotCard, SkipPill, UpNext } from './Overlays'
@@ -84,6 +85,11 @@ const BRIGHTNESS_DETENT = 0.1
 type Drag = { mode: 'scrub'; from: number } | { mode: 'brightness'; from: number; step: number } | { mode: 'volume'; from: number; max: number }
 
 export function Player({ mediaId, startAt, rotation, onRotation }: { mediaId: number; startAt?: number; rotation: Rotation; onRotation: (r: Rotation) => void }) {
+  const { music } = useMusic()
+  useEffect(() => {
+    music.suspend()
+    return () => music.unsuspend()
+  }, [music])
   const api = useApi()
   const connection = useConnection()
   const origin = connection?.origin

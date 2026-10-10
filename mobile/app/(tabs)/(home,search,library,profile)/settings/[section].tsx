@@ -2,11 +2,12 @@
 // One section of Settings.
 
 import { useLocalSearchParams } from 'expo-router'
-import { Music, Scissors } from 'lucide-react-native'
+import { Scissors } from 'lucide-react-native'
 import type { ReactNode } from 'react'
 import { Page } from '../../../../src/components/Page'
 import { Soon } from '../../../../src/components/Soon'
 import { Empty } from '../../../../src/components/ui'
+import { MusicSettings } from '../../../../src/settings/Music'
 import { Account } from '../../../../src/settings/Account'
 import { Appearance } from '../../../../src/settings/Appearance'
 import { Credits } from '../../../../src/settings/Credits'
@@ -23,9 +24,7 @@ const SCREENS: Record<SectionId, () => { body: ReactNode; footer?: ReactNode }> 
   account: () => ({ body: <Account /> }),
   appearance: () => ({ body: <Appearance /> }),
   libraries: () => ({ body: <Libraries /> }),
-  music: () => ({
-    body: <Soon icon={Music} title="Music settings come with the Music tab" body="Lyrics and loudness are set in tinystream in a browser for now." />,
-  }),
+  music: () => ({ body: <MusicSettings /> }),
   clips: () => ({ body: <Soon icon={Scissors} title="Clip settings come with clips" body="Set them in tinystream in a browser for now." /> }),
   skipped: () => ({ body: <Skipped /> }),
   downloads: Torrents,
