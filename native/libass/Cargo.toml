@@ -3,7 +3,7 @@ name = "libass-src"
 # The version of libass it builds.
 version = "0.17.3"
 edition.workspace = true
-description = "A static libass, for burning subtitles into clips"
+description = "A static libass, for the app's subtitles and as rustyass's reference"
 license.workspace = true
 authors.workspace = true
 repository.workspace = true

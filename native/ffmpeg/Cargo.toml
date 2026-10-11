@@ -16,10 +16,6 @@ nasm-src = { path = "../nasm" }
 dav1d-src = { path = "../dav1d" }
 x264-src = { path = "../x264" }
 zimg-src = { path = "../zimg" }
-freetype-src = { path = "../freetype" }
-fribidi-src = { path = "../fribidi" }
-harfbuzz-src = { path = "../harfbuzz" }
-libass-src = { path = "../libass" }
 opus-src = { path = "../opus" }
 lame-src = { path = "../lame" }
 

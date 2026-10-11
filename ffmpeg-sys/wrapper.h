@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-#include <stdio.h>
-
 #include <libavcodec/avcodec.h>
 #include <libavfilter/avfilter.h>
 #include <libavfilter/buffersink.h>
@@ -15,6 +13,3 @@
 #include <libavutil/pixdesc.h>
 #include <libswresample/swresample.h>
 #include <libswscale/swscale.h>
-#include <ass/ass.h>
-
-typedef void (*ass_message_cb)(int level, const char *fmt, va_list args, void *data);

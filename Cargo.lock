@@ -1211,11 +1211,7 @@ name = "ffmpeg-src"
 version = "8.0.0"
 dependencies = [
  "dav1d-src",
- "freetype-src",
- "fribidi-src",
- "harfbuzz-src",
  "lame-src",
- "libass-src",
  "libva-src",
  "nasm-src",
  "native-support",
@@ -3979,6 +3975,7 @@ dependencies = [
  "regex",
  "reqwest",
  "rust-embed",
+ "rustyass",
  "serde",
  "serde_json",
  "sha2 0.10.9",

@@ -7,7 +7,7 @@ fn main() {
 
     let apple = std::env::var("CARGO_CFG_TARGET_VENDOR").is_ok_and(|v| v == "apple");
 
-    let mut deps = vec!["nasm", "dav1d", "x264", "zimg", "freetype", "fribidi", "harfbuzz", "ass", "opus", "mp3lame"];
+    let mut deps = vec!["nasm", "dav1d", "x264", "zimg", "opus", "mp3lame"];
 
     if !apple {
         deps.push("va");
@@ -30,10 +30,6 @@ fn main() {
         "--enable-libdav1d".into(),
         "--disable-libdrm".into(),
         "--enable-libzimg".into(),
-        "--enable-libass".into(),
-        "--enable-libfreetype".into(),
-        "--enable-libfribidi".into(),
-        "--enable-libharfbuzz".into(),
         "--enable-libopus".into(),
         "--enable-libmp3lame".into(),
         "--disable-programs".into(),

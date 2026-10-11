@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-use std::ffi::{c_char, c_int, c_void};
+use std::ffi::c_int;
 use std::path::Path;
 use std::ptr;
 
 use anyhow::{Context, bail};
+use rustyass::{Margins, Renderer, Track};
 
 use super::ff::{self, Dict, Frame, Input, Packet, ffi};
 
@@ -20,7 +21,7 @@ pub struct Fonts<'a> {
 }
 
 pub enum Overlay {
-    Text(Ass),
+    Text(Box<Ass>),
     Bitmap(Bitmaps),
 }
 
@@ -35,7 +36,9 @@ impl Overlay {
         to: f64,
     ) -> anyhow::Result<Self> {
         Ok(match src {
-            Source::Text { ass, fonts: attached } => Overlay::Text(Ass::new(&ass, &attached, fonts, size, source)?),
+            Source::Text { ass, fonts: attached } => {
+                Overlay::Text(Box::new(Ass::new(&ass, &attached, fonts, size, source)?))
+            },
             Source::Bitmap { stream } => Overlay::Bitmap(Bitmaps::read(video, stream, size, source, from, to)?),
         })
     }
@@ -49,21 +52,8 @@ impl Overlay {
 }
 
 pub struct Ass {
-    lib: *mut ffi::ASS_Library,
-    renderer: *mut ffi::ASS_Renderer,
-    track: *mut ffi::ASS_Track,
-}
-
-unsafe impl Send for Ass {}
-
-unsafe extern "C" fn ass_log(level: c_int, fmt: *const c_char, args: ffi::VaList, _: *mut c_void) {
-    if level > 2 {
-        return;
-    }
-    let mut buf = [0 as c_char; 512];
-    unsafe { ffi::vsnprintf(buf.as_mut_ptr(), buf.len() as _, fmt, args) };
-    let msg = unsafe { std::ffi::CStr::from_ptr(buf.as_ptr()) }.to_string_lossy();
-    tracing::debug!("libass: {}", msg.trim_end());
+    renderer: Renderer,
+    track: Track,
 }
 
 impl Ass {
@@ -74,99 +64,62 @@ impl Ass {
         (w, h): (i32, i32),
         (sw, sh): (i32, i32),
     ) -> anyhow::Result<Self> {
-        unsafe {
-            let lib = ffi::ass_library_init();
+        let track = Track::parse(text.as_bytes()).context("can't read these subtitles")?;
+        let mut all = rustyass::Fonts::new();
 
-            if lib.is_null() {
-                bail!("can't start libass");
+        for (name, data) in attached {
+            if all.add(data.as_slice()) == 0 {
+                tracing::debug!("rustyass: no fonts in attachment {name}");
             }
-
-            let mut this = Ass { lib, renderer: ptr::null_mut(), track: ptr::null_mut() };
-            ffi::ass_set_message_cb(lib, Some(ass_log), ptr::null_mut());
-
-            for (name, data) in attached {
-                let n = ff::cstr(name);
-                ffi::ass_add_font(lib, n.as_ptr(), data.as_ptr() as *const c_char, data.len() as c_int);
-            }
-
-            if let Some(dir) = fonts.dir {
-                let d = ff::cstr(&dir.to_string_lossy());
-                ffi::ass_set_fonts_dir(lib, d.as_ptr());
-            }
-
-            this.renderer = ffi::ass_renderer_init(lib);
-
-            if this.renderer.is_null() {
-                bail!("can't start libass's renderer");
-            }
-
-            ffi::ass_set_frame_size(this.renderer, w, h);
-            ffi::ass_set_storage_size(this.renderer, sw, sh);
-            let default = ff::cstr(&fonts.default.to_string_lossy());
-
-            ffi::ass_set_fonts(
-                this.renderer,
-                default.as_ptr(),
-                ptr::null(),
-                ffi::ASS_FONTPROVIDER_NONE as c_int,
-                ptr::null(),
-                1,
-            );
-
-            let mut buf = text.as_bytes().to_vec();
-            this.track = ffi::ass_read_memory(lib, buf.as_mut_ptr() as *mut c_char, buf.len(), ptr::null());
-
-            if this.track.is_null() {
-                bail!("libass can't read these subtitles");
-            }
-
-            Ok(this)
         }
+
+        for (name, data) in track.fonts() {
+            if all.add(data) == 0 {
+                tracing::debug!("rustyass: no fonts in embedded {name}");
+            }
+        }
+
+        if let Some(dir) = fonts.dir {
+            match all.add_dir(dir) {
+                Ok(n) => tracing::debug!("rustyass: {n} fonts in {}", dir.display()),
+                Err(e) => tracing::debug!("rustyass: can't read fonts from {}: {e}", dir.display()),
+            }
+        }
+
+        match std::fs::read(fonts.default) {
+            Ok(data) => all.set_default(data),
+            Err(e) => tracing::debug!("rustyass: can't read the default font {}: {e}", fonts.default.display()),
+        }
+
+        let mut renderer = Renderer::new(all);
+        renderer.set_frame((w, h), (sw, sh), Margins::default());
+        Ok(Ass { renderer, track })
     }
 
     fn draw(&mut self, frame: &mut Frame, at: f64) -> anyhow::Result<()> {
-        let mut changed = 0;
+        let images = self.renderer.render(&self.track, (at * 1000.0).round() as i64).images;
 
-        let mut img =
-            unsafe { ffi::ass_render_frame(self.renderer, self.track, (at * 1000.0).round() as i64, &mut changed) };
-
-        if img.is_null() {
+        if images.is_empty() {
             return Ok(());
         }
 
         let mut planes = Planes::of(frame)?;
 
-        while !img.is_null() {
-            let i = unsafe { &*img };
-            let (r, g, b) = ((i.color >> 24) as u8, (i.color >> 16) as u8, (i.color >> 8) as u8);
-            let opacity = 255 - (i.color & 0xFF);
-            let mask = unsafe { std::slice::from_raw_parts(i.bitmap, (i.stride * (i.h - 1) + i.w).max(0) as usize) };
+        for i in images {
+            let c = i.color();
+            let (opacity, mask, stride) = (c.a as u32, i.mask(), i.stride());
 
-            planes.blend(i.dst_x, i.dst_y, i.w, i.h, |x, y| {
-                let a = mask[(y * i.stride + x) as usize] as u32 * opacity / 255;
-                (r, g, b, a as u8)
+            if opacity == 0 {
+                continue;
+            }
+
+            planes.blend(i.x, i.y, i.w, i.h, |x, y| {
+                let a = mask[y as usize * stride + x as usize] as u32 * opacity / 255;
+                (c.r, c.g, c.b, a as u8)
             });
-
-            img = i.next;
         }
 
         Ok(())
-    }
-}
-
-impl Drop for Ass {
-    fn drop(&mut self) {
-        unsafe {
-            if !self.track.is_null() {
-                ffi::ass_free_track(self.track);
-            }
-
-            if !self.renderer.is_null() {
-                ffi::ass_renderer_done(self.renderer);
-            }
-
-            ffi::ass_library_done(self.lib);
-        }
     }
 }
 
