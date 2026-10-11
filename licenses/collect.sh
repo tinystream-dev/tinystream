@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 #
 # Prints the THIRD_PARTY_LICENSES that ship with a release: the native libraries from <native-dir>,
-# the system libraries a musl build links in, the Rust crates and the web UI's packages.
+# rustyass, the system libraries a musl build links in, the Rust crates and the web UI's packages.
 #
 #   licenses/collect.sh <native-dir> <target> > THIRD_PARTY_LICENSES
 #
@@ -45,6 +45,11 @@ for lib in $(cargo tree --locked -e normal --target "$target" --prefix none --fo
     fi
 done
 
+part "rustyass, tinystream's subtitle renderer (GNU LGPL version 3 or later)"
+cat rustyass/COPYING.LESSER
+printf '\n\n'
+cat rustyass/COPYING
+
 case $target in
 *-musl)
     part "System libraries (linked statically into musl builds)"
@@ -55,5 +60,5 @@ esac
 part "Rust crates"
 cargo about generate --workspace --locked --fail -c "$here/about.toml" "$here/about.hbs"
 
-part "Web UI packages"
+part "Web UI packages, and the Rust in its wasm"
 cat web/dist/client/third-party-licenses.txt

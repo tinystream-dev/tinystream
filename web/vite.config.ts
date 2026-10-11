@@ -37,7 +37,23 @@ function contributors(): Contributor[] {
   return [...people.values()].sort((a, b) => b.commits - a.commits || a.name.localeCompare(b.name))
 }
 
-// Writes the license of every package that ends up in the client bundle to third-party-licenses.txt.
+// The licenses of the Rust in the player's wasm (web/decoder and web/subtitles): rustyass's, which cargo-about skips
+// (it isn't published), and every crate's through cargo-about.
+function crateLicenses(rule: string) {
+  const root = fileURLToPath(new URL('..', import.meta.url))
+  const rustyass = ['COPYING.LESSER', 'COPYING'].map((f) => readFileSync(join(root, 'rustyass', f), 'utf8').trimEnd()).join('\n\n')
+  const crates = ['web/decoder', 'web/subtitles'].map((c) =>
+    execFileSync(
+      'cargo',
+      ['about', 'generate', '--locked', '--fail', '-m', join(root, c, 'Cargo.toml'), '-c', join(root, 'licenses/about.toml'), join(root, 'licenses/about.hbs')],
+      { cwd: root, encoding: 'utf8', maxBuffer: 1 << 28 },
+    ),
+  )
+  return [`${rule}\nrustyass\nLGPL-3.0-or-later\n${rule}\n\n${rustyass}\n`, ...crates].join('\n')
+}
+
+// Writes the license of every package that ends up in the client bundle, and of the Rust in its wasm, to
+// third-party-licenses.txt.
 function licenses(): Plugin {
   return {
     name: 'third-party-licenses',
@@ -59,7 +75,8 @@ function licenses(): Plugin {
         return { name: pkg.name as string, body: `${rule}\n${pkg.name} ${pkg.version}\n${pkg.license ?? ''}\n${rule}\n\n${text}\n` }
       })
       sections.sort((a, b) => a.name.localeCompare(b.name))
-      this.emitFile({ type: 'asset', fileName: 'third-party-licenses.txt', source: sections.map((s) => s.body).join('\n') })
+      const source = [...sections.map((s) => s.body), crateLicenses(rule)].join('\n')
+      this.emitFile({ type: 'asset', fileName: 'third-party-licenses.txt', source })
     },
   }
 }

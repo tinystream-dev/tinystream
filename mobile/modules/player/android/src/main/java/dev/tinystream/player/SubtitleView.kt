@@ -30,11 +30,11 @@ private val loader = Executors.newSingleThreadExecutor { r -> Thread(r, "tinystr
 /** A subtitle track: its ASS file and the video's fonts, and the headers that fetch them. */
 data class SubtitleSource(val url: String, val fonts: List<String>, val headers: Map<String, String>)
 
-/** What libass draws into (see Ass.resize). */
+/** What rustyass draws into (see Ass.resize). */
 private data class Frame(val width: Int, val height: Int, val storageWidth: Int, val storageHeight: Int, val picture: Rect)
 
 /**
- * A video's subtitles, drawn by libass over the picture: on a thread of its
+ * A video's subtitles, drawn by rustyass over the picture: on a thread of its
  * own, every frame the time has moved (as `clock` tells it) and only when
  * what shows has changed, into a bitmap covering just that.
  */

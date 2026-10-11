@@ -18,7 +18,8 @@ runs:
         ndk="$(sed -n "s/^export const NDK = '\(.*\)'/\1/p" mobile/app.config.ts)"
         sdkmanager --install "ndk;$ndk" "build-tools;36.0.0" "platforms;android-36" "cmake;3.31.6" > /dev/null
         echo "$ANDROID_HOME/cmake/3.31.6/bin" >> "$GITHUB_PATH"
-    - uses: dtolnay/rust-toolchain@stable
+    # The player's subtitles are rustyass, on nightly.
+    - uses: dtolnay/rust-toolchain@nightly
       with:
         targets: aarch64-linux-android,x86_64-linux-android
     - uses: taiki-e/install-action@v2

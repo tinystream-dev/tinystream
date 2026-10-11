@@ -31,7 +31,8 @@ jobs:
       - uses: oven-sh/setup-bun@v2
       - uses: ./.github/actions/native-deps
         if: matrix.libc == 'gnu'
-      - uses: dtolnay/rust-toolchain@stable
+      # rustyass, in burn-in and the web player's subtitles, is on nightly.
+      - uses: dtolnay/rust-toolchain@nightly
         with:
           targets: wasm32-unknown-unknown
       - uses: taiki-e/install-action@v2

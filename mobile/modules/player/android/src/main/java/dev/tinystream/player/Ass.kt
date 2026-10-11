@@ -5,7 +5,7 @@ package dev.tinystream.player
 import android.graphics.Bitmap
 
 /**
- * libass, through mobile/crates/subtitles: one script and its fonts per
+ * rustyass, through mobile/crates/subtitles: one script and its fonts per
  * handle, used from one thread at a time.
  */
 internal object Ass {
@@ -13,7 +13,7 @@ internal object Ass {
     System.loadLibrary("tinystream_subtitles")
   }
 
-  /** A handle for `script` (an ASS file) with `fonts`, falling back on `default`; 0 when libass can't read it. */
+  /** A handle for `script` (an ASS file) with `fonts`, falling back on `default`; 0 when it isn't a script. */
   external fun open(script: ByteArray, fonts: Array<ByteArray>, default: ByteArray): Long
 
   external fun close(handle: Long)

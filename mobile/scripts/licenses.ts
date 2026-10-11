@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Writes the THIRD_PARTY_LICENSES the APK ships (into the native project's
-// assets, so run it after `expo prebuild`): the libraries in licenses/ and
-// those native/ builds for the app's crates, the Rust crates the app links
-// (cargo-about), and every package in the JS bundle.
+// assets, so run it after `expo prebuild`): the libraries and fonts in
+// licenses/, the Rust crates the app links (rustyass and, through cargo-about,
+// the rest), and every package in the JS bundle.
 
 import { spawnSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { basename, join, resolve } from 'node:path'
+import { join, resolve } from 'node:path'
 
 const app = resolve(import.meta.dir, '..')
 const root = resolve(app, '..')
@@ -77,23 +77,20 @@ this file carries their copyright notices and licenses. The source of tinystream
 itself is at https://github.com/tinystream-dev/tinystream.
 `
 
-/** What the app's crates build of native/ (libass for the subtitles); their builds collect the licenses. */
-const NATIVE = ['libass', 'freetype', 'fribidi', 'harfbuzz']
-
-function nativeLicenses() {
-  const dir = join(process.env.TINYSTREAM_NATIVE_DIR ?? join(root, '.native'), 'licenses')
-  const file = (name: string) => join(dir, `${name}.txt`)
-  // Build scripts run on a check too, for this machine, and that's all it takes.
-  if (!NATIVE.every((name) => existsSync(file(name)))) run('cargo', ['check', '--locked', '--package', 'tinystream-subtitles'], app)
-  return NATIVE.map((name) => file(name))
+/** rustyass, the subtitle renderer: tinystream's own, but under the LGPL, which cargo-about skips (it isn't published). */
+function rustyass() {
+  const dir = join(root, 'rustyass')
+  const text = ['COPYING.LESSER', 'COPYING'].map((f) => readFileSync(join(dir, f), 'utf8').trimEnd()).join('\n\n')
+  return `${rule}\nrustyass\nLGPL-3.0-or-later\n${rule}\n\n${text}\n`
 }
 
-const libraries = [...readdirSync(join(app, 'licenses')).filter((f) => f.endsWith('.txt')).map((f) => join(app, 'licenses', f)), ...nativeLicenses()]
-  .sort((a, b) => basename(a).localeCompare(basename(b)))
-  .map((f) => readFileSync(f, 'utf8').trimEnd())
+const libraries = readdirSync(join(app, 'licenses'))
+  .filter((f) => f.endsWith('.txt'))
+  .sort()
+  .map((f) => readFileSync(join(app, 'licenses', f), 'utf8').trimEnd())
   .join('\n\n')
 
-const text = header + part('Libraries and fonts') + libraries + part('Rust crates') + crateLicenses() + part('JavaScript packages') + packageLicenses()
+const text = header + part('Libraries and fonts') + libraries + part('Rust crates') + rustyass() + '\n' + crateLicenses() + part('JavaScript packages') + packageLicenses()
 mkdirSync(join(out, '..'), { recursive: true })
 writeFileSync(out, text)
 console.log(`wrote ${out}`)

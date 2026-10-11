@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The video player: ExoPlayer on tinystream's stream (see Stream.kt), seeking
-// with `?start=` where it hasn't buffered, libass subtitles over it, plus what
+// with `?start=` where it hasn't buffered, rustyass subtitles over it, plus what
 // a full-screen player needs of the window: brightness, volume, system bars
 // and orientation.
 
@@ -49,7 +49,7 @@ export type VideoViewHandle = {
   setMuted(muted: boolean): Promise<void>
   /** False when the system won't (PiP turned off for the app). */
   enterPip(): Promise<boolean>
-  /** Draws `track` over the picture with libass, or no subtitles; resolves once they show. */
+  /** Draws `track` over the picture with rustyass, or no subtitles; resolves once they show. */
   selectSubtitles(track: Subtitles | null): Promise<void>
 }
 

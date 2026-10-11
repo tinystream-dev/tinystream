@@ -20,76 +20,17 @@ pub struct Build {
     pkgconfig: Vec<PathBuf>,
     path: Vec<PathBuf>,
     started: SystemTime,
-    cross: Option<Cross>,
-}
-
-/// An Android target, as cargo-ndk builds for it: its compilers, and what meson and configure need
-/// to hear about it.
-pub struct Cross {
-    pub target: String,
-    cpu: &'static str,
-    cc: String,
-    cxx: String,
-    flags: String,
-    ar: String,
-    ranlib: String,
-}
-
-impl Cross {
-    fn detect() -> Option<Cross> {
-        println!("cargo::rerun-if-env-changed=TARGET");
-        let target = env::var("TARGET").ok()?;
-
-        if !target.contains("-android") {
-            return None;
-        }
-
-        let tool = |name: &str| {
-            println!("cargo::rerun-if-env-changed={name}_{target}");
-            env::var(format!("{name}_{target}"))
-                .or_else(|_| env::var(format!("{name}_{}", target.replace('-', "_"))))
-                .unwrap_or_else(|_| panic!("building for {target} needs {name}_{target}; build with cargo ndk"))
-        };
-
-        let cpu = match target.split('-').next() {
-            Some("aarch64") => "aarch64",
-            Some("x86_64") => "x86_64",
-            _ => panic!("can't build native libraries for {target}"),
-        };
-
-        Some(Cross {
-            cpu,
-            cc: tool("CC"),
-            cxx: tool("CXX"),
-            flags: tool("CFLAGS"),
-            ar: tool("AR"),
-            ranlib: tool("RANLIB"),
-            target,
-        })
-    }
 }
 
 impl Build {
     pub fn new(name: &str, version: &str, deps: &[&str]) -> Build {
-        Self::with(name, version, deps, Cross::detect())
-    }
-
-    /// A tool to run while building (nasm), so for this machine whatever the target is.
-    pub fn host(name: &str, version: &str, deps: &[&str]) -> Build {
-        Self::with(name, version, deps, None)
-    }
-
-    fn with(name: &str, version: &str, deps: &[&str], cross: Option<Cross>) -> Build {
         let started = SystemTime::now();
         let manifest = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").unwrap());
 
         let root =
             env::var_os("TINYSTREAM_NATIVE_DIR").map(PathBuf::from).unwrap_or_else(|| manifest.join("../../.native"));
 
-        let work = match &cross {
-            Some(c) => root.join(format!("{name}-{version}-{}", c.target)),
-            None => root.join(format!("{name}-{version}")),
-        };
+        let work = root.join(format!("{name}-{version}"));
         let downloads = root.join("downloads");
         fs::create_dir_all(&work).expect("can't create the native build directory");
         fs::create_dir_all(&downloads).unwrap();
@@ -128,13 +69,7 @@ impl Build {
             pkgconfig,
             path,
             started,
-            cross,
         }
-    }
-
-    /// The Android target being built for, if any.
-    pub fn cross(&self) -> Option<&Cross> {
-        self.cross.as_ref()
     }
 
     pub fn cflags(&self) -> String {
@@ -246,14 +181,9 @@ impl Build {
     pub fn cmd(&self, program: impl AsRef<std::ffi::OsStr>) -> Command {
         let mut cmd = Command::new(program);
 
-        cmd.current_dir(&self.src).env("PATH", prepend(&self.path, "PATH"));
-
-        if self.cross.is_some() {
-            // Only what's been built for the target; nothing from this machine.
-            cmd.env("PKG_CONFIG_LIBDIR", env::join_paths(&self.pkgconfig).unwrap()).env_remove("PKG_CONFIG_PATH");
-        } else {
-            cmd.env("PKG_CONFIG_PATH", prepend(&self.pkgconfig, "PKG_CONFIG_PATH"));
-        }
+        cmd.current_dir(&self.src)
+            .env("PATH", prepend(&self.path, "PATH"))
+            .env("PKG_CONFIG_PATH", prepend(&self.pkgconfig, "PKG_CONFIG_PATH"));
 
         cmd
     }
@@ -284,52 +214,18 @@ impl Build {
     }
 
     pub fn meson(&self, options: &[&str]) {
-        let mut setup = self.cmd("meson");
-        setup
-            .args(["setup", "build", "--libdir=lib", "--buildtype=release"])
-            .arg(format!("--prefix={}", self.prefix.display()));
-
-        if let Some(c) = &self.cross {
-            let file = self.work.join("cross.ini");
-            let list = |items: &[&str]| items.iter().map(|i| format!("'{i}'")).collect::<Vec<_>>().join(", ");
-            let pkgconfig: Vec<_> = self.pkgconfig.iter().map(|p| p.to_string_lossy().into_owned()).collect();
-            let pkgconfig: Vec<&str> = pkgconfig.iter().map(String::as_str).collect();
-
-            let ini = format!(
-                "[binaries]\nc = [{}]\ncpp = [{}]\nar = '{}'\nranlib = '{}'\npkg-config = 'pkg-config'\n\n\
-                 [properties]\npkg_config_libdir = [{}]\n\n\
-                 [host_machine]\nsystem = 'android'\ncpu_family = '{cpu}'\ncpu = '{cpu}'\nendian = 'little'\n",
-                list(&[&c.cc, &c.flags]),
-                list(&[&c.cxx, &c.flags]),
-                c.ar,
-                c.ranlib,
-                list(&pkgconfig),
-                cpu = c.cpu,
-            );
-
-            fs::write(&file, ini).unwrap();
-            setup.arg(format!("--cross-file={}", file.display()));
-        }
-
-        self.exec(setup.args(options));
+        self.exec(
+            self.cmd("meson")
+                .args(["setup", "build", "--libdir=lib", "--buildtype=release"])
+                .arg(format!("--prefix={}", self.prefix.display()))
+                .args(options),
+        );
 
         self.exec(self.cmd("ninja").args(["-C", "build", &format!("-j{}", jobs()), "install"]));
     }
 
     pub fn configure(&self, args: &[&str]) {
-        let mut configure = self.cmd("./configure");
-        configure.arg(format!("--prefix={}", self.prefix.display()));
-
-        if let Some(c) = &self.cross {
-            configure
-                .arg(format!("--host={}", c.target))
-                .env("CC", format!("{} {}", c.cc, c.flags))
-                .env("CXX", format!("{} {}", c.cxx, c.flags))
-                .env("AR", &c.ar)
-                .env("RANLIB", &c.ranlib);
-        }
-
-        self.exec(configure.args(args));
+        self.exec(self.cmd("./configure").arg(format!("--prefix={}", self.prefix.display())).args(args));
         self.make(&[]);
         self.make(&["install"]);
     }

@@ -14,10 +14,10 @@ const libraries = [
   { name: 'Opus', license: 'BSD-3-Clause', href: 'https://opus-codec.org', does: 'Opus audio' },
   { name: 'zimg', license: 'WTFPL', href: 'https://github.com/sekrit-twc/zimg', does: 'Scaling and color conversion' },
   { name: 'libva', license: 'MIT', href: 'https://github.com/intel/libva', does: 'Hardware transcoding' },
-  { name: 'libass', license: 'ISC', href: 'https://github.com/libass/libass', does: 'Burned-in subtitles' },
-  { name: 'FreeType', license: 'FTL', href: 'https://freetype.org', does: 'Font rendering' },
-  { name: 'HarfBuzz', license: 'MIT', href: 'https://harfbuzz.github.io', does: 'Text shaping' },
-  { name: 'FriBidi', license: 'LGPL-2.1-or-later', href: 'https://github.com/fribidi/fribidi', does: 'Right-to-left text' },
+  { name: 'rustyass', license: 'LGPL-3.0-or-later', href: 'https://github.com/tinystream-dev/tinystream', does: 'Subtitles' },
+  { name: 'HarfRust', license: 'MIT', href: 'https://github.com/harfbuzz/harfrust', does: 'Text shaping' },
+  { name: 'Fontations', license: 'MIT OR Apache-2.0', href: 'https://github.com/googlefonts/fontations', does: 'Font reading' },
+  { name: 'unicode-bidi', license: 'MIT OR Apache-2.0', href: 'https://github.com/servo/unicode-bidi', does: 'Right-to-left text' },
   { name: 'libtorrent', license: 'BSD-3-Clause', href: 'https://libtorrent.org', does: 'Torrent downloads' },
   { name: 'Boost', license: 'BSL-1.0', href: 'https://www.boost.org', does: 'What libtorrent is built on' },
   { name: 'Noto Sans', license: 'OFL-1.1', href: 'https://notofonts.github.io', does: 'Default subtitle font' },
@@ -97,9 +97,6 @@ export function Credits() {
             </li>
           ))}
         </ul>
-        <p className="mt-4 text-xs leading-relaxed text-ink-3">
-          Portions of this software are copyright © 2024 The FreeType Project (www.freetype.org). All rights reserved.
-        </p>
       </Card>
       <Card title="Metadata" description="Titles, artwork and episode details come from these services.">
         <div className="flex flex-col gap-5">

@@ -1,86 +1,21 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-//! The video player's subtitles (dev.tinystream.player.Ass): libass renders
+//! The video player's subtitles (dev.tinystream.player.Ass): rustyass renders
 //! a script at a time, and what it draws is blended into an Android bitmap
 //! covering just the part of the frame that has anything on it.
 
-use std::ffi::{CString, c_char, c_int};
+use std::ffi::c_int;
 use std::ptr;
 
 use jni::JNIEnv;
 use jni::objects::{JByteArray, JObject, JObjectArray};
 use jni::sys::{jboolean, jint, jintArray, jlong};
-use libass_src as _;
-
-#[repr(C)]
-struct AssLibrary {
-    _private: [u8; 0],
-}
-
-#[repr(C)]
-struct AssRenderer {
-    _private: [u8; 0],
-}
-
-#[repr(C)]
-struct AssTrack {
-    _private: [u8; 0],
-}
-
-#[repr(C)]
-struct AssImage {
-    w: c_int,
-    h: c_int,
-    stride: c_int,
-    bitmap: *const u8,
-    /// RGBA, the alpha being transparency.
-    color: u32,
-    dst_x: c_int,
-    dst_y: c_int,
-    next: *const AssImage,
-    kind: c_int,
-}
-
-const ASS_FONTPROVIDER_NONE: c_int = 0;
-
-unsafe extern "C" {
-    fn ass_library_init() -> *mut AssLibrary;
-    fn ass_library_done(lib: *mut AssLibrary);
-    fn ass_set_extract_fonts(lib: *mut AssLibrary, extract: c_int);
-    fn ass_add_font(lib: *mut AssLibrary, name: *const c_char, data: *const c_char, size: c_int);
-    fn ass_renderer_init(lib: *mut AssLibrary) -> *mut AssRenderer;
-    fn ass_renderer_done(renderer: *mut AssRenderer);
-    fn ass_set_frame_size(renderer: *mut AssRenderer, w: c_int, h: c_int);
-    fn ass_set_storage_size(renderer: *mut AssRenderer, w: c_int, h: c_int);
-    fn ass_set_margins(renderer: *mut AssRenderer, t: c_int, b: c_int, l: c_int, r: c_int);
-    fn ass_set_use_margins(renderer: *mut AssRenderer, on: c_int);
-    fn ass_set_fonts(
-        renderer: *mut AssRenderer,
-        default_font: *const c_char,
-        default_family: *const c_char,
-        provider: c_int,
-        config: *const c_char,
-        update: c_int,
-    );
-    fn ass_read_memory(lib: *mut AssLibrary, buf: *mut c_char, size: usize, codepage: *const c_char) -> *mut AssTrack;
-    fn ass_free_track(track: *mut AssTrack);
-    fn ass_render_frame(
-        renderer: *mut AssRenderer,
-        track: *mut AssTrack,
-        now: i64,
-        changed: *mut c_int,
-    ) -> *const AssImage;
-}
-
-/// The family of the font every script falls back on.
-const DEFAULT_FAMILY: &str = "Liberation Sans";
+use rustyass::{Fonts, Margins, Renderer, Rgba, Track};
 
 struct Subtitles {
-    lib: *mut AssLibrary,
-    renderer: *mut AssRenderer,
-    track: *mut AssTrack,
+    renderer: Renderer,
+    track: Track,
     frame: (c_int, c_int),
-    /// What the last render drew, and the box around it.
-    images: *const AssImage,
+    /// The box around what the last render drew.
     area: Area,
 }
 
@@ -93,63 +28,34 @@ struct Area {
 }
 
 impl Subtitles {
+    /// `script` with the video's `fonts` and its own, falling back on `default`.
     fn open(script: &[u8], fonts: &[Vec<u8>], default: &[u8]) -> Option<Box<Subtitles>> {
-        unsafe {
-            let lib = ass_library_init();
+        let track = Track::parse(script)?;
+        let mut all = Fonts::new();
+        all.set_default(default);
 
-            if lib.is_null() {
-                return None;
-            }
-
-            let mut this = Box::new(Subtitles {
-                lib,
-                renderer: ptr::null_mut(),
-                track: ptr::null_mut(),
-                frame: (0, 0),
-                images: ptr::null(),
-                area: Area::default(),
-            });
-
-            ass_set_extract_fonts(lib, 1);
-
-            for (i, font) in std::iter::once(default).chain(fonts.iter().map(Vec::as_slice)).enumerate() {
-                let name = CString::new(format!("font{i}")).unwrap();
-                ass_add_font(lib, name.as_ptr(), font.as_ptr().cast(), font.len() as c_int);
-            }
-
-            this.renderer = ass_renderer_init(lib);
-
-            if this.renderer.is_null() {
-                return None;
-            }
-
-            let family = CString::new(DEFAULT_FAMILY).unwrap();
-            ass_set_fonts(this.renderer, ptr::null(), family.as_ptr(), ASS_FONTPROVIDER_NONE, ptr::null(), 0);
-
-            let mut buf = script.to_vec();
-            this.track = ass_read_memory(lib, buf.as_mut_ptr().cast(), buf.len(), ptr::null());
-
-            if this.track.is_null() {
-                return None;
-            }
-
-            Some(this)
+        for font in fonts {
+            all.add(font.as_slice());
         }
+
+        for (_, data) in track.fonts() {
+            all.add(data);
+        }
+
+        Some(Box::new(Subtitles { renderer: Renderer::new(all), track, frame: (0, 0), area: Area::default() }))
     }
 
     /// Lays the frame out: `frame` is what's drawn into (the view), `storage` the video's own size,
     /// and `margins` (top, bottom, left, right) how far the picture is inside the frame:
     /// negative when cropped, in which case dialogue is kept in what's visible.
-    fn resize(&mut self, frame: (c_int, c_int), storage: (c_int, c_int), (t, b, l, r): (c_int, c_int, c_int, c_int)) {
+    fn resize(
+        &mut self,
+        frame: (c_int, c_int),
+        storage: (c_int, c_int),
+        (top, bottom, left, right): (c_int, c_int, c_int, c_int),
+    ) {
         self.frame = frame;
-        self.images = ptr::null();
-
-        unsafe {
-            ass_set_frame_size(self.renderer, frame.0, frame.1);
-            ass_set_storage_size(self.renderer, storage.0, storage.1);
-            ass_set_margins(self.renderer, t, b, l, r);
-            ass_set_use_margins(self.renderer, (t < 0 || b < 0 || l < 0 || r < 0) as c_int);
-        }
+        self.renderer.set_frame(frame, storage, Margins { top, bottom, left, right });
     }
 
     /// What's showing at `ms`, or None when that's what showed last time.
@@ -158,35 +64,23 @@ impl Subtitles {
             return None;
         }
 
-        let mut changed = 0;
-        self.images = unsafe { ass_render_frame(self.renderer, self.track, ms, &mut changed) };
+        let r = self.renderer.render(&self.track, ms);
 
-        if changed == 0 && !force {
+        if !r.changed && !force {
             return None;
         }
 
         let (mut x0, mut y0, mut x1, mut y1) = (i32::MAX, i32::MAX, i32::MIN, i32::MIN);
 
-        for i in self.iter() {
-            x0 = x0.min(i.dst_x.max(0));
-            y0 = y0.min(i.dst_y.max(0));
-            x1 = x1.max((i.dst_x + i.w).min(self.frame.0));
-            y1 = y1.max((i.dst_y + i.h).min(self.frame.1));
+        for i in r.images {
+            x0 = x0.min(i.x.max(0));
+            y0 = y0.min(i.y.max(0));
+            x1 = x1.max((i.x + i.w).min(self.frame.0));
+            y1 = y1.max((i.y + i.h).min(self.frame.1));
         }
 
         self.area = if x0 < x1 && y0 < y1 { Area { x: x0, y: y0, w: x1 - x0, h: y1 - y0 } } else { Area::default() };
         Some(self.area)
-    }
-
-    fn iter(&self) -> impl Iterator<Item = &AssImage> {
-        let mut next = self.images;
-
-        std::iter::from_fn(move || {
-            let image = unsafe { next.as_ref()? };
-            next = image.next;
-            Some(image)
-        })
-        .filter(|i| i.w > 0 && i.h > 0)
     }
 
     /// Paints the last render into `pixels` (premultiplied RGBA, `stride` bytes a row), which
@@ -197,36 +91,34 @@ impl Subtitles {
             pixels[row * stride..row * stride + w as usize * 4].fill(0);
         }
 
-        for i in self.iter() {
-            let mask = unsafe { std::slice::from_raw_parts(i.bitmap, (i.stride * (i.h - 1) + i.w) as usize) };
+        for i in self.renderer.images() {
             blend(
                 pixels,
                 (w, h),
                 stride,
-                i.color,
-                mask,
-                i.stride as usize,
-                (i.dst_x - self.area.x, i.dst_y - self.area.y),
+                i.color(),
+                i.mask(),
+                i.stride(),
+                (i.x - self.area.x, i.y - self.area.y),
                 (i.w, i.h),
             );
         }
     }
 }
 
-/// Blends one of libass's masks, all in `color`, over premultiplied RGBA pixels at `at`.
+/// Blends one of rustyass's masks, all in `color`, over premultiplied RGBA pixels at `at`.
 #[allow(clippy::too_many_arguments)]
 fn blend(
     pixels: &mut [u8],
     (w, h): (i32, i32),
     stride: usize,
-    color: u32,
+    color: Rgba,
     mask: &[u8],
     pitch: usize,
     at: (i32, i32),
     (mw, mh): (i32, i32),
 ) {
-    let (r, g, b) = ((color >> 24) as u32, (color >> 16 & 0xFF) as u32, (color >> 8 & 0xFF) as u32);
-    let opacity = 255 - (color & 0xFF);
+    let (r, g, b, opacity) = (color.r as u32, color.g as u32, color.b as u32, color.a as u32);
 
     if opacity == 0 {
         return;
@@ -252,22 +144,6 @@ fn blend(
             p[1] = ((g * a + p[1] as u32 * keep + 127) / 255) as u8;
             p[2] = ((b * a + p[2] as u32 * keep + 127) / 255) as u8;
             p[3] = (a + (p[3] as u32 * keep + 127) / 255) as u8;
-        }
-    }
-}
-
-impl Drop for Subtitles {
-    fn drop(&mut self) {
-        unsafe {
-            if !self.track.is_null() {
-                ass_free_track(self.track);
-            }
-
-            if !self.renderer.is_null() {
-                ass_renderer_done(self.renderer);
-            }
-
-            ass_library_done(self.lib);
         }
     }
 }
@@ -367,6 +243,7 @@ struct AndroidBitmapInfo {
 const ANDROID_BITMAP_FORMAT_RGBA_8888: i32 = 1;
 
 #[cfg(target_os = "android")]
+#[link(name = "jnigraphics")]
 unsafe extern "C" {
     fn AndroidBitmap_getInfo(
         env: *mut jni::sys::JNIEnv,
@@ -415,25 +292,52 @@ pub extern "system" fn Java_dev_tinystream_player_Ass_paint<'l>(
 
 #[cfg(test)]
 mod tests {
-    use super::blend;
+    use super::*;
+
+    const WHITE: Rgba = Rgba { r: 255, g: 255, b: 255, a: 127 };
+    const RED: Rgba = Rgba { r: 255, g: 0, b: 0, a: 255 };
+    const GREEN: Rgba = Rgba { r: 0, g: 255, b: 0, a: 255 };
+
+    const SCRIPT: &[u8] = b"[Script Info]\nScriptType: v4.00+\nPlayResX: 640\nPlayResY: 360\n\n[V4+ Styles]\n\
+        Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, \
+        Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, \
+        MarginR, MarginV, Encoding\n\
+        Style: Default,Liberation Sans,40,&H00FFFFFF,&H000000FF,&H00000000,&H80000000,0,0,0,0,100,100,0,0,1,2,1,2,10,10,20,1\n\n\
+        [Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n\
+        Dialogue: 0,0:00:01.00,0:00:02.00,Default,,0,0,0,,Hello\n";
 
     #[test]
     fn blends_premultiplied() {
         let mut px = vec![0u8; 2 * 4];
         // White at half transparency, through a full and an empty mask pixel.
-        blend(&mut px, (2, 1), 8, 0xFFFFFF80, &[255, 0], 2, (0, 0), (2, 1));
+        blend(&mut px, (2, 1), 8, WHITE, &[255, 0], 2, (0, 0), (2, 1));
         assert_eq!(&px[..4], &[127, 127, 127, 127]);
         assert_eq!(&px[4..], &[0, 0, 0, 0]);
 
         // Opaque red over that.
-        blend(&mut px, (2, 1), 8, 0xFF000000, &[255, 0], 2, (0, 0), (2, 1));
+        blend(&mut px, (2, 1), 8, RED, &[255, 0], 2, (0, 0), (2, 1));
         assert_eq!(&px[..4], &[255, 0, 0, 255]);
     }
 
     #[test]
     fn clips_to_the_bitmap() {
         let mut px = vec![0u8; 4];
-        blend(&mut px, (1, 1), 4, 0x00FF0000, &[255, 255, 255, 255], 2, (-1, -1), (2, 2));
+        blend(&mut px, (1, 1), 4, GREEN, &[255, 255, 255, 255], 2, (-1, -1), (2, 2));
         assert_eq!(px, [0, 255, 0, 255]);
+    }
+
+    #[test]
+    fn renders_only_what_changed() {
+        let font =
+            include_bytes!("../../../modules/player/android/src/main/assets/subtitles/LiberationSans-Regular.ttf");
+        let mut s = Subtitles::open(SCRIPT, &[], font).unwrap();
+        assert!(s.render(1500, false).is_none());
+
+        s.resize((640, 360), (640, 360), (0, 0, 0, 0));
+        let a = s.render(1500, false).unwrap();
+        assert!(a.w > 0 && a.h > 0 && a.y + a.h <= 360);
+        assert!(s.render(1600, false).is_none());
+        assert_eq!(s.render(1600, true), Some(a));
+        assert_eq!(s.render(2500, false), Some(Area::default()));
     }
 }

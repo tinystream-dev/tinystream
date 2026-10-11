@@ -93,7 +93,7 @@ jobs:
           targets: wasm32-unknown-unknown
       - uses: taiki-e/install-action@v2
         with:
-          tool: wasm-bindgen@0.2.126
+          tool: wasm-bindgen@0.2.126,cargo-about
       # The workspace is installed from the root; web only needs its own packages.
       - run: bun install --frozen-lockfile --filter tinystream-web --filter @tinystream/shared
         working-directory: .
