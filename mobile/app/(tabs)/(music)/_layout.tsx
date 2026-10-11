@@ -2,6 +2,4 @@
 
 import { TabStack } from '../../../src/components/TabStack'
 
-export const unstable_settings = { initialRouteName: 'music' }
-
 export default TabStack

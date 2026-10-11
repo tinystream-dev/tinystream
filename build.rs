@@ -16,7 +16,6 @@ fn main() {
         "web/public",
         "web/decoder",
         "web/subtitles",
-        "decoder/core",
         "rustyass",
         "assets/fonts",
         "web/scripts",

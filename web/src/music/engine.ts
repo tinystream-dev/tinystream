@@ -32,7 +32,6 @@ export class Engine {
   private read = 0
   private readAt = 0
   private current: string | null = null
-  private currentFrame: number | null = null
   private playing = false
   private listeners = new Map<keyof EngineEvents, Set<(...args: never[]) => void>>()
 
@@ -107,10 +106,7 @@ export class Engine {
   private heard(m: FromWorker) {
     if (m.type === 'ready') return
     if (m.generation !== this.generation) return
-    if (m.type === 'rewind') {
-      this.marks = this.marks.filter((mark) => mark.frame < m.frame)
-      this.end = null
-    } else if (m.type === 'mark') {
+    if (m.type === 'mark') {
       this.marks.push({ key: m.key, frame: m.frame, offset: m.offset, duration: m.duration })
       this.marks.sort((a, b) => a.frame - b.frame)
     } else if (m.type === 'end') {
@@ -125,9 +121,8 @@ export class Engine {
     this.readAt = performance.now()
     this.emit('starved', starved)
     const mark = this.markAt(read)
-    if (mark && (mark.key !== this.current || mark.frame !== this.currentFrame)) {
+    if (mark && mark.key !== this.current) {
       this.current = mark.key
-      this.currentFrame = mark.frame
       this.emit('track', mark.key)
     }
     // Marks long behind are of no more use.
@@ -169,7 +164,6 @@ export class Engine {
     this.marks = []
     this.end = null
     this.current = null
-    this.currentFrame = null
     this.send({ type: 'play', items, start })
   }
 
@@ -203,7 +197,6 @@ export class Engine {
     this.pause()
     this.marks = []
     this.current = null
-    this.currentFrame = null
     this.send({ type: 'stop' })
   }
 }

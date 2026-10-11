@@ -2,7 +2,6 @@
 
 import '../global.css'
 import '../src/background'
-import '../src/music/background'
 import { QueryClientProvider, focusManager } from '@tanstack/react-query'
 import { Stack, useRouter } from 'expo-router'
 import { useEffect, useRef } from 'react'
@@ -18,7 +17,6 @@ import { startBackgroundChecks } from '../src/background'
 import { installLogging } from '../src/log'
 import { apiOf, cacheOf, tokenOf, useServers } from '../src/servers'
 import { SessionProvider } from '../src/session'
-import { MusicProvider, stopMusic } from '../src/music/context'
 import { ThemeProvider, useTheme } from '../src/theme/ThemeProvider'
 
 installLogging()
@@ -53,10 +51,6 @@ function App() {
   const bar = useTabBarSpace()
   const { tokens } = useTheme()
 
-  useEffect(() => {
-    if (!token) stopMusic()
-  }, [token])
-
   // A new stack starts where the URL was (say, signing in to the server just added), and losing the
   // token leaves whatever unguarded screens were under it: go where the app should be instead.
   useEffect(() => {
@@ -88,11 +82,9 @@ function App() {
   return (
     <QueryClientProvider key={active.id} client={cacheOf(active.id)}>
       <SessionProvider server={active} api={apiOf(active)} token={token}>
-        <MusicProvider key={at}>
-          <ServerSync />
-          {token && <LiveUpdates />}
-          {stack}
-        </MusicProvider>
+        <ServerSync />
+        {token && <LiveUpdates />}
+        {stack}
         <Feedback bottom={bar + 10} />
       </SessionProvider>
     </QueryClientProvider>

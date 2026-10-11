@@ -52,11 +52,11 @@ jobs:
               - '!bunfig.toml'
               - '!.github/actions/android/**'
             web:
-              - '{web,packages,decoder}/**'
+              - '{web,packages}/**'
               - '{package.json,bun.lock,bunfig.toml}'
               - '.github/workflows/ci.yml'
             mobile:
-              - '{mobile,packages,decoder}/**'
+              - '{mobile,packages}/**'
               - '{package.json,bun.lock,bunfig.toml}'
               - '.github/actions/android/**'
               - '.github/workflows/ci.yml'
@@ -97,7 +97,7 @@ jobs:
       # The workspace is installed from the root; web only needs its own packages.
       - run: bun install --frozen-lockfile --filter tinystream-web --filter @tinystream/shared
         working-directory: .
-      - run: cargo test -p tinystream-decoder-core -p tinystream-subtitles --locked
+      - run: cargo test -p tinystream-subtitles --locked
         working-directory: .
       - run: bun run typecheck
       - run: bun run build
