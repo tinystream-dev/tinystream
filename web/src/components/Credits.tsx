@@ -20,7 +20,7 @@ const libraries = [
   { name: 'FriBidi', license: 'LGPL-2.1-or-later', href: 'https://github.com/fribidi/fribidi', does: 'Right-to-left text' },
   { name: 'libtorrent', license: 'BSD-3-Clause', href: 'https://libtorrent.org', does: 'Torrent downloads' },
   { name: 'Boost', license: 'BSL-1.0', href: 'https://www.boost.org', does: 'What libtorrent is built on' },
-  { name: 'JASSUB', license: 'MIT', href: 'https://github.com/ThaUnknown/jassub', does: 'Subtitles in the browser' },
+  { name: 'Noto Sans', license: 'OFL-1.1', href: 'https://notofonts.github.io', does: 'Default subtitle font' },
   { name: 'Symphonia', license: 'MPL-2.0', href: 'https://github.com/pdeljanov/Symphonia', does: 'Music decoding in the browser' },
 ]
 

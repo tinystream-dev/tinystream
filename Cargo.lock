@@ -4018,6 +4018,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "tinystream-subtitles"
+version = "0.28.3"
+dependencies = [
+ "rustyass",
+ "wasm-bindgen",
+]
+
+[[package]]
 name = "tinyvec"
 version = "1.13.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"

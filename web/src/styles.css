@@ -801,13 +801,13 @@
 
 /* Paused: the frame (subtitles included) recedes and what you're watching steps forward. */
 .recede,
-.recede + .JASSUB {
+.recede + .subtitles {
   transition:
     filter 1400ms cubic-bezier(0.16, 1, 0.3, 1),
     transform 1400ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 .recede[data-receded],
-.recede[data-receded] + .JASSUB {
+.recede[data-receded] + .subtitles {
   filter: blur(6px) brightness(0.55) saturate(0.85);
   transform: scale(1.015);
 }

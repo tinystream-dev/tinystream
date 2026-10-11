@@ -87,8 +87,8 @@ jobs:
     steps:
       - uses: useblacksmith/checkout@v1
       - uses: oven-sh/setup-bun@v2
-      # The music player's decoder is Rust, built for the browser.
-      - uses: dtolnay/rust-toolchain@stable
+      # The music player's decoder and the video player's subtitles (rustyass, on nightly) are Rust, built for the browser.
+      - uses: dtolnay/rust-toolchain@nightly
         with:
           targets: wasm32-unknown-unknown
       - uses: taiki-e/install-action@v2
@@ -97,7 +97,7 @@ jobs:
       # The workspace is installed from the root; web only needs its own packages.
       - run: bun install --frozen-lockfile --filter tinystream-web --filter @tinystream/shared
         working-directory: .
-      - run: cargo test -p tinystream-decoder-core --locked
+      - run: cargo test -p tinystream-decoder-core -p tinystream-subtitles --locked
         working-directory: .
       - run: bun run typecheck
       - run: bun run build

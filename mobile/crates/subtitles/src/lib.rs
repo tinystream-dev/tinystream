@@ -71,7 +71,7 @@ unsafe extern "C" {
     ) -> *const AssImage;
 }
 
-/// The family of the font every script falls back on (as on web: JASSUB's default).
+/// The family of the font every script falls back on.
 const DEFAULT_FAMILY: &str = "Liberation Sans";
 
 struct Subtitles {

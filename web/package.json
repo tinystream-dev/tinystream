@@ -5,10 +5,10 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "bun run decoder && vite dev --port 5173",
-    "build": "bun run decoder && vite build",
-    "decoder": "bun scripts/decoder.ts",
-    "typecheck": "bun run decoder && tsc --noEmit",
+    "dev": "bun run wasm && vite dev --port 5173",
+    "build": "bun run wasm && vite build",
+    "wasm": "bun scripts/wasm.ts",
+    "typecheck": "bun run wasm && tsc --noEmit",
     "codegen": "graphql-codegen"
   },
   "dependencies": {
@@ -18,7 +18,6 @@
     "@tanstack/react-start": "^1.168.59",
     "@tinystream/shared": "*",
     "graphql-ws": "^6.3.0",
-    "jassub": "^2.5.16",
     "lucide-react": "^1.48.0",
     "react": "^19.3.0",
     "react-dom": "^19.3.0"

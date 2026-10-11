@@ -67,14 +67,14 @@ function licenses(): Plugin {
 export default defineConfig({
   define: { __CONTRIBUTORS__: JSON.stringify(contributors()) },
   resolve: {
-    // The music player's decoder, built from web/decoder by `bun run decoder`.
-    alias: { '#decoder': fileURLToPath(new URL('../target/wasm/pkg', import.meta.url)) },
+    // The web player's Rust (web/decoder and web/subtitles), built by `bun run wasm`.
+    alias: { '#wasm': fileURLToPath(new URL('../target/wasm/pkg', import.meta.url)) },
   },
   server: {
-    fs: { allow: ['.', '../target/wasm/pkg'] },
+    fs: { allow: ['.', '../target/wasm/pkg', '../assets/fonts'] },
     proxy: { '/api': { target: api, changeOrigin: false, ws: true } },
     headers: {
-      // Lets the subtitle renderer use threads (SharedArrayBuffer).
+      // Lets the music player share its ring with the decoder (SharedArrayBuffer).
       'Cross-Origin-Opener-Policy': 'same-origin',
       'Cross-Origin-Embedder-Policy': 'credentialless',
     },

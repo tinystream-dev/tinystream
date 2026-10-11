@@ -3,7 +3,7 @@
 // there's never a gap between them. Files are read with synchronous range
 // requests, which only workers may make, and which keep the Rust side simple.
 
-import init, { Sequencer } from '#decoder/tinystream_decoder.js'
+import init, { Sequencer } from '#wasm/tinystream_decoder.js'
 import { FLUSH_AT, GENERATION, READ, WRITTEN, views } from './ring'
 
 export type Item = {
