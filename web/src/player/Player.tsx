@@ -586,7 +586,10 @@ export function Player({ mediaId, room, editClip, startAt }: { mediaId: number; 
     if (!ended || !pb?.next) return
     setCountdown(5)
     const id = setInterval(() => setCountdown((c) => (c === null ? null : c - 1)), 1000)
-    return () => clearInterval(id)
+    return () => {
+      clearInterval(id)
+      setCountdown(null)
+    }
   }, [ended, pb])
   useEffect(() => {
     if (countdown !== null && countdown <= 0 && pb?.next && controls) goTo(pb.next.id)
@@ -791,15 +794,25 @@ export function Player({ mediaId, room, editClip, startAt }: { mediaId: number; 
         onDoubleClick={() => pointerType.current !== 'touch' && toggleFullscreen()}
         onPlay={() => (setPlaying(true), setEnded(false), setCountdown(null))}
         onPause={() => (setPlaying(false), save())}
-        onWaiting={() => setWaiting(true)}
+        onWaiting={() => {
+          // Some files end a little short of their stated length, and the browser waits there instead of ending.
+          if (engine.current?.exhausted()) (setEnded(true), save())
+          else setWaiting(true)
+        }}
         onPlaying={() => (setWaiting(false), setStarted(true))}
         onCanPlay={() => (setWaiting(false), setStarted(true))}
         onStalled={() => engine.current?.recover()}
         onEnded={() => (setEnded(true), save())}
+        onSeeking={() => {
+          // A paused video doesn't play again on seeking back, so ending has to be undone here.
+          setEnded(false)
+        }}
         onRateChange={(e) => !room && setRate(e.currentTarget.playbackRate)}
         onTimeUpdate={(e) => {
           const v = e.currentTarget
           setTime(v.currentTime)
+          // Seeking to the end while paused doesn't always fire "ended".
+          if (v.ended) setEnded(true)
           const b = v.buffered
           const r: [number, number][] = []
           for (let i = 0; i < b.length; i++) r.push([b.start(i), b.end(i)])
@@ -1346,34 +1359,48 @@ function UpNext({
   /** Missing when someone else decides. */
   onPlay?: () => void
 }) {
-  return (
-    <div className="lift animate-[pop_180ms_ease-out]">
-      <Squircle radius={16} edge className="w-80 bg-media-panel/85 p-2.5 backdrop-blur-xl">
-        <div className="flex gap-3">
-          <Squircle radius={9} className="aspect-video w-28 shrink-0 bg-panel">
-            <img src={still} alt="" className="size-full object-cover" />
-          </Squircle>
-          <div className="min-w-0 flex-1 py-0.5">
-            <p className="text-xs text-ink-3">Up next · {next.label}</p>
-            <p className="mt-0.5 line-clamp-2 text-sm leading-snug font-medium">{next.name ?? next.label}</p>
-          </div>
+  const body = (
+    <>
+      <div className="flex gap-3">
+        <Squircle radius={9} className="aspect-video w-28 shrink-0 bg-panel">
+          <img src={still} alt="" className="size-full object-cover" />
+        </Squircle>
+        <div className="min-w-0 flex-1 py-0.5">
+          <p className="text-xs text-ink-3">Up next · {next.label}</p>
+          <p className="mt-0.5 line-clamp-2 text-sm leading-snug font-medium">{next.name ?? next.label}</p>
         </div>
-        {onPlay && (
-        <button
-          onClick={onPlay}
-          className="relative mt-2.5 flex h-9 w-full items-center justify-center gap-2 overflow-hidden rounded-[10px] bg-accent/85 text-sm font-medium text-on-accent hover:bg-accent-hover"
+      </div>
+      {onPlay && (
+        <span
+          className={`relative mt-2.5 flex h-9 w-full items-center justify-center gap-2 overflow-hidden rounded-[10px] text-sm font-medium text-on-accent transition-colors ${countdown !== null ? 'bg-accent/40' : 'bg-accent/85 group-hover:bg-accent-hover'}`}
         >
           {/* The countdown, as a fill sweeping across. */}
-          {countdown !== null && (
-            <span className="absolute inset-0 origin-left animate-[sweep_5s_linear_forwards] bg-accent-hover" />
-          )}
+          {countdown !== null && <span className="absolute inset-0 origin-left animate-[sweep_5s_linear_forwards] bg-accent" />}
           <span className="relative flex items-center gap-2">
             <Play className="size-4 fill-current" />
             {countdown !== null ? 'Playing next' : 'Play now'}
           </span>
-        </button>
-        )}
-      </Squircle>
+        </span>
+      )}
+    </>
+  )
+  return (
+    <div className="lift animate-[pop_180ms_ease-out]">
+      {onPlay ? (
+        <Squircle
+          as="button"
+          radius={16}
+          edge
+          onClick={onPlay}
+          className="group block w-80 bg-media-panel/85 p-2.5 text-left backdrop-blur-xl transition-colors hover:bg-media-panel"
+        >
+          {body}
+        </Squircle>
+      ) : (
+        <Squircle radius={16} edge className="w-80 bg-media-panel/85 p-2.5 backdrop-blur-xl">
+          {body}
+        </Squircle>
+      )}
     </div>
   )
 }
