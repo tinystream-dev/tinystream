@@ -42,11 +42,12 @@ import { canControl, pickShared, roomSubtitle, sameSubtitle, subtitleChoice, typ
 
 type Quality = 'auto' | 1080 | 720 | 480
 
-const SKIPPABLE = /^(op|opening|intro|ed|ending|credits|preview|next episode|recap)\b/i
+// Not "intro": releases often call the cold open that, and it's part of the episode.
+const SKIPPABLE = /^(op|opening|ed|ending|credits|preview|next episode|recap)\b/i
 
 function skipLabel(title: string) {
   const t = title.toLowerCase()
-  if (/^(op|opening|intro)/.test(t)) return 'Skip opening'
+  if (/^(op|opening)/.test(t)) return 'Skip opening'
   if (/^(ed|ending|credits)/.test(t)) return 'Skip credits'
   if (/^recap/.test(t)) return 'Skip recap'
   return 'Skip preview'
@@ -747,6 +748,16 @@ export function Player({ mediaId, room, editClip, startAt }: { mediaId: number; 
   const overview = details?.video?.overview ?? details?.title?.overview ?? null
 
   const showChrome = ((!playing && !rested) || !idle || !!error) && !clipping
+  // The skip button shows for a while as its chapter starts, then only with the controls.
+  const skipAt = skippable?.start ?? null
+  const [skipFresh, setSkipFresh] = useState<number | null>(null)
+  useEffect(() => {
+    if (skipAt === null) return
+    setSkipFresh(skipAt)
+    const t = setTimeout(() => setSkipFresh(null), 6000)
+    return () => clearTimeout(t)
+  }, [skipAt])
+  const showSkip = skipFresh === skipAt || showChrome
   const title = pb?.title.name ?? ''
   const subtitleLine = pb?.title.kind === 'SHOW' ? [pb.label, pb.name].filter(Boolean).join(' · ') : null
 
@@ -852,9 +863,11 @@ export function Player({ mediaId, room, editClip, startAt }: { mediaId: number; 
         {room && <RoomButton ctx={room} />}
       </div>
 
-      <div className="absolute right-6 bottom-28 flex flex-col items-end gap-3">
+      <div className="absolute right-6 bottom-28 z-10 flex flex-col items-end gap-3">
         {skippable && !nearEnd && controls && (
-          <SkipPill onClick={() => seek(skippable.end)}>{skipLabel(skippable.title!)}</SkipPill>
+          <SkipPill shown={showSkip} onClick={() => seek(skippable.end)}>
+            {skipLabel(skippable.title!)}
+          </SkipPill>
         )}
         {pb?.next && (nearEnd || ended) && (
           <UpNext
@@ -1302,15 +1315,17 @@ export function ChromeButton({
   )
 }
 
-function SkipPill({ children, onClick }: { children: ReactNode; onClick: () => void }) {
+function SkipPill({ children, shown, onClick }: { children: ReactNode; shown: boolean; onClick: () => void }) {
   return (
-    <div className="lift animate-[pop_160ms_ease-out]">
+    <div
+      className={`animate-[pop_160ms_ease-out] transition-opacity duration-500 ${shown ? 'opacity-100' : 'pointer-events-none opacity-0'}`}
+    >
       <Squircle
         as="button"
-        radius={14}
+        radius={12}
         edge
         onClick={onClick}
-        className="flex h-11 items-center gap-2 bg-media-ink/12 px-4 text-sm font-medium text-media-ink backdrop-blur-xl transition-colors hover:bg-media-ink/20"
+        className="flex h-9 items-center gap-2 bg-media-ink/10 px-3.5 text-[13px] font-medium text-media-ink/85 backdrop-blur-xl transition-colors hover:bg-media-ink/20 hover:text-media-ink"
       >
         {children}
         <span className="text-2xs text-media-ink/50">S</span>
