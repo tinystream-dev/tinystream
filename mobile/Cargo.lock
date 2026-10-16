@@ -477,7 +477,7 @@ dependencies = [
 
 [[package]]
 name = "rustyass"
-version = "0.28.3"
+version = "0.36.0"
 dependencies = [
  "harfrust",
  "rustc-hash",
@@ -720,14 +720,14 @@ dependencies = [
 
 [[package]]
 name = "tinystream-about"
-version = "0.28.3"
+version = "0.36.0"
 dependencies = [
  "uniffi",
 ]
 
 [[package]]
 name = "tinystream-subtitles"
-version = "0.28.3"
+version = "0.36.0"
 dependencies = [
  "jni",
  "rustyass",
@@ -808,7 +808,7 @@ dependencies = [
 
 [[package]]
 name = "uniffi-bindgen"
-version = "0.28.3"
+version = "0.36.0"
 dependencies = [
  "uniffi",
 ]
