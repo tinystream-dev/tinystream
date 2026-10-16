@@ -562,6 +562,14 @@ export type CalendarEntryFieldsFragment = { seriesId: number, library: string, s
 
 export type SettingsFieldsFragment = { raw: string, error: string | null, network: { host: string, port: number, cors: Array<string> }, log: { level: string }, scan: { watch: boolean, interval: string | null }, metadata: { tmdbApiKey: string | null, language: string }, transcode: { hardware: Hardware, vaapiDevice: string }, clips: { enabled: boolean, path: string | null, publicLinks: boolean, concurrency: number, maxStorage: number, fontsDir: string | null, defaultFont: string | null }, music: { onlineLyrics: boolean, lyricsUrl: string, analyzeLoudness: boolean }, downloads: { path: string | null, import: ImportMode, port: number, upnp: boolean, dht: boolean, maxActive: number, downloadLimit: number, uploadLimit: number, slowDownloadLimit: number, slowUploadLimit: number, slowFrom: string | null, slowTo: string | null, bindInterface: string | null, proxy: string | null, seeding: { ratio: number | null, time: string | null, idle: string | null, then: SeedAction } }, automation: { defaultMonitor: Monitor, rssInterval: string, renameSuggestions: boolean, retry: Array<{ every: string, until: string }> }, requests: { monitor: Monitor }, signIn: { style: SignInStyle }, sources: Array<{ name: string, kind: SourceKind, url: string, feed: string | null, apiKey: string | null, categories: Array<number>, enabled: boolean, downloadPath: string | null, seeding: { ratio: number | null, time: string | null, idle: string | null, then: SeedAction } | null }>, profiles: Array<{ name: string, resolutions: Array<string>, groups: Array<string>, require: Array<string>, reject: Array<string>, minSize: number | null, maxSize: number | null, codecs: Array<string>, preferDualAudio: boolean, batches: boolean, minSeeders: number }>, libraries: Array<{ name: string, path: string, kind: LibraryKind, metadataProvider: Provider | null, managed: boolean, profile: string | null, downloadPath: string | null, resolvedPath: string | null, exists: boolean, error: string | null, titleCount: number, skippedCount: number }>, paths: { config: string, data: string, log: string } };
 
+export type MusicTrackFragment = { id: number, title: string, artist: string, album: string, albumId: number | null, albumArtist: string | null, library: string, disc: number | null, number: number | null, year: number | null, duration: number, codec: string, suffix: string, lossless: boolean, bitrate: number | null, sampleRate: number | null, bitDepth: number | null, channels: number | null, size: number, file: string, flac: string, cover: string | null, coverTint: string | null, starred: boolean, rating: number | null, playCount: number, artists: Array<{ id: number, name: string }>, gains: { trackGain: number | null, trackPeak: number | null, albumGain: number | null, albumPeak: number | null, pending: boolean } };
+
+export type AlbumCardFragment = { id: number, name: string, artist: string, year: number | null, cover: string | null, trackCount: number, duration: number, compilation: boolean, starred: boolean, playCount: number, addedAt: number, artists: Array<{ id: number, name: string }> };
+
+export type ArtistCardFragment = { id: number, name: string, albumCount: number, trackCount: number, cover: string | null, starred: boolean };
+
+export type PlaylistCardFragment = { id: number, name: string, comment: string | null, public: boolean, mine: boolean, trackCount: number, duration: number, covers: Array<string>, owner: { id: number, username: string } };
+
 export type ColorSchemesQueryVariables = Exact<{ [key: string]: never; }>;
 
 
@@ -1141,14 +1149,6 @@ export type PlaylistsQueryVariables = Exact<{ [key: string]: never; }>;
 
 
 export type PlaylistsQuery = { playlists: Array<{ id: number, name: string, comment: string | null, public: boolean, mine: boolean, trackCount: number, duration: number, covers: Array<string>, owner: { id: number, username: string } }> };
-
-export type MusicTrackFragment = { id: number, title: string, artist: string, album: string, albumId: number | null, albumArtist: string | null, library: string, disc: number | null, number: number | null, year: number | null, duration: number, codec: string, suffix: string, lossless: boolean, bitrate: number | null, sampleRate: number | null, bitDepth: number | null, channels: number | null, size: number, file: string, flac: string, cover: string | null, coverTint: string | null, starred: boolean, rating: number | null, playCount: number, artists: Array<{ id: number, name: string }>, gains: { trackGain: number | null, trackPeak: number | null, albumGain: number | null, albumPeak: number | null, pending: boolean } };
-
-export type AlbumCardFragment = { id: number, name: string, artist: string, year: number | null, cover: string | null, trackCount: number, duration: number, compilation: boolean, starred: boolean, playCount: number, addedAt: number, artists: Array<{ id: number, name: string }> };
-
-export type ArtistCardFragment = { id: number, name: string, albumCount: number, trackCount: number, cover: string | null, starred: boolean };
-
-export type PlaylistCardFragment = { id: number, name: string, comment: string | null, public: boolean, mine: boolean, trackCount: number, duration: number, covers: Array<string>, owner: { id: number, username: string } };
 
 export type PlayQueueQueryVariables = Exact<{ [key: string]: never; }>;
 
@@ -2421,89 +2421,6 @@ export const SettingsFieldsFragmentDoc = new TypedDocumentString(`
   idle
   then
 }`, {"fragmentName":"SettingsFields"}) as unknown as TypedDocumentString<SettingsFieldsFragment, unknown>;
-export const SchemeFieldsFragmentDoc = new TypedDocumentString(`
-    fragment SchemeFields on ColorScheme {
-  id
-  name
-  builtIn
-  published
-  editable
-  code
-  shareCode
-  forkedFrom {
-    id
-    name
-  }
-  palette {
-    seeds {
-      name
-      value
-    }
-    overrides {
-      name
-      value
-    }
-    tokens {
-      name
-      value
-    }
-    warnings {
-      foreground
-      background
-      ratio
-      minimum
-    }
-  }
-}
-    `, {"fragmentName":"SchemeFields"}) as unknown as TypedDocumentString<SchemeFieldsFragment, unknown>;
-export const NotificationFieldsFragmentDoc = new TypedDocumentString(`
-    fragment NotificationFields on Notification {
-  id
-  kind
-  priority
-  title
-  body
-  image
-  link
-  actor {
-    ...Person
-  }
-  createdAt
-  expiresAt
-  readAt
-}
-    fragment Person on User {
-  id
-  username
-  avatar
-}`, {"fragmentName":"NotificationFields"}) as unknown as TypedDocumentString<NotificationFieldsFragment, unknown>;
-export const InboxFieldsFragmentDoc = new TypedDocumentString(`
-    fragment InboxFields on Inbox {
-  items {
-    ...NotificationFields
-  }
-  unread
-}
-    fragment Person on User {
-  id
-  username
-  avatar
-}
-fragment NotificationFields on Notification {
-  id
-  kind
-  priority
-  title
-  body
-  image
-  link
-  actor {
-    ...Person
-  }
-  createdAt
-  expiresAt
-  readAt
-}`, {"fragmentName":"InboxFields"}) as unknown as TypedDocumentString<InboxFieldsFragment, unknown>;
 export const MusicTrackFragmentDoc = new TypedDocumentString(`
     fragment MusicTrack on Track {
   id
@@ -2590,6 +2507,89 @@ export const PlaylistCardFragmentDoc = new TypedDocumentString(`
   }
 }
     `, {"fragmentName":"PlaylistCard"}) as unknown as TypedDocumentString<PlaylistCardFragment, unknown>;
+export const SchemeFieldsFragmentDoc = new TypedDocumentString(`
+    fragment SchemeFields on ColorScheme {
+  id
+  name
+  builtIn
+  published
+  editable
+  code
+  shareCode
+  forkedFrom {
+    id
+    name
+  }
+  palette {
+    seeds {
+      name
+      value
+    }
+    overrides {
+      name
+      value
+    }
+    tokens {
+      name
+      value
+    }
+    warnings {
+      foreground
+      background
+      ratio
+      minimum
+    }
+  }
+}
+    `, {"fragmentName":"SchemeFields"}) as unknown as TypedDocumentString<SchemeFieldsFragment, unknown>;
+export const NotificationFieldsFragmentDoc = new TypedDocumentString(`
+    fragment NotificationFields on Notification {
+  id
+  kind
+  priority
+  title
+  body
+  image
+  link
+  actor {
+    ...Person
+  }
+  createdAt
+  expiresAt
+  readAt
+}
+    fragment Person on User {
+  id
+  username
+  avatar
+}`, {"fragmentName":"NotificationFields"}) as unknown as TypedDocumentString<NotificationFieldsFragment, unknown>;
+export const InboxFieldsFragmentDoc = new TypedDocumentString(`
+    fragment InboxFields on Inbox {
+  items {
+    ...NotificationFields
+  }
+  unread
+}
+    fragment Person on User {
+  id
+  username
+  avatar
+}
+fragment NotificationFields on Notification {
+  id
+  kind
+  priority
+  title
+  body
+  image
+  link
+  actor {
+    ...Person
+  }
+  createdAt
+  expiresAt
+  readAt
+}`, {"fragmentName":"InboxFields"}) as unknown as TypedDocumentString<InboxFieldsFragment, unknown>;
 export const ColorSchemesDocument = new TypedDocumentString(`
     query ColorSchemes {
   colorSchemes {

@@ -1280,6 +1280,14 @@ export type CalendarEntryFieldsFragment = { seriesId: number, library: string, s
 
 export type SettingsFieldsFragment = { raw: string, error: string | null, network: { host: string, port: number, cors: Array<string> }, log: { level: string }, scan: { watch: boolean, interval: string | null }, metadata: { tmdbApiKey: string | null, language: string }, transcode: { hardware: Hardware, vaapiDevice: string }, clips: { enabled: boolean, path: string | null, publicLinks: boolean, concurrency: number, maxStorage: number, fontsDir: string | null, defaultFont: string | null }, music: { onlineLyrics: boolean, lyricsUrl: string, analyzeLoudness: boolean }, downloads: { path: string | null, import: ImportMode, port: number, upnp: boolean, dht: boolean, maxActive: number, downloadLimit: number, uploadLimit: number, slowDownloadLimit: number, slowUploadLimit: number, slowFrom: string | null, slowTo: string | null, bindInterface: string | null, proxy: string | null, seeding: { ratio: number | null, time: string | null, idle: string | null, then: SeedAction } }, automation: { defaultMonitor: Monitor, rssInterval: string, renameSuggestions: boolean, retry: Array<{ every: string, until: string }> }, requests: { monitor: Monitor }, signIn: { style: SignInStyle }, sources: Array<{ name: string, kind: SourceKind, url: string, feed: string | null, apiKey: string | null, categories: Array<number>, enabled: boolean, downloadPath: string | null, seeding: { ratio: number | null, time: string | null, idle: string | null, then: SeedAction } | null }>, profiles: Array<{ name: string, resolutions: Array<string>, groups: Array<string>, require: Array<string>, reject: Array<string>, minSize: number | null, maxSize: number | null, codecs: Array<string>, preferDualAudio: boolean, batches: boolean, minSeeders: number }>, libraries: Array<{ name: string, path: string, kind: LibraryKind, metadataProvider: Provider | null, managed: boolean, profile: string | null, downloadPath: string | null, resolvedPath: string | null, exists: boolean, error: string | null, titleCount: number, skippedCount: number }>, paths: { config: string, data: string, log: string } };
 
+export type MusicTrackFragment = { id: number, title: string, artist: string, album: string, albumId: number | null, albumArtist: string | null, library: string, disc: number | null, number: number | null, year: number | null, duration: number, codec: string, suffix: string, lossless: boolean, bitrate: number | null, sampleRate: number | null, bitDepth: number | null, channels: number | null, size: number, file: string, flac: string, cover: string | null, coverTint: string | null, starred: boolean, rating: number | null, playCount: number, artists: Array<{ id: number, name: string }>, gains: { trackGain: number | null, trackPeak: number | null, albumGain: number | null, albumPeak: number | null, pending: boolean } };
+
+export type AlbumCardFragment = { id: number, name: string, artist: string, year: number | null, cover: string | null, trackCount: number, duration: number, compilation: boolean, starred: boolean, playCount: number, addedAt: number, artists: Array<{ id: number, name: string }> };
+
+export type ArtistCardFragment = { id: number, name: string, albumCount: number, trackCount: number, cover: string | null, starred: boolean };
+
+export type PlaylistCardFragment = { id: number, name: string, comment: string | null, public: boolean, mine: boolean, trackCount: number, duration: number, covers: Array<string>, owner: { id: number, username: string } };
+
 export class TypedDocumentString<TResult, TVariables>
   extends String
   implements DocumentTypeDecoration<TResult, TVariables>
@@ -2050,6 +2058,92 @@ export const SettingsFieldsFragmentDoc = new TypedDocumentString(`
   idle
   then
 }`, {"fragmentName":"SettingsFields"}) as unknown as TypedDocumentString<SettingsFieldsFragment, unknown>;
+export const MusicTrackFragmentDoc = new TypedDocumentString(`
+    fragment MusicTrack on Track {
+  id
+  title
+  artist
+  artists {
+    id
+    name
+  }
+  album
+  albumId
+  albumArtist
+  library
+  disc
+  number
+  year
+  duration
+  codec
+  suffix
+  lossless
+  bitrate
+  sampleRate
+  bitDepth
+  channels
+  size
+  file
+  flac
+  cover
+  coverTint
+  gains {
+    trackGain
+    trackPeak
+    albumGain
+    albumPeak
+    pending
+  }
+  starred
+  rating
+  playCount
+}
+    `, {"fragmentName":"MusicTrack"}) as unknown as TypedDocumentString<MusicTrackFragment, unknown>;
+export const AlbumCardFragmentDoc = new TypedDocumentString(`
+    fragment AlbumCard on Album {
+  id
+  name
+  artist
+  artists {
+    id
+    name
+  }
+  year
+  cover
+  trackCount
+  duration
+  compilation
+  starred
+  playCount
+  addedAt
+}
+    `, {"fragmentName":"AlbumCard"}) as unknown as TypedDocumentString<AlbumCardFragment, unknown>;
+export const ArtistCardFragmentDoc = new TypedDocumentString(`
+    fragment ArtistCard on Artist {
+  id
+  name
+  albumCount
+  trackCount
+  cover
+  starred
+}
+    `, {"fragmentName":"ArtistCard"}) as unknown as TypedDocumentString<ArtistCardFragment, unknown>;
+export const PlaylistCardFragmentDoc = new TypedDocumentString(`
+    fragment PlaylistCard on Playlist {
+  id
+  name
+  comment
+  public
+  mine
+  trackCount
+  duration
+  covers
+  owner {
+    id
+    username
+  }
+}
+    `, {"fragmentName":"PlaylistCard"}) as unknown as TypedDocumentString<PlaylistCardFragment, unknown>;
 export const CalendarDocument = new TypedDocumentString(`
     query Calendar($from: Int!, $to: Int!) {
   calendar(from: $from, to: $to) {

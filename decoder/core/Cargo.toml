@@ -1,0 +1,19 @@
+[package]
+name = "tinystream-decoder-core"
+description = "The music players' decoder: files to PCM, one track straight into the next"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish = false
+
+[features]
+# libopus, built from source; for the app, which caches music as Opus.
+opus = ["dep:symphonia-adapter-libopus"]
+
+[dependencies]
+rubato = "5"
+symphonia = { version = "0.6", default-features = false, features = ["flac", "mp3", "aac", "alac", "isomp4", "ogg", "vorbis", "wav", "aiff", "pcm"] }
+symphonia-adapter-libopus = { version = "0.3", optional = true }

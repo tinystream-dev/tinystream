@@ -856,10 +856,14 @@ type Mutation {
 	"""
 	played(trackId: Int!): Boolean!
 	"""
-	What's playing in the web player right now, so other apps see it; no track means it stopped.
+	What's playing in tinystream's own player right now (the web's, or `client`, the app's), so
+	other apps see it; no track means it stopped.
 	"""
-	nowPlaying(trackId: Int, position: Float! = 0.0, paused: Boolean! = false): Boolean!
-	savePlayQueue(input: QueueInput!): PlayQueue!
+	nowPlaying(trackId: Int, position: Float! = 0.0, paused: Boolean! = false, client: String): Boolean!
+	"""
+	Saves the queue of tinystream's own player: the web's, or `client`, the app's.
+	"""
+	savePlayQueue(input: QueueInput!, client: String): PlayQueue!
 	"""
 	Measures a track's loudness now, if that's still to be done, for whoever's about to hear it.
 	"""

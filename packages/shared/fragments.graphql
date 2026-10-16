@@ -587,3 +587,85 @@ fragment SettingsFields on Settings {
     log
   }
 }
+
+fragment MusicTrack on Track {
+  id
+  title
+  artist
+  artists {
+    id
+    name
+  }
+  album
+  albumId
+  albumArtist
+  library
+  disc
+  number
+  year
+  duration
+  codec
+  suffix
+  lossless
+  bitrate
+  sampleRate
+  bitDepth
+  channels
+  size
+  file
+  flac
+  cover
+  coverTint
+  gains {
+    trackGain
+    trackPeak
+    albumGain
+    albumPeak
+    pending
+  }
+  starred
+  rating
+  playCount
+}
+
+fragment AlbumCard on Album {
+  id
+  name
+  artist
+  artists {
+    id
+    name
+  }
+  year
+  cover
+  trackCount
+  duration
+  compilation
+  starred
+  playCount
+  addedAt
+}
+
+fragment ArtistCard on Artist {
+  id
+  name
+  albumCount
+  trackCount
+  cover
+  starred
+}
+
+fragment PlaylistCard on Playlist {
+  id
+  name
+  comment
+  public
+  mine
+  trackCount
+  duration
+  covers
+  owner {
+    id
+    username
+  }
+}

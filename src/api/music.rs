@@ -1010,13 +1010,15 @@ impl MusicMutation {
         Ok(true)
     }
 
-    /// What's playing in the web player right now, so other apps see it; no track means it stopped.
+    /// What's playing in tinystream's own player right now (the web's, or `client`, the app's), so
+    /// other apps see it; no track means it stopped.
     async fn now_playing(
         &self,
         ctx: &Context<'_>,
         track_id: Option<i64>,
         #[graphql(default)] position: f64,
         #[graphql(default)] paused: bool,
+        client: Option<String>,
     ) -> ApiResult<bool> {
         let (state, user) = (ctx.state(), ctx.user()?);
 
@@ -1026,7 +1028,7 @@ impl MusicMutation {
 
                 Some(Playing {
                     track_id: id,
-                    client: "tinystream".into(),
+                    client: client.unwrap_or_else(|| "tinystream".into()),
                     since: now(),
                     position,
                     duration: t.duration,
@@ -1040,7 +1042,13 @@ impl MusicMutation {
         Ok(true)
     }
 
-    async fn save_play_queue(&self, ctx: &Context<'_>, input: QueueInput) -> ApiResult<PlayQueue> {
+    /// Saves the queue of tinystream's own player: the web's, or `client`, the app's.
+    async fn save_play_queue(
+        &self,
+        ctx: &Context<'_>,
+        input: QueueInput,
+        client: Option<String>,
+    ) -> ApiResult<PlayQueue> {
         let (state, user) = (ctx.state(), ctx.user()?);
 
         let q = queue::Queue {
@@ -1049,7 +1057,7 @@ impl MusicMutation {
             position: input.position,
             shuffled: input.shuffled,
             repeat: input.repeat,
-            changed_by: Some("tinystream".into()),
+            changed_by: Some(client.unwrap_or_else(|| "tinystream".into())),
             updated_at: 0,
         };
 
