@@ -53,6 +53,9 @@ pub struct Tracks {
     pub audio_language: Option<String>,
     pub subtitle: Option<String>,
     pub subtitle_language: Option<String>,
+    pub subtitle_title: Option<String>,
+    pub subtitle_forced: bool,
+    pub subtitle_codec: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize)]

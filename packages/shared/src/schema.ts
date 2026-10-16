@@ -824,7 +824,10 @@ export type Mutation = {
   matchTitle: Title;
   /** Measures a track's loudness now, if that's still to be done, for whoever's about to hear it. */
   measureLoudness: Track;
-  /** What's playing in the web player right now, so other apps see it; no track means it stopped. */
+  /**
+   * What's playing in tinystream's own player right now (the web's, or `client`, the app's), so
+   * other apps see it; no track means it stopped.
+   */
   nowPlaying: Scalars['Boolean']['output'];
   pauseDownloads: Array<Download>;
   /** Someone listened to (most of) a track. */
@@ -846,6 +849,7 @@ export type Mutation = {
   renderClip: Clip;
   replaceConfig: Settings;
   resumeDownloads: Array<Download>;
+  /** Saves the queue of tinystream's own player: the web's, or `client`, the app's. */
   savePlayQueue: PlayQueue;
   saveProgress: Video;
   /** Creates a scheme, or changes one you may edit. */
@@ -1084,6 +1088,7 @@ export type MutationMeasureLoudnessArgs = {
 
 
 export type MutationNowPlayingArgs = {
+  client?: InputMaybe<Scalars['String']['input']>;
   paused?: Scalars['Boolean']['input'];
   position?: Scalars['Float']['input'];
   trackId?: InputMaybe<Scalars['Int']['input']>;
@@ -1175,6 +1180,7 @@ export type MutationResumeDownloadsArgs = {
 
 
 export type MutationSavePlayQueueArgs = {
+  client?: InputMaybe<Scalars['String']['input']>;
   input: QueueInput;
 };
 
@@ -2493,7 +2499,10 @@ export type TracksInput = {
   audio?: InputMaybe<Scalars['Int']['input']>;
   audioLanguage?: InputMaybe<Scalars['String']['input']>;
   subtitle?: InputMaybe<Scalars['String']['input']>;
+  subtitleCodec?: InputMaybe<Scalars['String']['input']>;
+  subtitleForced?: Scalars['Boolean']['input'];
   subtitleLanguage?: InputMaybe<Scalars['String']['input']>;
+  subtitleTitle?: InputMaybe<Scalars['String']['input']>;
 };
 
 export type TranscodeConfig = {

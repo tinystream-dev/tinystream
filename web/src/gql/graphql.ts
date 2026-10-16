@@ -507,7 +507,10 @@ export type TracksInput = {
   audio?: number | null | undefined;
   audioLanguage?: string | null | undefined;
   subtitle?: string | null | undefined;
+  subtitleCodec?: string | null | undefined;
+  subtitleForced?: boolean;
   subtitleLanguage?: string | null | undefined;
+  subtitleTitle?: string | null | undefined;
 };
 
 export type TranscodeConfigInput = {

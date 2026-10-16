@@ -1005,7 +1005,7 @@ input NewRoom {
 	videoId: Int!
 	position: Float! = 0.0
 	paused: Boolean! = false
-	tracks: TracksInput! = {audio: null, audioLanguage: null, subtitle: null, subtitleLanguage: null}
+	tracks: TracksInput! = {audio: null, audioLanguage: null, subtitle: null, subtitleLanguage: null, subtitleTitle: null, subtitleForced: false, subtitleCodec: null}
 	public: Boolean! = false
 }
 
@@ -1946,6 +1946,9 @@ input TracksInput {
 	audioLanguage: String
 	subtitle: String
 	subtitleLanguage: String
+	subtitleTitle: String
+	subtitleForced: Boolean! = false
+	subtitleCodec: String
 }
 
 type TranscodeConfig {

@@ -84,6 +84,10 @@ pub struct TracksInput {
 
     subtitle: Option<String>,
     subtitle_language: Option<String>,
+    subtitle_title: Option<String>,
+    #[graphql(default)]
+    subtitle_forced: bool,
+    subtitle_codec: Option<String>,
 }
 
 #[derive(InputObject)]
@@ -208,6 +212,9 @@ impl RoomMutation {
                         audio_language: t.audio_language,
                         subtitle: t.subtitle,
                         subtitle_language: t.subtitle_language,
+                        subtitle_title: t.subtitle_title,
+                        subtitle_forced: t.subtitle_forced,
+                        subtitle_codec: t.subtitle_codec,
                     },
                     position,
                     paused: input.paused,

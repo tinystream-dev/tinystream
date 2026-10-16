@@ -38,7 +38,7 @@ import { ClipEditor } from './ClipEditor'
 import { StreamEngine, plan } from './engine'
 import { type RoomContext, RoomButton, RoomNotices, TapToJoin, controlledBy, useRoomSnapshot } from './Room'
 import { SubtitleRenderer } from './subtitles'
-import { canControl, pickShared } from './sync'
+import { canControl, pickShared, roomSubtitle, sameSubtitle, subtitleChoice, type SubtitleChoice } from './sync'
 
 type Quality = 'auto' | 1080 | 720 | 480
 
@@ -57,11 +57,25 @@ export const pref = {
   set: (k: string, v: string) => localStorage.setItem(`tinystream.${k}`, v),
 }
 
+function readChoice(k: string): SubtitleChoice | 'off' | null {
+  const v = pref.get(k)
+  if (!v) return null
+  if (v === 'off') return v
+  try {
+    return JSON.parse(v) as SubtitleChoice
+  } catch {
+    return null
+  }
+}
+
+/** The subtitles picked last for this show, or anywhere when it's new. */
 function defaultSubtitle(pb: Playback): string | null {
   const usable = pb.media.subtitles.filter((s) => s.supported)
-  if (!usable.length || pref.get('subtitles') === 'off') return null
+  const choice = readChoice(`subtitles.${pb.title.id}`) ?? readChoice('subtitleTrack')
+  if (!usable.length || choice === 'off' || (!choice && pref.get('subtitles') === 'off')) return null
   const lang = pref.get('subtitleLanguage')
   return (
+    (choice && sameSubtitle(usable, choice)) ||
     (lang && usable.find((s) => s.language === lang && !s.forced)?.id) ||
     usable.find((s) => s.default)?.id ||
     usable.find((s) => !s.forced)?.id ||
@@ -270,13 +284,15 @@ export function Player({ mediaId, room, editClip, startAt }: { mediaId: number; 
     if (!room || !pb || !rs || !shared) return
     const audio = change.audio !== undefined ? change.audio : shared.audio
     const sub = change.subtitle !== undefined ? change.subtitle : shared.subtitle
+    const track = pb.media.subtitles.find((s) => s.id === sub)
     room.client.setTracks({
+      // Kept while off, so turning them back on finds the same track.
+      ...rs.tracks,
+      ...(track && roomSubtitle(track)),
       mediaId: pb.id,
       audio,
       audioLanguage: pb.media.audio.find((a) => a.index === audio)?.language ?? null,
       subtitle: sub,
-      // Kept while off, so turning them back on finds the same language.
-      subtitleLanguage: sub ? (pb.media.subtitles.find((s) => s.id === sub)?.language ?? null) : rs.tracks.subtitleLanguage,
     })
   }
   const chooseAudio = (index: number) => {
@@ -292,8 +308,13 @@ export function Player({ mediaId, room, editClip, startAt }: { mediaId: number; 
   const chooseSubtitle = (id: string | null) => {
     setSubtitle(id)
     pref.set('subtitles', id ? 'on' : 'off')
-    const lang = id && pb?.media.subtitles.find((s) => s.id === id)?.language
-    if (lang) pref.set('subtitleLanguage', lang)
+    const track = id ? pb?.media.subtitles.find((s) => s.id === id) : null
+    if (track?.language) pref.set('subtitleLanguage', track.language)
+    if (pb) {
+      const choice = track ? JSON.stringify(subtitleChoice(track)) : 'off'
+      pref.set(`subtitles.${pb.title.id}`, choice)
+      if (track) pref.set('subtitleTrack', choice)
+    }
     if (room) {
       setOwnSubtitle(scope === 'me')
       if (scope === 'everyone') shareTracks({ subtitle: id })
@@ -541,7 +562,7 @@ export function Player({ mediaId, room, editClip, startAt }: { mediaId: number; 
               audio: audioIndex ?? null,
               audioLanguage: pb.media.audio.find((a) => a.index === audioIndex)?.language ?? null,
               subtitle,
-              subtitleLanguage: pb.media.subtitles.find((s) => s.id === subtitle)?.language ?? null,
+              ...roomSubtitle(pb.media.subtitles.find((s) => s.id === subtitle)),
             },
           },
         })
