@@ -174,13 +174,13 @@ impl Media {
         titles
     }
 
-    fn sequel(&self) -> Option<i64> {
-        let sequels = || self.relations.iter().flat_map(|r| &r.edges).filter(|e| e.relation_type == "SEQUEL");
+    fn related(&self, relation: &str) -> Option<i64> {
+        let edges = || self.relations.iter().flat_map(|r| &r.edges).filter(|e| e.relation_type == relation);
 
-        sequels().find(|e| is_series(e.node.format.as_deref())).map(|e| e.node.id).or_else(|| {
-            sequels()
+        edges().find(|e| is_series(e.node.format.as_deref())).map(|e| e.node.id).or_else(|| {
+            edges()
                 .flat_map(|e| e.node.relations.iter().flat_map(|r| &r.edges))
-                .find(|e| e.relation_type == "SEQUEL" && is_series(e.node.format.as_deref()))
+                .find(|e| e.relation_type == relation && is_series(e.node.format.as_deref()))
                 .map(|e| e.node.id)
         })
     }
@@ -425,7 +425,7 @@ impl Client {
             }
 
             let entry = self.entry(id).await?;
-            next = entry.media.sequel();
+            next = entry.media.related("SEQUEL");
             let episodes = entry.media.episodes;
 
             match seasons.last_mut() {
@@ -450,6 +450,35 @@ impl Client {
 
         share_streaming(&mut seasons);
         Ok(seasons)
+    }
+
+    pub async fn first_season(&self, id: &str) -> anyhow::Result<Candidate> {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "PascalCase")]
+
+        struct Data {
+            media: Media,
+        }
+
+        let q = format!(
+            "query ($id: Int) {{ Media(id: $id) {{ {SEARCH_FIELDS}
+                relations {{ edges {{ relationType node {{ id format relations {{ edges {{ relationType node {{ id format }} }} }} }} }} }} }} }}"
+        );
+
+        let mut id: i64 = id.parse().context("AniList ids are numbers")?;
+        let mut seen = HashSet::from([id]);
+
+        loop {
+            let data: Data = self.query(&q, json!({ "id": id })).await?;
+            let m = data.media;
+
+            match m.related("PREQUEL") {
+                Some(prequel) if is_series(m.format.as_deref()) && seen.insert(prequel) && seen.len() <= 40 => {
+                    id = prequel
+                },
+                _ => return Ok(m.candidate()),
+            }
+        }
     }
 
     pub async fn search(&self, kind: ItemKind, query: &str) -> anyhow::Result<Vec<Candidate>> {

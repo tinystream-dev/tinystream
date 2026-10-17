@@ -136,30 +136,31 @@ pub struct NewSeries {
     pub profile: Option<String>,
 }
 
-pub async fn create(state: &Arc<AppState>, new: NewSeries) -> anyhow::Result<i64> {
+pub async fn create(state: &Arc<AppState>, mut new: NewSeries) -> anyhow::Result<i64> {
     let config = state.config.current();
     let library = config.library(&new.library).context("no such library")?;
     let root = library.resolved_path(state.config.config_dir())?;
+    let mut found = find(state, &new).await?;
+    let mut stale = false;
 
-    let existing: Option<(i64,)> =
-        sqlx::query_as("SELECT id FROM items WHERE provider = ? AND provider_id = ? AND library = ?")
-            .bind(new.provider.as_str())
-            .bind(&new.provider_id)
-            .bind(&new.library)
-            .fetch_optional(&state.db)
-            .await?;
+    if found.is_none() {
+        match state.metadata.first_season(new.provider, &new.provider_id).await {
+            Ok(Some(first)) if first.id != new.provider_id => {
+                new.provider_id = first.id;
+                new.title = first.title;
+                new.year = first.year;
+                new.poster = first.poster.or(new.poster);
+                new.overview = first.overview;
+                found = find(state, &new).await?;
+                stale = found.is_some();
+            },
+            Ok(_) => {},
+            Err(e) => tracing::warn!("first season of {}: {e:#}", new.title),
+        }
+    }
 
-    let id = if let Some((item,)) = existing {
-        ensure_for_item(state, item).await?
-    } else if let Some(row) =
-        sqlx::query_as::<_, (i64,)>("SELECT id FROM series WHERE provider = ? AND provider_id = ? AND library = ?")
-            .bind(new.provider.as_str())
-            .bind(&new.provider_id)
-            .bind(&new.library)
-            .fetch_optional(&state.db)
-            .await?
-    {
-        row.0
+    let id = if let Some(id) = found {
+        id
     } else {
         let years = naming::library_uses_years(&state.db, &new.library).await?;
         let mut folder = naming::sanitize(&new.title);
@@ -196,7 +197,50 @@ pub async fn create(state: &Arc<AppState>, new: NewSeries) -> anyhow::Result<i64
         .await?;
 
     set_monitor(state, id, monitor).await?;
+
+    // The show is here but its schedule predates the season that was asked for.
+    if stale {
+        let state = state.clone();
+
+        tokio::spawn(async move {
+            if let Err(e) = refresh_schedule(&state, id).await {
+                tracing::warn!("schedule for series {id}: {e:#}");
+            }
+        });
+    }
+
     Ok(id)
+}
+
+/// The show `new` belongs to in its library, if it's already there, by its own id or any of its
+/// seasons'.
+async fn find(state: &Arc<AppState>, new: &NewSeries) -> anyhow::Result<Option<i64>> {
+    let item: Option<i64> = sqlx::query_scalar(
+        "SELECT i.id FROM items i WHERE i.provider = ?1 AND i.library = ?3 AND i.kind = 'show' AND (i.provider_id = ?2
+            OR EXISTS (SELECT 1 FROM seasons s, json_each(s.provider_ids) WHERE s.item_id = i.id AND value = ?2))
+         LIMIT 1",
+    )
+    .bind(new.provider.as_str())
+    .bind(&new.provider_id)
+    .bind(&new.library)
+    .fetch_optional(&state.db)
+    .await?;
+
+    if let Some(item) = item {
+        return Ok(Some(ensure_for_item(state, item).await?));
+    }
+
+    Ok(sqlx::query_scalar(
+        "SELECT s.id FROM series s WHERE s.provider = ?1 AND s.library = ?3 AND (s.provider_id = ?2 OR EXISTS (
+            SELECT 1 FROM series_seasons ss WHERE ss.series_id = s.id AND (ss.provider_id = ?2
+                OR EXISTS (SELECT 1 FROM json_each(ss.parts) WHERE json_extract(value, '$.provider_id') = ?2))))
+         LIMIT 1",
+    )
+    .bind(new.provider.as_str())
+    .bind(&new.provider_id)
+    .bind(&new.library)
+    .fetch_optional(&state.db)
+    .await?)
 }
 
 fn unique_path(p: &Path) -> PathBuf {

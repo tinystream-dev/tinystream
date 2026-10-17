@@ -168,6 +168,10 @@ impl MetadataService {
         unavailable()
     }
 
+    pub async fn first_season(&self, _provider: Provider, _id: &str) -> anyhow::Result<Option<Candidate>> {
+        Ok(None)
+    }
+
     pub async fn search(
         &self,
         _state: &AppState,
@@ -252,6 +256,13 @@ impl MetadataService {
 
                 Ok(schedule)
             },
+        }
+    }
+
+    pub async fn first_season(&self, provider: Provider, id: &str) -> anyhow::Result<Option<Candidate>> {
+        match provider {
+            Provider::Anilist => Ok(Some(self.anilist.first_season(id).await?)),
+            Provider::Tmdb => Ok(None),
         }
     }
 
