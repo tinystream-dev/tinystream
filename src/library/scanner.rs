@@ -400,6 +400,10 @@ async fn scan_library(state: &Arc<AppState>, name: &str) -> anyhow::Result<()> {
         return super::music::scan(state, name, &root, download_dirs(state, &config)).await;
     }
 
+    if library.is_books() {
+        return super::books::scan(state, name, &root, download_dirs(state, &config)).await;
+    }
+
     let started = std::time::Instant::now();
 
     let walk = {

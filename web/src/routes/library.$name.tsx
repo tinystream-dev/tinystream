@@ -7,9 +7,10 @@ import { Empty, Page, PageTitle } from '../components/Page'
 import { Poster } from '../components/Poster'
 import { PosterGrid } from '../components/PosterGrid'
 import { PosterGridSkeleton } from '../components/Skeleton'
-import { Squircle } from '../components/Squircle'
+import { Chip } from '../components/ui'
 import { graphql } from '../gql'
 import { type Card, librariesQuery, request } from '../lib/api'
+import { BookLibrary } from '../books/Library'
 import { MusicLibrary } from '../music/Library'
 import { useTitle } from '../lib/title'
 
@@ -50,6 +51,7 @@ function LibraryPage() {
   const lib = libraries?.find((l) => l.name === name)
   useTitle(name)
   if (lib?.kind === 'MUSIC') return <MusicLibrary key={name} name={name} albums={lib.albumCount} tracks={lib.trackCount} />
+  if (lib?.kind === 'BOOKS') return <BookLibrary key={name} name={name} />
   return <VideoLibrary name={name} />
 }
 
@@ -100,19 +102,5 @@ function VideoLibrary({ name }: { name: string }) {
         <PosterGridSkeleton />
       )}
     </Page>
-  )
-}
-
-function Chip({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
-  return (
-    <Squircle
-      as="button"
-      radius={9}
-      onClick={onClick}
-      aria-pressed={active}
-      className={`h-7.5 px-3 text-[13px] transition-colors ${active ? 'bg-press text-ink' : 'text-ink-2 hover:bg-hover hover:text-ink'}`}
-    >
-      {children}
-    </Squircle>
   )
 }

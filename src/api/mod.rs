@@ -4,6 +4,7 @@ mod appearance;
 mod auth;
 #[cfg(feature = "torrent")]
 mod automation;
+mod books;
 mod clips;
 mod discovery;
 mod events;
@@ -35,6 +36,7 @@ use axum::routing::get;
 use axum::{Json, Router};
 use schema::{AppSchema, Session};
 use serde_json::json;
+use tower_http::compression::CompressionLayer;
 
 use crate::auth::{token_from, user_from_token};
 use crate::state::AppState;
@@ -79,6 +81,10 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/listen/{code}/tracks/{id}/stream", get(listen::stream))
         .route("/listen/{code}/tracks/{id}/cover", get(listen::cover))
         .route("/listen/{code}/avatars/{user}", get(listen::avatar))
+        .route("/books/{id}/content", get(books::content).layer(CompressionLayer::new()))
+        .route("/books/{id}/files/{*name}", get(books::resource))
+        .route("/books/{id}/cover", get(books::cover))
+        .route("/books/{id}/file", get(books::file))
         .route("/clips/still/{media}", get(clips::still))
         .route("/clips/{id}/video", get(clips::file))
         .route("/clips/{id}/image", get(clips::file))

@@ -148,6 +148,86 @@ input AutomationConfigInput {
 	renameSuggestions: Boolean!
 }
 
+type Book {
+	id: Int!
+	library: String!
+	title: String!
+	sortTitle: String!
+	authors: [String!]!
+	series: String
+	seriesIndex: Float
+	"""
+	The book's own, or else what was found online.
+	"""
+	description: String
+	publisher: String
+	"""
+	A date, or just a year.
+	"""
+	published: String
+	year: Int
+	language: String
+	isbn: String
+	genres: [String!]!
+	format: BookFormat!
+	"""
+	Characters of text, which reading positions count in.
+	"""
+	length: Int!
+	chapterCount: Int!
+	"""
+	Pages in print, when that was found online.
+	"""
+	pages: Int
+	"""
+	Out of 10.
+	"""
+	rating: Float
+	size: Int!
+	addedAt: Int!
+	"""
+	Where what the book doesn't say came from: `apple-books` or `open-library`.
+	"""
+	provider: String
+	"""
+	The page about it where its details came from.
+	"""
+	providerUrl: String
+	"""
+	Whether it's been looked up online yet.
+	"""
+	fetched: Boolean!
+	cover: String
+	"""
+	The most vivid colour of the cover as "r g b", empty until it's been worked out.
+	"""
+	coverTint: String
+	"""
+	The text, as the readers show it: JSON, as `packages/shared/src/books.ts` describes it.
+	"""
+	content: String!
+	"""
+	Where the pictures in `content` are, each at this followed by its `src`.
+	"""
+	files: String!
+	"""
+	The file as it is.
+	"""
+	file: String!
+	reading: ReadingState
+}
+
+enum BookFormat {
+	EPUB
+	FB2
+	TXT
+}
+
+type BookShelf {
+	library: String!
+	books: [Book!]!
+}
+
 type CalendarEntry {
 	seriesId: Int!
 	title: Title
@@ -668,6 +748,7 @@ type Library {
 	kind: LibraryKind!
 	albumCount: Int!
 	trackCount: Int!
+	bookCount: Int!
 	showCount: Int!
 	movieCount: Int!
 	titles: [Title!]!
@@ -690,6 +771,7 @@ input LibraryInput {
 enum LibraryKind {
 	VIDEO
 	MUSIC
+	BOOKS
 }
 
 type ListChanged {
@@ -874,6 +956,18 @@ type Mutation {
 	deletePlaylist(id: Int!): Boolean!
 	createAppPassword(name: String!): NewAppPassword!
 	deleteAppPassword(id: Int!): Boolean!
+	"""
+	Where someone is in a book, in characters of its `length`; reaching the end finishes it.
+	"""
+	saveReading(id: Int!, position: Int!): Book!
+	"""
+	Marks a book read, or not started (which forgets where it was left).
+	"""
+	setBookFinished(id: Int!, finished: Boolean!): Book!
+	"""
+	Looks the book up online again.
+	"""
+	refreshBook(id: Int!): Book!
 	startRoom(input: NewRoom!): Room!
 	startListenRoom(input: NewListenRoom!): ListenRoom!
 	createClip(input: NewClip!): Clip!
@@ -1317,6 +1411,19 @@ type Query {
 	"""
 	similarTracks(trackId: Int!, count: Int! = 25, exclude: [Int!]! = []): [Track!]!
 	appPasswords: [AppPassword!]!
+	"""
+	A book library's books, a series' volumes together.
+	"""
+	books(library: String!): [Book!]!
+	book(id: Int!): Book
+	"""
+	Books part read, the latest first.
+	"""
+	readingNow(limit: Int! = 16): [Book!]!
+	"""
+	The books added last to each book library.
+	"""
+	newBooks(limit: Int! = 24): [BookShelf!]!
 	discover(library: String, query: String): Discovery!
 	airedEpisodes(provider: Provider!, id: String!): Int!
 	forYou(library: String): ForYou!
@@ -1368,6 +1475,19 @@ input QueueInput {
 	position: Float!
 	shuffled: Boolean! = false
 	repeat: Repeat! = OFF
+}
+
+type ReadingState {
+	"""
+	Characters in, of the book's `length`.
+	"""
+	position: Int!
+	"""
+	From 0 to 1.
+	"""
+	progress: Float!
+	finished: Boolean!
+	updatedAt: Int!
 }
 
 input RecipeInput {

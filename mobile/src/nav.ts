@@ -26,6 +26,10 @@ export function place(link: string): { tab?: Tab; path: Place; root?: boolean } 
       return parts[1] ? { path: `title/${parts[1]}` } : null
     case 'watch':
       return parts[1] ? { path: `watch/${parts[1]}`, root: true } : null
+    case 'book':
+      return parts[1] ? { path: `book/${parts[1]}` } : null
+    case 'read':
+      return parts[1] ? { path: `read/${parts[1]}`, root: true } : null
     case 'library':
       return { tab: '(library)', path: parts[1] ? `library?name=${encodeURIComponent(parts[1])}` : 'library' }
     case 'discover':
@@ -88,6 +92,13 @@ export function useWatch() {
   const router = useRouter()
   const leave = useLeave()
   return useCallback((id: number) => leave(() => router.push(`/watch/${id}` as Href)), [router, leave])
+}
+
+/** Opens the reader on a book. */
+export function useRead() {
+  const router = useRouter()
+  const leave = useLeave()
+  return useCallback((id: number) => leave(() => router.push(`/read/${id}` as Href)), [router, leave])
 }
 
 /** Follows a server link (a notification's) wherever it leads in the app. */

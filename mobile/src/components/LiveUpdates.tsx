@@ -71,7 +71,7 @@ export function LiveUpdates() {
         switch (e.__typename) {
           case 'LibraryChanged':
           case 'ScanFinished':
-            invalidate(['home'], ['libraries'], ['library', e.library], ['settings'], ['music'])
+            invalidate(['home'], ['libraries'], ['library', e.library], ['settings'], ['music'], ['books', 'library', e.library], ['books', 'home'], ['books', 'book'])
             break
           case 'MetadataChanged':
             if (e.status !== 'FETCHING') invalidate(['item', e.titleId], ['home'], ['library'])

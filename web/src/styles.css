@@ -811,3 +811,8 @@
   filter: blur(6px) brightness(0.55) saturate(0.85);
   transform: scale(1.015);
 }
+
+/* Selected text in a book is read again or copied out, so it's easier to see there. */
+.reader-text ::selection {
+  background: color-mix(in oklab, var(--color-selection) 80%, var(--color-ink));
+}

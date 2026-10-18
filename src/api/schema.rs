@@ -9,6 +9,7 @@ use super::appearance::{AppearanceMutation, AppearanceQuery};
 use super::auth::{AuthMutation, AuthQuery};
 #[cfg(feature = "torrent")]
 use super::automation::{AutomationMutation, AutomationQuery};
+use super::books::{BookMutation, BookQuery};
 use super::clips::{ClipMutation, ClipQuery};
 use super::discovery::DiscoveryQuery;
 use super::events::EventSubscription;
@@ -31,6 +32,7 @@ pub struct Query(
     UserQuery,
     LibraryQuery,
     MusicQuery,
+    BookQuery,
     DiscoveryQuery,
     RoomQuery,
     ListenQuery,
@@ -48,6 +50,7 @@ pub struct Query(
     UserQuery,
     LibraryQuery,
     MusicQuery,
+    BookQuery,
     DiscoveryQuery,
     RoomQuery,
     ListenQuery,
@@ -64,6 +67,7 @@ pub struct Mutation(
     UserMutation,
     LibraryMutation,
     MusicMutation,
+    BookMutation,
     RoomMutation,
     ListenMutation,
     ClipMutation,
@@ -80,6 +84,7 @@ pub struct Mutation(
     UserMutation,
     LibraryMutation,
     MusicMutation,
+    BookMutation,
     RoomMutation,
     ListenMutation,
     ClipMutation,

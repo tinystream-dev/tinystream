@@ -23,6 +23,7 @@ mod api;
 mod auth;
 #[cfg(feature = "torrent")]
 mod automation;
+mod books;
 mod cli;
 mod clips;
 mod config;
@@ -221,6 +222,7 @@ async fn serve(paths: Paths) -> anyhow::Result<()> {
         together: Default::default(),
         clips: Default::default(),
         music: Default::default(),
+        books: Default::default(),
         tints: Default::default(),
     });
 
@@ -228,6 +230,7 @@ async fn serve(paths: Paths) -> anyhow::Result<()> {
     library::scanner::spawn_triggers(state.clone());
     metadata::spawn_worker(state.clone());
     music::spawn(state.clone());
+    books::spawn(state.clone());
 
     #[cfg(feature = "torrent")]
     automation::spawn(state.clone());

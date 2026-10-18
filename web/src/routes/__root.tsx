@@ -125,7 +125,7 @@ function useLiveUpdates(enabled: boolean) {
         switch (e.__typename) {
           case 'LibraryChanged':
           case 'ScanFinished':
-            invalidate(['home'], ['libraries'], ['library', e.library], ['settings'], ['music'])
+            invalidate(['home'], ['libraries'], ['library', e.library], ['settings'], ['music'], ['books', 'library', e.library], ['books', 'home'], ['books', 'book'])
             break
           case 'QueueChanged':
             // Another app moved the queue on; follow it unless we're the ones playing.

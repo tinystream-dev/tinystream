@@ -669,3 +669,44 @@ fragment PlaylistCard on Playlist {
     username
   }
 }
+
+fragment BookCard on Book {
+  id
+  library
+  title
+  authors
+  series
+  seriesIndex
+  year
+  cover
+  length
+  addedAt
+  reading {
+    position
+    progress
+    finished
+    updatedAt
+  }
+}
+
+fragment BookDetail on Book {
+  ...BookCard
+  description
+  publisher
+  published
+  language
+  isbn
+  genres
+  format
+  chapterCount
+  pages
+  rating
+  size
+  provider
+  providerUrl
+  fetched
+  coverTint
+  content
+  files
+  file
+}

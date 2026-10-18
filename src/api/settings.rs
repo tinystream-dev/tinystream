@@ -114,7 +114,8 @@ impl Settings {
             let resolved = lib.resolved_path(config_dir);
 
             let (title_count, skipped_count): (i64, i64) = sqlx::query_as(
-                "SELECT (SELECT COUNT(*) FROM items WHERE library = ?1) + (SELECT COUNT(*) FROM albums WHERE library = ?1),
+                "SELECT (SELECT COUNT(*) FROM items WHERE library = ?1) + (SELECT COUNT(*) FROM albums WHERE library = ?1)
+                        + (SELECT COUNT(*) FROM books WHERE library = ?1),
                         (SELECT COUNT(*) FROM skipped WHERE library = ?1)",
             )
             .bind(&lib.name)

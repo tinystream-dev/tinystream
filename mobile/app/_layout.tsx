@@ -72,6 +72,7 @@ function App() {
         <Stack.Screen name="(tabs)" />
         <Stack.Screen name="debug" />
         <Stack.Screen name="watch/[id]" options={{ animation: 'fade_from_bottom' }} />
+        <Stack.Screen name="read/[id]" options={{ animation: 'fade_from_bottom' }} />
       </Stack.Protected>
       <Stack.Screen name="sign-in" />
       <Stack.Screen name="open" />

@@ -30,6 +30,11 @@ export type AutomationConfigInput = {
   rssInterval: string;
 };
 
+export type BookFormat =
+  | 'EPUB'
+  | 'FB2'
+  | 'TXT';
+
 export type ChangedList =
   | 'APPEARANCE'
   | 'DOWNLOADS'
@@ -158,6 +163,7 @@ export type LibraryInput = {
 };
 
 export type LibraryKind =
+  | 'BOOKS'
   | 'MUSIC'
   | 'VIDEO';
 
@@ -572,6 +578,52 @@ export type AlbumCardFragment = { id: number, name: string, artist: string, year
 export type ArtistCardFragment = { id: number, name: string, albumCount: number, trackCount: number, cover: string | null, starred: boolean };
 
 export type PlaylistCardFragment = { id: number, name: string, comment: string | null, public: boolean, mine: boolean, trackCount: number, duration: number, covers: Array<string>, owner: { id: number, username: string } };
+
+export type BookCardFragment = { id: number, library: string, title: string, authors: Array<string>, series: string | null, seriesIndex: number | null, year: number | null, cover: string | null, length: number, addedAt: number, reading: { position: number, progress: number, finished: boolean, updatedAt: number } | null };
+
+export type BookDetailFragment = { description: string | null, publisher: string | null, published: string | null, language: string | null, isbn: string | null, genres: Array<string>, format: BookFormat, chapterCount: number, pages: number | null, rating: number | null, size: number, provider: string | null, providerUrl: string | null, fetched: boolean, coverTint: string | null, content: string, files: string, file: string, id: number, library: string, title: string, authors: Array<string>, series: string | null, seriesIndex: number | null, year: number | null, cover: string | null, length: number, addedAt: number, reading: { position: number, progress: number, finished: boolean, updatedAt: number } | null };
+
+export type BooksQueryVariables = Exact<{
+  library: string;
+}>;
+
+
+export type BooksQuery = { books: Array<{ id: number, library: string, title: string, authors: Array<string>, series: string | null, seriesIndex: number | null, year: number | null, cover: string | null, length: number, addedAt: number, reading: { position: number, progress: number, finished: boolean, updatedAt: number } | null }> };
+
+export type BookQueryVariables = Exact<{
+  id: number;
+}>;
+
+
+export type BookQuery = { book: { description: string | null, publisher: string | null, published: string | null, language: string | null, isbn: string | null, genres: Array<string>, format: BookFormat, chapterCount: number, pages: number | null, rating: number | null, size: number, provider: string | null, providerUrl: string | null, fetched: boolean, coverTint: string | null, content: string, files: string, file: string, id: number, library: string, title: string, authors: Array<string>, series: string | null, seriesIndex: number | null, year: number | null, cover: string | null, length: number, addedAt: number, reading: { position: number, progress: number, finished: boolean, updatedAt: number } | null } | null };
+
+export type ReadingNowQueryVariables = Exact<{ [key: string]: never; }>;
+
+
+export type ReadingNowQuery = { readingNow: Array<{ id: number, library: string, title: string, authors: Array<string>, series: string | null, seriesIndex: number | null, year: number | null, cover: string | null, length: number, addedAt: number, reading: { position: number, progress: number, finished: boolean, updatedAt: number } | null }>, newBooks: Array<{ library: string, books: Array<{ id: number, library: string, title: string, authors: Array<string>, series: string | null, seriesIndex: number | null, year: number | null, cover: string | null, length: number, addedAt: number, reading: { position: number, progress: number, finished: boolean, updatedAt: number } | null }> }> };
+
+export type SaveReadingMutationVariables = Exact<{
+  id: number;
+  position: number;
+}>;
+
+
+export type SaveReadingMutation = { saveReading: { id: number, reading: { position: number, progress: number, finished: boolean, updatedAt: number } | null } };
+
+export type SetBookFinishedMutationVariables = Exact<{
+  id: number;
+  finished: boolean;
+}>;
+
+
+export type SetBookFinishedMutation = { setBookFinished: { id: number, reading: { position: number, progress: number, finished: boolean, updatedAt: number } | null } };
+
+export type RefreshBookMutationVariables = Exact<{
+  id: number;
+}>;
+
+
+export type RefreshBookMutation = { refreshBook: { id: number } };
 
 export type ColorSchemesQueryVariables = Exact<{ [key: string]: never; }>;
 
@@ -1068,7 +1120,7 @@ export type LookForAgainMutation = { lookForAgain: boolean };
 export type LibrariesQueryVariables = Exact<{ [key: string]: never; }>;
 
 
-export type LibrariesQuery = { libraries: Array<{ name: string, kind: LibraryKind, showCount: number, movieCount: number, albumCount: number, trackCount: number }> };
+export type LibrariesQuery = { libraries: Array<{ name: string, kind: LibraryKind, showCount: number, movieCount: number, albumCount: number, trackCount: number, bookCount: number }> };
 
 export type SettingsQueryVariables = Exact<{ [key: string]: never; }>;
 
@@ -2510,6 +2562,66 @@ export const PlaylistCardFragmentDoc = new TypedDocumentString(`
   }
 }
     `, {"fragmentName":"PlaylistCard"}) as unknown as TypedDocumentString<PlaylistCardFragment, unknown>;
+export const BookCardFragmentDoc = new TypedDocumentString(`
+    fragment BookCard on Book {
+  id
+  library
+  title
+  authors
+  series
+  seriesIndex
+  year
+  cover
+  length
+  addedAt
+  reading {
+    position
+    progress
+    finished
+    updatedAt
+  }
+}
+    `, {"fragmentName":"BookCard"}) as unknown as TypedDocumentString<BookCardFragment, unknown>;
+export const BookDetailFragmentDoc = new TypedDocumentString(`
+    fragment BookDetail on Book {
+  ...BookCard
+  description
+  publisher
+  published
+  language
+  isbn
+  genres
+  format
+  chapterCount
+  pages
+  rating
+  size
+  provider
+  providerUrl
+  fetched
+  coverTint
+  content
+  files
+  file
+}
+    fragment BookCard on Book {
+  id
+  library
+  title
+  authors
+  series
+  seriesIndex
+  year
+  cover
+  length
+  addedAt
+  reading {
+    position
+    progress
+    finished
+    updatedAt
+  }
+}`, {"fragmentName":"BookDetail"}) as unknown as TypedDocumentString<BookDetailFragment, unknown>;
 export const SchemeFieldsFragmentDoc = new TypedDocumentString(`
     fragment SchemeFields on ColorScheme {
   id
@@ -2593,6 +2705,138 @@ fragment NotificationFields on Notification {
   expiresAt
   readAt
 }`, {"fragmentName":"InboxFields"}) as unknown as TypedDocumentString<InboxFieldsFragment, unknown>;
+export const BooksDocument = new TypedDocumentString(`
+    query Books($library: String!) {
+  books(library: $library) {
+    ...BookCard
+  }
+}
+    fragment BookCard on Book {
+  id
+  library
+  title
+  authors
+  series
+  seriesIndex
+  year
+  cover
+  length
+  addedAt
+  reading {
+    position
+    progress
+    finished
+    updatedAt
+  }
+}`) as unknown as TypedDocumentString<BooksQuery, BooksQueryVariables>;
+export const BookDocument = new TypedDocumentString(`
+    query Book($id: Int!) {
+  book(id: $id) {
+    ...BookDetail
+  }
+}
+    fragment BookCard on Book {
+  id
+  library
+  title
+  authors
+  series
+  seriesIndex
+  year
+  cover
+  length
+  addedAt
+  reading {
+    position
+    progress
+    finished
+    updatedAt
+  }
+}
+fragment BookDetail on Book {
+  ...BookCard
+  description
+  publisher
+  published
+  language
+  isbn
+  genres
+  format
+  chapterCount
+  pages
+  rating
+  size
+  provider
+  providerUrl
+  fetched
+  coverTint
+  content
+  files
+  file
+}`) as unknown as TypedDocumentString<BookQuery, BookQueryVariables>;
+export const ReadingNowDocument = new TypedDocumentString(`
+    query ReadingNow {
+  readingNow {
+    ...BookCard
+  }
+  newBooks(limit: 18) {
+    library
+    books {
+      ...BookCard
+    }
+  }
+}
+    fragment BookCard on Book {
+  id
+  library
+  title
+  authors
+  series
+  seriesIndex
+  year
+  cover
+  length
+  addedAt
+  reading {
+    position
+    progress
+    finished
+    updatedAt
+  }
+}`) as unknown as TypedDocumentString<ReadingNowQuery, ReadingNowQueryVariables>;
+export const SaveReadingDocument = new TypedDocumentString(`
+    mutation SaveReading($id: Int!, $position: Int!) {
+  saveReading(id: $id, position: $position) {
+    id
+    reading {
+      position
+      progress
+      finished
+      updatedAt
+    }
+  }
+}
+    `) as unknown as TypedDocumentString<SaveReadingMutation, SaveReadingMutationVariables>;
+export const SetBookFinishedDocument = new TypedDocumentString(`
+    mutation SetBookFinished($id: Int!, $finished: Boolean!) {
+  setBookFinished(id: $id, finished: $finished) {
+    id
+    reading {
+      position
+      progress
+      finished
+      updatedAt
+    }
+  }
+}
+    `) as unknown as TypedDocumentString<SetBookFinishedMutation, SetBookFinishedMutationVariables>;
+export const RefreshBookDocument = new TypedDocumentString(`
+    mutation RefreshBook($id: Int!) {
+  refreshBook(id: $id) {
+    id
+  }
+}
+    `) as unknown as TypedDocumentString<RefreshBookMutation, RefreshBookMutationVariables>;
 export const ColorSchemesDocument = new TypedDocumentString(`
     query ColorSchemes {
   colorSchemes {
@@ -3787,6 +4031,7 @@ export const LibrariesDocument = new TypedDocumentString(`
     movieCount
     albumCount
     trackCount
+    bookCount
   }
 }
     `) as unknown as TypedDocumentString<LibrariesQuery, LibrariesQueryVariables>;

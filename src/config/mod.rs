@@ -278,6 +278,7 @@ pub enum LibraryKind {
     #[default]
     Video,
     Music,
+    Books,
 }
 
 impl LibraryKind {
@@ -289,6 +290,7 @@ impl LibraryKind {
         match self {
             LibraryKind::Video => "video",
             LibraryKind::Music => "music",
+            LibraryKind::Books => "books",
         }
     }
 }
@@ -296,6 +298,10 @@ impl LibraryKind {
 impl Library {
     pub fn is_music(&self) -> bool {
         self.kind == LibraryKind::Music
+    }
+
+    pub fn is_books(&self) -> bool {
+        self.kind == LibraryKind::Books
     }
 
     pub fn resolved_path(&self, config_dir: &Path) -> anyhow::Result<PathBuf> {
@@ -610,9 +616,10 @@ impl Config {
                 return Err(format!("library {name:?} needs a `path`"));
             }
 
-            if lib.is_music() && (lib.managed || lib.metadata_provider.is_some() || lib.profile.is_some()) {
+            if !lib.kind.is_video() && (lib.managed || lib.metadata_provider.is_some() || lib.profile.is_some()) {
                 return Err(format!(
-                    "library {name:?} is a music library; `managed`, `metadata-provider` and `profile` are for video"
+                    "library {name:?} is a {} library; `managed`, `metadata-provider` and `profile` are for video",
+                    lib.kind.as_str()
                 ));
             }
         }
@@ -760,6 +767,14 @@ port = 3000
 # name = "Music"
 # path = "~/Music"
 # kind = "music"
+#
+# Books (EPUB, FB2 and plain text) are read from the files themselves, with
+# what's missing looked up on Google Books and Open Library:
+#
+# [[library]]
+# name = "Novels"
+# path = "~/Books"
+# kind = "books"
 
 # Downloads (Settings → Downloads and Sources in the UI). tinystream ships
 # with no sources; add the ones you use:

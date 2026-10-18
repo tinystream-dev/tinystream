@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { createFileRoute, useNavigate } from '@tanstack/react-router'
 import {
   ArrowDownToLine,
+  BookOpen,
   ChevronRight,
   CircleUser,
   CornerLeftUp,
@@ -326,7 +327,13 @@ function Libraries() {
               onClick={() => setEditing(l)}
               className="flex w-full items-center gap-4 px-3 py-2.5 text-left transition-colors hover:bg-hover"
             >
-              {l.kind === 'MUSIC' ? <Music className="size-4.5 shrink-0 text-ink-3" /> : <Folder className="size-4.5 shrink-0 text-ink-3" />}
+              {l.kind === 'MUSIC' ? (
+                <Music className="size-4.5 shrink-0 text-ink-3" />
+              ) : l.kind === 'BOOKS' ? (
+                <BookOpen className="size-4.5 shrink-0 text-ink-3" />
+              ) : (
+                <Folder className="size-4.5 shrink-0 text-ink-3" />
+              )}
               <div className="min-w-0 flex-1">
                 <p className="text-sm font-medium">{l.name}</p>
                 <p className={`truncate text-xs ${l.exists ? 'text-ink-3' : 'text-danger'}`}>
@@ -335,7 +342,7 @@ function Libraries() {
               </div>
               {l.managed && <span className="shrink-0 rounded-md bg-panel px-1.5 py-0.5 text-2xs text-ink-2">Managed</span>}
               <span className="shrink-0 text-xs text-ink-3 tabular">
-                {l.titleCount} {l.kind === 'MUSIC' ? 'albums' : 'titles'}{l.skippedCount > 0 && `, ${l.skippedCount} skipped`}
+                {l.titleCount} {l.kind === 'MUSIC' ? 'albums' : l.kind === 'BOOKS' ? 'books' : 'titles'}{l.skippedCount > 0 && `, ${l.skippedCount} skipped`}
               </span>
               <ChevronRight className="size-4 shrink-0 text-ink-3" />
             </Squircle>
@@ -359,7 +366,7 @@ function Libraries() {
 function LibraryDialog({ library, onClose, onSaved }: { library: ConfigLibrary | null; onClose: () => void; onSaved: () => void }) {
   const [name, setName] = useState(library?.name ?? '')
   const [path, setPath] = useState(library?.path ?? '')
-  const [kind, setKind] = useState<'VIDEO' | 'MUSIC'>(library?.kind ?? 'VIDEO')
+  const [kind, setKind] = useState<'VIDEO' | 'MUSIC' | 'BOOKS'>(library?.kind ?? 'VIDEO')
   const [provider, setProvider] = useState<'' | Provider>(library?.metadataProvider ?? '')
   const [managed, setManaged] = useState(library?.managed ?? false)
   const [profile, setProfile] = useState(library?.profile ?? '')
@@ -368,13 +375,14 @@ function LibraryDialog({ library, onClose, onSaved }: { library: ConfigLibrary |
   const [browsing, setBrowsing] = useState(!library)
   const [error, setError] = useState<string | null>(null)
   const music = kind === 'MUSIC'
+  const video = kind === 'VIDEO'
   const body = {
     name,
     path,
     kind,
-    metadataProvider: music ? null : provider || null,
-    managed: music ? false : managed,
-    profile: music ? null : profile || null,
+    metadataProvider: video ? provider || null : null,
+    managed: video ? managed : false,
+    profile: video ? profile || null : null,
     downloadPath: downloadPath.trim() || null,
   }
   const save = useMutation({
@@ -394,10 +402,11 @@ function LibraryDialog({ library, onClose, onSaved }: { library: ConfigLibrary |
           options={[
             { value: 'VIDEO', label: 'Shows and movies' },
             { value: 'MUSIC', label: 'Music' },
+            { value: 'BOOKS', label: 'Books' },
           ]}
         />
         <Field label="Name">
-          <Input value={name} onChange={(e) => setName(e.target.value)} placeholder={music ? 'Music' : 'Anime'} autoFocus={!!library} />
+          <Input value={name} onChange={(e) => setName(e.target.value)} placeholder={music ? 'Music' : video ? 'Anime' : 'Novels'} autoFocus={!!library} />
         </Field>
         <Field label="Folder">
           <div className="flex gap-2">
@@ -418,12 +427,16 @@ function LibraryDialog({ library, onClose, onSaved }: { library: ConfigLibrary |
         )}
         {music ? (
           <p className="text-xs leading-relaxed text-ink-3">Albums and artists come from the files' tags, however the folders are laid out.</p>
+        ) : !video ? (
+          <p className="text-xs leading-relaxed text-ink-3">
+            EPUB, FB2 and plain text books, in any folders. What a book doesn't say about itself is looked up on Apple Books and Open Library.
+          </p>
         ) : (
           <Field label="Metadata provider">
             <Select value={provider} options={providers} onChange={setProvider} />
           </Field>
         )}
-        {settings?.downloads && !music && (
+        {settings?.downloads && video && (
           <>
             <Row label="Managed" hint="Off = read-only">
               <Toggle label="Managed" checked={managed} onChange={setManaged} />

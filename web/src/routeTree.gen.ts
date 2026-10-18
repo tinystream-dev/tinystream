@@ -19,9 +19,11 @@ import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as WantedRouteImport } from './routes/wanted'
 import { Route as AlbumIdRouteImport } from './routes/album.$id'
 import { Route as ArtistIdRouteImport } from './routes/artist.$id'
+import { Route as BookIdRouteImport } from './routes/book.$id'
 import { Route as LibraryNameRouteImport } from './routes/library.$name'
 import { Route as ListenCodeRouteImport } from './routes/listen.$code'
 import { Route as PlaylistIdRouteImport } from './routes/playlist.$id'
+import { Route as ReadIdRouteImport } from './routes/read.$id'
 import { Route as TitleIdRouteImport } from './routes/title.$id'
 import { Route as TogetherCodeRouteImport } from './routes/together.$code'
 import { Route as WatchIdRouteImport } from './routes/watch.$id'
@@ -76,6 +78,11 @@ const ArtistIdRoute = ArtistIdRouteImport.update({
   path: '/artist/$id',
   getParentRoute: () => rootRouteImport,
 } as any)
+const BookIdRoute = BookIdRouteImport.update({
+  id: '/book/$id',
+  path: '/book/$id',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const LibraryNameRoute = LibraryNameRouteImport.update({
   id: '/library/$name',
   path: '/library/$name',
@@ -89,6 +96,11 @@ const ListenCodeRoute = ListenCodeRouteImport.update({
 const PlaylistIdRoute = PlaylistIdRouteImport.update({
   id: '/playlist/$id',
   path: '/playlist/$id',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ReadIdRoute = ReadIdRouteImport.update({
+  id: '/read/$id',
+  path: '/read/$id',
   getParentRoute: () => rootRouteImport,
 } as any)
 const TitleIdRoute = TitleIdRouteImport.update({
@@ -118,9 +130,11 @@ export interface FileRoutesByFullPath {
   '/wanted': typeof WantedRoute
   '/album/$id': typeof AlbumIdRoute
   '/artist/$id': typeof ArtistIdRoute
+  '/book/$id': typeof BookIdRoute
   '/library/$name': typeof LibraryNameRoute
   '/listen/$code': typeof ListenCodeRoute
   '/playlist/$id': typeof PlaylistIdRoute
+  '/read/$id': typeof ReadIdRoute
   '/title/$id': typeof TitleIdRoute
   '/together/$code': typeof TogetherCodeRoute
   '/watch/$id': typeof WatchIdRoute
@@ -136,9 +150,11 @@ export interface FileRoutesByTo {
   '/wanted': typeof WantedRoute
   '/album/$id': typeof AlbumIdRoute
   '/artist/$id': typeof ArtistIdRoute
+  '/book/$id': typeof BookIdRoute
   '/library/$name': typeof LibraryNameRoute
   '/listen/$code': typeof ListenCodeRoute
   '/playlist/$id': typeof PlaylistIdRoute
+  '/read/$id': typeof ReadIdRoute
   '/title/$id': typeof TitleIdRoute
   '/together/$code': typeof TogetherCodeRoute
   '/watch/$id': typeof WatchIdRoute
@@ -155,9 +171,11 @@ export interface FileRoutesById {
   '/wanted': typeof WantedRoute
   '/album/$id': typeof AlbumIdRoute
   '/artist/$id': typeof ArtistIdRoute
+  '/book/$id': typeof BookIdRoute
   '/library/$name': typeof LibraryNameRoute
   '/listen/$code': typeof ListenCodeRoute
   '/playlist/$id': typeof PlaylistIdRoute
+  '/read/$id': typeof ReadIdRoute
   '/title/$id': typeof TitleIdRoute
   '/together/$code': typeof TogetherCodeRoute
   '/watch/$id': typeof WatchIdRoute
@@ -175,9 +193,11 @@ export interface FileRouteTypes {
     | '/wanted'
     | '/album/$id'
     | '/artist/$id'
+    | '/book/$id'
     | '/library/$name'
     | '/listen/$code'
     | '/playlist/$id'
+    | '/read/$id'
     | '/title/$id'
     | '/together/$code'
     | '/watch/$id'
@@ -193,9 +213,11 @@ export interface FileRouteTypes {
     | '/wanted'
     | '/album/$id'
     | '/artist/$id'
+    | '/book/$id'
     | '/library/$name'
     | '/listen/$code'
     | '/playlist/$id'
+    | '/read/$id'
     | '/title/$id'
     | '/together/$code'
     | '/watch/$id'
@@ -211,9 +233,11 @@ export interface FileRouteTypes {
     | '/wanted'
     | '/album/$id'
     | '/artist/$id'
+    | '/book/$id'
     | '/library/$name'
     | '/listen/$code'
     | '/playlist/$id'
+    | '/read/$id'
     | '/title/$id'
     | '/together/$code'
     | '/watch/$id'
@@ -230,9 +254,11 @@ export interface RootRouteChildren {
   WantedRoute: typeof WantedRoute
   AlbumIdRoute: typeof AlbumIdRoute
   ArtistIdRoute: typeof ArtistIdRoute
+  BookIdRoute: typeof BookIdRoute
   LibraryNameRoute: typeof LibraryNameRoute
   ListenCodeRoute: typeof ListenCodeRoute
   PlaylistIdRoute: typeof PlaylistIdRoute
+  ReadIdRoute: typeof ReadIdRoute
   TitleIdRoute: typeof TitleIdRoute
   TogetherCodeRoute: typeof TogetherCodeRoute
   WatchIdRoute: typeof WatchIdRoute
@@ -310,6 +336,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ArtistIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/book/$id': {
+      id: '/book/$id'
+      path: '/book/$id'
+      fullPath: '/book/$id'
+      preLoaderRoute: typeof BookIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/library/$name': {
       id: '/library/$name'
       path: '/library/$name'
@@ -329,6 +362,13 @@ declare module '@tanstack/react-router' {
       path: '/playlist/$id'
       fullPath: '/playlist/$id'
       preLoaderRoute: typeof PlaylistIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/read/$id': {
+      id: '/read/$id'
+      path: '/read/$id'
+      fullPath: '/read/$id'
+      preLoaderRoute: typeof ReadIdRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/title/$id': {
@@ -366,9 +406,11 @@ const rootRouteChildren: RootRouteChildren = {
   WantedRoute: WantedRoute,
   AlbumIdRoute: AlbumIdRoute,
   ArtistIdRoute: ArtistIdRoute,
+  BookIdRoute: BookIdRoute,
   LibraryNameRoute: LibraryNameRoute,
   ListenCodeRoute: ListenCodeRoute,
   PlaylistIdRoute: PlaylistIdRoute,
+  ReadIdRoute: ReadIdRoute,
   TitleIdRoute: TitleIdRoute,
   TogetherCodeRoute: TogetherCodeRoute,
   WatchIdRoute: WatchIdRoute,

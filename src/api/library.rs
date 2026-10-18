@@ -722,6 +722,13 @@ impl Library {
             .await?)
     }
 
+    async fn book_count(&self, ctx: &Context<'_>) -> ApiResult<i64> {
+        Ok(sqlx::query_scalar("SELECT COUNT(*) FROM books WHERE library = ?")
+            .bind(&self.name)
+            .fetch_one(&ctx.state().db)
+            .await?)
+    }
+
     async fn show_count(&self, ctx: &Context<'_>) -> ApiResult<i64> {
         Ok(sqlx::query_scalar("SELECT COUNT(*) FROM items WHERE library = ? AND kind = 'show'")
             .bind(&self.name)

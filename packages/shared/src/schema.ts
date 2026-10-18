@@ -148,6 +148,61 @@ export type AutomationConfigInput = {
   rssInterval: Scalars['Duration']['input'];
 };
 
+export type Book = {
+  addedAt: Scalars['Int']['output'];
+  authors: Array<Scalars['String']['output']>;
+  chapterCount: Scalars['Int']['output'];
+  /** The text, as the readers show it: JSON, as `packages/shared/src/books.ts` describes it. */
+  content: Scalars['String']['output'];
+  cover?: Maybe<Scalars['String']['output']>;
+  /** The most vivid colour of the cover as "r g b", empty until it's been worked out. */
+  coverTint?: Maybe<Scalars['String']['output']>;
+  /** The book's own, or else what was found online. */
+  description?: Maybe<Scalars['String']['output']>;
+  /** Whether it's been looked up online yet. */
+  fetched: Scalars['Boolean']['output'];
+  /** The file as it is. */
+  file: Scalars['String']['output'];
+  /** Where the pictures in `content` are, each at this followed by its `src`. */
+  files: Scalars['String']['output'];
+  format: BookFormat;
+  genres: Array<Scalars['String']['output']>;
+  id: Scalars['Int']['output'];
+  isbn?: Maybe<Scalars['String']['output']>;
+  language?: Maybe<Scalars['String']['output']>;
+  /** Characters of text, which reading positions count in. */
+  length: Scalars['Int']['output'];
+  library: Scalars['String']['output'];
+  /** Pages in print, when that was found online. */
+  pages?: Maybe<Scalars['Int']['output']>;
+  /** Where what the book doesn't say came from: `apple-books` or `open-library`. */
+  provider?: Maybe<Scalars['String']['output']>;
+  /** The page about it where its details came from. */
+  providerUrl?: Maybe<Scalars['String']['output']>;
+  /** A date, or just a year. */
+  published?: Maybe<Scalars['String']['output']>;
+  publisher?: Maybe<Scalars['String']['output']>;
+  /** Out of 10. */
+  rating?: Maybe<Scalars['Float']['output']>;
+  reading?: Maybe<ReadingState>;
+  series?: Maybe<Scalars['String']['output']>;
+  seriesIndex?: Maybe<Scalars['Float']['output']>;
+  size: Scalars['Int']['output'];
+  sortTitle: Scalars['String']['output'];
+  title: Scalars['String']['output'];
+  year?: Maybe<Scalars['Int']['output']>;
+};
+
+export type BookFormat =
+  | 'EPUB'
+  | 'FB2'
+  | 'TXT';
+
+export type BookShelf = {
+  books: Array<Book>;
+  library: Scalars['String']['output'];
+};
+
 export type CalendarEntry = {
   absolute?: Maybe<Scalars['Int']['output']>;
   airAt: Scalars['Int']['output'];
@@ -636,6 +691,7 @@ export type Inbox = {
 
 export type Library = {
   albumCount: Scalars['Int']['output'];
+  bookCount: Scalars['Int']['output'];
   kind: LibraryKind;
   movieCount: Scalars['Int']['output'];
   name: Scalars['String']['output'];
@@ -659,6 +715,7 @@ export type LibraryInput = {
 };
 
 export type LibraryKind =
+  | 'BOOKS'
   | 'MUSIC'
   | 'VIDEO';
 
@@ -837,6 +894,8 @@ export type Mutation = {
   /** 1 to 5 stars; 0 takes the rating away. */
   rate: Scalars['Boolean']['output'];
   recheckDownloads: Array<Download>;
+  /** Looks the book up online again. */
+  refreshBook: Book;
   refreshRenameSuggestions: Scalars['Boolean']['output'];
   refreshSeriesSchedule: Series;
   refreshTitle: Title;
@@ -852,11 +911,15 @@ export type Mutation = {
   /** Saves the queue of tinystream's own player: the web's, or `client`, the app's. */
   savePlayQueue: PlayQueue;
   saveProgress: Video;
+  /** Where someone is in a book, in characters of its `length`; reaching the end finishes it. */
+  saveReading: Book;
   /** Creates a scheme, or changes one you may edit. */
   saveScheme: ColorScheme;
   scan: Scalars['Boolean']['output'];
   setAppearance: Appearance;
   setAvatar: User;
+  /** Marks a book read, or not started (which forgets where it was left). */
+  setBookFinished: Book;
   setPermissionDefaults: Permissions;
   /** What everyone sees unless they pick something else, signed-out pages included. */
   setServerAppearance: ServerAppearance;
@@ -1123,6 +1186,11 @@ export type MutationRecheckDownloadsArgs = {
 };
 
 
+export type MutationRefreshBookArgs = {
+  id: Scalars['Int']['input'];
+};
+
+
 export type MutationRefreshSeriesScheduleArgs = {
   id: Scalars['Int']['input'];
 };
@@ -1192,6 +1260,12 @@ export type MutationSaveProgressArgs = {
 };
 
 
+export type MutationSaveReadingArgs = {
+  id: Scalars['Int']['input'];
+  position: Scalars['Int']['input'];
+};
+
+
 export type MutationSaveSchemeArgs = {
   id?: InputMaybe<Scalars['String']['input']>;
   input: SchemeInput;
@@ -1211,6 +1285,12 @@ export type MutationSetAppearanceArgs = {
 export type MutationSetAvatarArgs = {
   image: Scalars['Upload']['input'];
   userId?: InputMaybe<Scalars['Int']['input']>;
+};
+
+
+export type MutationSetBookFinishedArgs = {
+  finished: Scalars['Boolean']['input'];
+  id: Scalars['Int']['input'];
 };
 
 
@@ -1690,6 +1770,9 @@ export type Query = {
   artist?: Maybe<Artist>;
   /** Artists with albums of their own. */
   artists: Array<Artist>;
+  book?: Maybe<Book>;
+  /** A book library's books, a series' volumes together. */
+  books: Array<Book>;
   calendar: Array<CalendarEntry>;
   clip?: Maybe<Clip>;
   clipAllowance: ClipAllowance;
@@ -1716,11 +1799,15 @@ export type Query = {
   lyrics?: Maybe<Lyrics>;
   musicHome: MusicHome;
   musicSearch: MusicSearch;
+  /** The books added last to each book library. */
+  newBooks: Array<BookShelf>;
   notifications: Inbox;
   permissionDefaults: Permissions;
   playQueue: PlayQueue;
   playlist?: Maybe<Playlist>;
   playlists: Array<Playlist>;
+  /** Books part read, the latest first. */
+  readingNow: Array<Book>;
   renameSuggestions: Array<RenameSuggestion>;
   requests: Array<Request>;
   room: Room;
@@ -1775,6 +1862,16 @@ export type QueryArtistArgs = {
 
 export type QueryArtistsArgs = {
   library?: InputMaybe<Scalars['String']['input']>;
+};
+
+
+export type QueryBookArgs = {
+  id: Scalars['Int']['input'];
+};
+
+
+export type QueryBooksArgs = {
+  library: Scalars['String']['input'];
 };
 
 
@@ -1857,6 +1954,11 @@ export type QueryMusicSearchArgs = {
 };
 
 
+export type QueryNewBooksArgs = {
+  limit?: Scalars['Int']['input'];
+};
+
+
 export type QueryNotificationsArgs = {
   limit?: Scalars['Int']['input'];
 };
@@ -1864,6 +1966,11 @@ export type QueryNotificationsArgs = {
 
 export type QueryPlaylistArgs = {
   id: Scalars['Int']['input'];
+};
+
+
+export type QueryReadingNowArgs = {
+  limit?: Scalars['Int']['input'];
 };
 
 
@@ -1936,6 +2043,15 @@ export type QueueInput = {
   repeat?: Repeat;
   shuffled?: Scalars['Boolean']['input'];
   tracks: Array<Scalars['Int']['input']>;
+};
+
+export type ReadingState = {
+  finished: Scalars['Boolean']['output'];
+  /** Characters in, of the book's `length`. */
+  position: Scalars['Int']['output'];
+  /** From 0 to 1. */
+  progress: Scalars['Float']['output'];
+  updatedAt: Scalars['Int']['output'];
 };
 
 export type RecipeInput = {

@@ -599,6 +599,21 @@ export function Dialog({
   )
 }
 
+/** A filter or sort to pick, in a row of them. */
+export function Chip({ active, onClick, children }: { active: boolean; onClick: () => void; children: ReactNode }) {
+  return (
+    <Squircle
+      as="button"
+      radius={9}
+      onClick={onClick}
+      aria-pressed={active}
+      className={`h-7.5 px-3 text-[13px] transition-colors ${active ? 'bg-press text-ink' : 'text-ink-2 hover:bg-hover hover:text-ink'}`}
+    >
+      {children}
+    </Squircle>
+  )
+}
+
 /**
  * A row of mutually exclusive choices, the chosen one lifted. The lift slides
  * over to a new choice, its leading edge first, so it stretches on the way.

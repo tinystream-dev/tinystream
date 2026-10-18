@@ -12,6 +12,8 @@ import { HomeSkeleton, useArrived } from '../components/Skeleton'
 import { Squircle } from '../components/Squircle'
 import { Ticker } from '../components/Ticker'
 import { Button } from '../components/ui'
+import { ReadingNowQuery } from '../books/api'
+import { BookTile } from '../books/components'
 import { graphql } from '../gql'
 import type { AlbumCard } from '../music/api'
 import { AlbumTile } from '../music/components'
@@ -84,7 +86,9 @@ function HomePage() {
   const arrived = useArrived(!!data)
   if (!data) return <HomeSkeleton />
 
-  const nothing = data.recentlyAdded.every((r) => r.titles.length === 0) && !libraries?.some((l) => l.kind === 'MUSIC' && l.albumCount > 0)
+  const nothing =
+    data.recentlyAdded.every((r) => r.titles.length === 0) &&
+    !libraries?.some((l) => (l.kind === 'MUSIC' && l.albumCount > 0) || (l.kind === 'BOOKS' && l.bookCount > 0))
   // A fresh episode takes the hero; otherwise whatever was watched last.
   const hero = data.continueWatching.find((e) => e.newEpisode) ?? data.continueWatching[0]
   const rest = data.continueWatching.filter((e) => e !== hero)
@@ -153,6 +157,8 @@ function HomePage() {
           </Section>
         ))}
 
+      {libraries?.some((l) => l.kind === 'BOOKS') && <BookShelves />}
+
       {libraries?.some((l) => l.kind === 'MUSIC') && <MusicShelves />}
     </Page>
   )
@@ -170,6 +176,46 @@ const MusicHomeQuery = graphql(`
     }
   }
 `)
+
+/** What's being read, and what's new to read. */
+function BookShelves() {
+  const { data } = useQuery({ queryKey: ['books', 'home'], queryFn: () => request(ReadingNowQuery) })
+  if (!data) return null
+  return (
+    <>
+      {data.readingNow.length > 0 && (
+        <Section title="Continue reading">
+          <Row>
+            {data.readingNow.map((b) => (
+              <div key={b.id} className="w-34 shrink-0 snap-start">
+                <BookTile book={b} />
+              </div>
+            ))}
+          </Row>
+        </Section>
+      )}
+      {data.newBooks.map((s) => (
+        <Section
+          key={s.library}
+          title={`New in ${s.library}`}
+          aside={
+            <Link to="/library/$name" params={{ name: s.library }} className="text-[13px] text-ink-3 transition-colors hover:text-ink">
+              See all
+            </Link>
+          }
+        >
+          <Row>
+            {s.books.map((b) => (
+              <div key={b.id} className="w-34 shrink-0 snap-start">
+                <BookTile book={b} />
+              </div>
+            ))}
+          </Row>
+        </Section>
+      ))}
+    </>
+  )
+}
 
 /** Music, a step quieter than the shows and movies above it. */
 function MusicShelves() {

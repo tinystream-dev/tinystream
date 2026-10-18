@@ -139,11 +139,20 @@ const LibrariesQuery = graphql(`
       movieCount
       albumCount
       trackCount
+      bookCount
     }
   }
 `)
 
-export type Library = { name: string; kind: 'VIDEO' | 'MUSIC'; showCount: number; movieCount: number; albumCount: number; trackCount: number }
+export type Library = {
+  name: string
+  kind: 'VIDEO' | 'MUSIC' | 'BOOKS'
+  showCount: number
+  movieCount: number
+  albumCount: number
+  trackCount: number
+  bookCount: number
+}
 
 /** The libraries you can see. */
 export function useLibraries() {

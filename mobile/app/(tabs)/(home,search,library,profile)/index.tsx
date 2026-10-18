@@ -24,6 +24,8 @@ import { Squircle } from '../../../src/effects/Squircle'
 import { Ticker } from '../../../src/effects/Ticker'
 import { Tilt } from '../../../src/effects/Tilt'
 import { useMotion } from '../../../src/effects/motion'
+import { ReadingNowQuery } from '../../../src/books'
+import { BookTile } from '../../../src/components/BookTile'
 import { graphql } from '../../../src/gql'
 import type { HomeQuery } from '../../../src/gql/graphql'
 import { titleTint } from '../../../src/lib/tint'
@@ -125,7 +127,9 @@ export default function Home() {
       </Page>
     )
 
-  const nothing = data.recentlyAdded.every((r) => r.titles.length === 0) && !libraries.data?.some((l) => l.kind === 'MUSIC' && l.albumCount > 0)
+  const nothing =
+    data.recentlyAdded.every((r) => r.titles.length === 0) &&
+    !libraries.data?.some((l) => (l.kind === 'MUSIC' && l.albumCount > 0) || (l.kind === 'BOOKS' && l.bookCount > 0))
   // A fresh episode takes the hero; otherwise whatever was watched last.
   const hero = data.continueWatching.find((e) => e.newEpisode) ?? data.continueWatching[0]
   const rest = data.continueWatching.filter((e) => e !== hero)
@@ -184,10 +188,36 @@ export default function Home() {
           </Animated.View>
         ))}
 
+      {libraries.data?.some((l) => l.kind === 'BOOKS') && <BookShelves />}
+
       {libraries.data?.some((l) => l.kind === 'MUSIC') && <MusicShelves />}
     </Page>
   )
 }
+
+/** What's being read, and what's new to read. */
+function BookShelves() {
+  const api = useApi()
+  const go = useGo()
+  const { data } = useQuery({ queryKey: ['books', 'home'], queryFn: () => api.request(ReadingNowQuery) })
+  if (!data) return null
+  return (
+    <>
+      {data.readingNow.length > 0 && (
+        <Section title="Continue reading">
+          <Row data={data.readingNow} width={BOOK} keyOf={(b) => b.id} render={(b) => <BookTile book={b} width={BOOK} />} />
+        </Section>
+      )}
+      {data.newBooks.map((s) => (
+        <Section key={s.library} title={`New in ${s.library}`} aside={<SectionLink label="See all" onPress={() => go(`library?name=${encodeURIComponent(s.library)}`, '(library)')} />}>
+          <Row data={s.books} width={BOOK} keyOf={(b) => b.id} render={(b) => <BookTile book={b} width={BOOK} />} />
+        </Section>
+      ))}
+    </>
+  )
+}
+
+const BOOK = 108
 
 /** Music, a step quieter than the shows and movies above it. Albums open in the Music tab. */
 function MusicShelves() {

@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The video libraries (web/src/routes/library.$name.tsx), one at a time: a
-// switcher across them, filters, and every title as a poster. Music
-// libraries are in the Music tab.
+// The video and book libraries (web/src/routes/library.$name.tsx), one at a
+// time: a switcher across them, filters, and every title or book as a
+// cover. Music libraries are in the Music tab.
 
 import { useQuery } from '@tanstack/react-query'
 import { useLocalSearchParams } from 'expo-router'
-import { useCallback, useDeferredValue, useEffect, useMemo, useState } from 'react'
+import { type ReactNode, useCallback, useDeferredValue, useEffect, useMemo, useState } from 'react'
 import { ScrollView, Text, View } from 'react-native'
+import { BookLibrary } from '../../../src/components/BookLibrary'
 import { Page } from '../../../src/components/Page'
 import { Poster } from '../../../src/components/Poster'
 import { PosterGridSkeleton, useArrived, useColumnWidth } from '../../../src/components/Skeleton'
@@ -52,15 +53,29 @@ const GAP = 12
 
 export default function Library() {
   const params = useLocalSearchParams<{ name?: string }>()
-  const api = useApi()
   const { data: libraries } = useLibraries()
-  const videos = (libraries ?? []).filter((l) => l.kind === 'VIDEO')
+  const shown = (libraries ?? []).filter((l) => l.kind !== 'MUSIC')
   const last = lastLibrary.use()
   const [picked, setPicked] = useState<string | null>(params.name ?? null)
   useEffect(() => {
     if (params.name) setPicked(params.name)
   }, [params.name])
-  const name = videos.find((l) => l.name === picked)?.name ?? videos.find((l) => l.name === last)?.name ?? videos[0]?.name ?? null
+  const lib = shown.find((l) => l.name === picked) ?? shown.find((l) => l.name === last) ?? shown[0] ?? null
+
+  const choose = (n: string) => {
+    setPicked(n)
+    lastLibrary.set(n)
+  }
+
+  const switcher =
+    shown.length > 1 ? <Segmented value={lib?.name ?? ''} options={shown.map((l) => ({ value: l.name, label: l.name }))} onChange={choose} /> : null
+
+  if (lib?.kind === 'BOOKS') return <BookLibrary key={lib.name} name={lib.name} switcher={switcher} />
+  return <VideoLibrary name={lib?.name ?? null} switcher={switcher} empty={!!libraries && !lib} />
+}
+
+function VideoLibrary({ name, switcher, empty }: { name: string | null; switcher: ReactNode; empty: boolean }) {
+  const api = useApi()
   const [filter, setFilter] = useState<Filter>('all')
   const [sort, setSort] = useState<Sort>('title')
   const width = useColumnWidth(3, 20, GAP)
@@ -82,14 +97,9 @@ export default function Library() {
   }, [data, shownFilter, shownSort])
   const renderItem = useCallback(({ item }: { item: Card }) => <Poster card={item} width={width} />, [width])
 
-  const choose = (n: string) => {
-    setPicked(n)
-    lastLibrary.set(n)
-  }
-
   const header = (
     <View className="gap-3 pb-5">
-      {videos.length > 1 && <Segmented value={name ?? ''} options={videos.map((l) => ({ value: l.name, label: l.name }))} onChange={choose} />}
+      {switcher}
       <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginHorizontal: -20 }} contentContainerStyle={{ paddingHorizontal: 20, gap: 6 }}>
         {filters.map((f) => (
           <Chip key={f.value} on={filter === f.value} onPress={() => setFilter(f.value)}>
@@ -110,7 +120,7 @@ export default function Library() {
         </Text>
       )}
       {!data && name && <PosterGridSkeleton />}
-      {libraries && !name && <Empty title="No libraries yet">Ask an admin for access.</Empty>}
+      {empty && <Empty title="No libraries yet">Ask an admin for access.</Empty>}
       {data && cards.length === 0 && <Empty title={data.length ? 'Nothing matches this filter' : 'This library is empty'} />}
     </View>
   )

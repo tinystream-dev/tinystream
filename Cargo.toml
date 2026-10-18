@@ -43,7 +43,7 @@ repository = "https://github.com/phrolova/tinystream"
 default = ["web-ui", "metadata", "torrent"]
 web-ui = ["dep:axum-frontend", "dep:rust-embed"]
 metadata = []
-torrent = ["metadata", "dep:libtorrent-sys", "dep:quick-xml"]
+torrent = ["metadata", "dep:libtorrent-sys"]
 
 [dependencies]
 anyhow = "1"
@@ -53,9 +53,11 @@ axum = { version = "0.8", features = ["macros", "ws"] }
 axum-frontend = { version = "0.1", optional = true }
 base64 = "0.22"
 bytes = "1"
+chardetng = "1"
 clap = { version = "4", features = ["derive", "env", "wrap_help"] }
 dirs = "6"
 ebur128 = "0.1"
+encoding_rs = "0.8"
 ffmpeg-sys = { path = "ffmpeg-sys" }
 libtorrent-sys = { path = "libtorrent-sys", optional = true }
 futures = "0.3"
@@ -66,7 +68,7 @@ md-5 = "0.10"
 mime_guess = "2"
 notify = "8"
 nucleo-matcher = "0.3"
-quick-xml = { version = "0.41", optional = true }
+quick-xml = { version = "0.41", features = ["escape-html"] }
 rand = "0.9"
 rust-embed = { version = "8", optional = true }
 rustyass = { path = "rustyass" }
@@ -115,6 +117,7 @@ tracing-subscriber = { version = "0.3", features = [
 ] }
 url = "2"
 uuid = { version = "1", features = ["v4", "serde"] }
+zip = { version = "9", default-features = false, features = ["deflate-flate2"] }
 webauthn-rs = { version = "0.5", features = [
     "danger-user-presence-only-security-keys",
 ] }

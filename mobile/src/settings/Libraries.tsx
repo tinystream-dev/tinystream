@@ -3,7 +3,7 @@
 // hold, and adding or changing one, with a browser of the server's folders.
 
 import { useMutation, useQuery } from '@tanstack/react-query'
-import { CornerLeftUp, Folder, Music, Plus, RefreshCw, Trash2 } from 'lucide-react-native'
+import { BookOpen, CornerLeftUp, Folder, Music, Plus, RefreshCw, Trash2 } from 'lucide-react-native'
 import { useEffect, useState } from 'react'
 import { Pressable, ScrollView, Text, View } from 'react-native'
 import { haptic } from '../../modules/haptics'
@@ -100,7 +100,15 @@ export function Libraries() {
             <View key={l.name}>
               {i > 0 && <Divider inset={52} />}
               <ListRow
-                icon={l.kind === 'MUSIC' ? <Music size={20} color={tokens['ink-3']} /> : <Folder size={20} color={tokens['ink-3']} />}
+                icon={
+                  l.kind === 'MUSIC' ? (
+                    <Music size={20} color={tokens['ink-3']} />
+                  ) : l.kind === 'BOOKS' ? (
+                    <BookOpen size={20} color={tokens['ink-3']} />
+                  ) : (
+                    <Folder size={20} color={tokens['ink-3']} />
+                  )
+                }
                 label={
                   <View className="flex-row items-center gap-2">
                     <Text className="font-sans text-[15px] text-ink">{l.name}</Text>
@@ -113,7 +121,7 @@ export function Libraries() {
                       {l.error ?? (l.exists ? l.resolvedPath : `${l.resolvedPath} can't be found`)}
                     </Text>
                     <Text className="font-sans text-xs text-ink-3">
-                      {l.titleCount} {l.kind === 'MUSIC' ? 'albums' : 'titles'}
+                      {l.titleCount} {l.kind === 'MUSIC' ? 'albums' : l.kind === 'BOOKS' ? 'books' : 'titles'}
                       {l.skippedCount > 0 && `, ${l.skippedCount} skipped`}
                     </Text>
                   </View>
@@ -146,13 +154,14 @@ function LibraryForm({ library, onDone }: { library: ConfigLibrary | null; onDon
   const [browsing, setBrowsing] = useState(!library)
   const [error, setError] = useState<string | null>(null)
   const music = kind === 'MUSIC'
+  const video = kind === 'VIDEO'
   const body = {
     name,
     path,
     kind,
-    metadataProvider: music ? null : provider || null,
-    managed: music ? false : managed,
-    profile: music ? null : profile || null,
+    metadataProvider: video ? provider || null : null,
+    managed: video ? managed : false,
+    profile: video ? profile || null : null,
     downloadPath: downloadPath.trim() || null,
   }
   const done = () => {
@@ -176,10 +185,11 @@ function LibraryForm({ library, onDone }: { library: ConfigLibrary | null; onDon
           options={[
             { value: 'VIDEO', label: 'Shows and movies' },
             { value: 'MUSIC', label: 'Music' },
+            { value: 'BOOKS', label: 'Books' },
           ]}
         />
         <Field label="Name">
-          <Input value={name} onChangeText={setName} placeholder={music ? 'Music' : 'Anime'} />
+          <Input value={name} onChangeText={setName} placeholder={music ? 'Music' : video ? 'Anime' : 'Novels'} />
         </Field>
         <Field label="Folder">
           <View className="flex-row gap-2">
@@ -202,12 +212,16 @@ function LibraryForm({ library, onDone }: { library: ConfigLibrary | null; onDon
         )}
         {music ? (
           <Text className="font-sans text-xs leading-4 text-ink-3">Albums and artists come from the files' tags, however the folders are laid out.</Text>
+        ) : !video ? (
+          <Text className="font-sans text-xs leading-4 text-ink-3">
+            EPUB, FB2 and plain text books, in any folders. What a book doesn't say about itself is looked up on Apple Books and Open Library.
+          </Text>
         ) : (
           <Field label="Metadata provider">
             <Select title="Metadata provider" value={provider} options={providers} onChange={setProvider} />
           </Field>
         )}
-        {settings?.downloads && !music && (
+        {settings?.downloads && video && (
           <>
             <View className="flex-row items-center gap-3">
               <View className="flex-1">
