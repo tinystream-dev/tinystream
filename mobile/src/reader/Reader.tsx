@@ -1,7 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// A book as one long scroll (web/src/books/Reader.tsx). Its blocks are a
-// list that starts at the one it was left on, with what came before added
-// above as it's scrolled back to. Where the top of the screen is in it is
+// A book as one long scroll (web/src/books/Reader.tsx). Only a stretch of
+// its blocks is there at a time, starting at the one it was left on, and
+// grows at either end as it's scrolled to (dropping what's far behind).
+// Every block in the stretch stays mounted, so when blocks are added above,
+// Android's maintainVisibleContentPosition keeps the text still: with a
+// virtualized list it lost its anchor and the text jumped. Where the top of
+// the screen is in it is
 // kept in characters (packages/shared/src/books.ts), so the web, or another
 // phone, opens on the same sentence. Scrolling on hides everything but the
 // text, the system's bars too; scrolling back or a tap brings it back.
@@ -29,8 +33,8 @@ import {
 import { useRouter } from 'expo-router'
 import { ArrowLeft, Highlighter, List, Minus, Plus } from 'lucide-react-native'
 import { type ReactNode, memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { AppState, type LayoutChangeEvent, Linking, Pressable, ScrollView, Text, type TextStyle, View, type ViewProps, type ViewStyle } from 'react-native'
-import { FlatList, Gesture, GestureDetector } from 'react-native-gesture-handler'
+import { AppState, type LayoutChangeEvent, Linking, Pressable, ScrollView, Text, type TextStyle, View, type ViewStyle } from 'react-native'
+import { Gesture, GestureDetector, ScrollView as GestureScrollView } from 'react-native-gesture-handler'
 import Animated, { Easing, useAnimatedScrollHandler, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { scheduleOnRN } from 'react-native-worklets'
@@ -55,10 +59,11 @@ const textSize = stored<number>('reader.size', 18)
 
 const SETTLE = Easing.bezier(0.16, 1, 0.3, 1)
 
-const AnimatedList = Animated.createAnimatedComponent(FlatList<number>)
+const AnimatedScroll = Animated.createAnimatedComponent(GestureScrollView)
 
-/** How many blocks are added above at a time, scrolling back. */
-const BEFORE = 40
+/** How many blocks are added at an end at a time, and the most kept at once. */
+const STEP = 30
+const KEEP = 150
 
 type Tokens = ReturnType<typeof useTheme>['tokens']
 
@@ -245,8 +250,11 @@ function Picture({ src, size }: { src: string; size: number }) {
   )
 }
 
-/** Each block's place in the list, in content coordinates, as the list lays them out. */
+/** Each block's place in the scroll, in content coordinates, as it's laid out. */
 type Layouts = Map<number, { y: number; h: number }>
+
+/** The blocks there are (from `lo` up to `hi`). */
+type Stretch = { lo: number; hi: number }
 
 /** The quotes over each block, by block. */
 function overByBlock(doc: BookDocument, marks: Mark[]): Map<number, Over[]> {
@@ -267,10 +275,19 @@ export function Reader({ book, doc, quote }: { book: BookDetail; doc: BookDocume
   const insets = useSafeAreaInsets()
   const { tokens } = useTheme()
   const size = textSize.use()
-  const list = useRef<FlatList<number>>(null)
+  const scroll = useRef<GestureScrollView>(null)
   const layouts = useRef<Layouts>(new Map())
   const start = useRef(book.reading && !book.reading.finished ? book.reading.position : 0)
-  const [first, setFirst] = useState(() => locate(doc, start.current).index)
+  const from = useCallback((index: number): Stretch => ({ lo: index, hi: Math.min(doc.blocks.length, index + STEP) }), [doc])
+  const [stretch, setStretch] = useState(() => from(locate(doc, start.current).index))
+  const stretchRef = useRef(stretch)
+  stretchRef.current = stretch
+  // Blocks were just added or dropped, and haven't been laid out yet.
+  const growing = useRef(false)
+  const stretchTo = useCallback((next: Stretch) => {
+    for (const i of layouts.current.keys()) if (i < next.lo || i >= next.hi) layouts.current.delete(i)
+    setStretch(next)
+  }, [])
   const [position, setPosition] = useState(start.current)
   const [contents, setContents] = useState(false)
   const [quoteList, setQuoteList] = useState(false)
@@ -289,7 +306,8 @@ export function Reader({ book, doc, quote }: { book: BookDetail; doc: BookDocume
   const pending = useRef<{ index: number; fraction: number } | null>(locate(doc, start.current))
   const placed = useRef(false)
   const viewport = useRef({ height: 0, content: 0 })
-  const line = insets.top + 12
+  // Where on screen the text that counts as where you are is: the top of the text, under the bar.
+  const line = insets.top + 64
 
   const saver = useMemo(
     () =>
@@ -315,24 +333,23 @@ export function Reader({ book, doc, quote }: { book: BookDetail; doc: BookDocume
   }, [chrome])
   useEffect(() => () => void setImmersive(false), [])
 
-  const data = useMemo(() => Array.from({ length: doc.blocks.length - first }, (_, k) => first + k), [doc, first])
-
-  // Starts the list at `index` (or scrolls to it, when it already does), `fraction` of the way in.
+  // Scrolls to `index`, `fraction` of the way in, starting the stretch there when it isn't in it.
   // `relayout`: it's about to be laid out again anyway (a new text size), so wait for that.
   const goTo = useCallback(
     (index: number, fraction = 0, relayout = false) => {
       const at = layouts.current.get(index)
-      if (index === first && at && !relayout) {
-        list.current?.scrollToOffset({ offset: at.y + fraction * at.h - line, animated: false })
+      if (at && !relayout) {
+        scroll.current?.scrollTo({ y: at.y + fraction * at.h - line, animated: false })
         return
       }
+      placed.current = false
       pending.current = { index, fraction }
-      if (index !== first) {
-        layouts.current.clear()
-        setFirst(index)
+      if (!at) {
+        growing.current = false
+        stretchTo(from(index))
       }
     },
-    [first, line],
+    [from, line, stretchTo],
   )
 
   // The same function all along, so the blocks that link elsewhere needn't render again.
@@ -459,10 +476,9 @@ export function Reader({ book, doc, quote }: { book: BookDetail; doc: BookDocume
 
   const measure = useCallback(
     (offset: number) => {
-      if (!placed.current) return
       const { height, content } = viewport.current
       let p: number | null = null
-      if (height > 0 && offset + height >= content - 4 && offset > 0) p = doc.length
+      if (stretchRef.current.hi === doc.blocks.length && height > 0 && offset + height >= content - 4 && offset > 0) p = doc.length
       else {
         const y = offset + line
         let best = -1
@@ -485,27 +501,56 @@ export function Reader({ book, doc, quote }: { book: BookDetail; doc: BookDocume
   const onChrome = useCallback((on: boolean) => setChrome(on), [])
   const onScrolled = useCallback(
     (offset: number) => {
+      if (!placed.current || growing.current) return
       measure(offset)
-      // Near the top of what's there: add what came before (it stays where it is on screen).
-      if (placed.current && offset < 800 && first > 0) {
-        layouts.current.clear()
-        setFirst((f) => Math.max(0, f - BEFORE))
+      // Near an end of what's there: add what comes next, dropping what's furthest away. Added
+      // above, it stays where it is on screen.
+      const { lo, hi } = stretchRef.current
+      const { height, content } = viewport.current
+      let next: Stretch | null = null
+      if (offset < height * 1.5 && lo > 0) {
+        const at = Math.max(0, lo - STEP)
+        next = { lo: at, hi: Math.min(hi, at + KEEP) }
+      } else if (offset + height * 2.5 > content && hi < doc.blocks.length) {
+        const to = Math.min(doc.blocks.length, hi + STEP)
+        next = { lo: Math.max(lo, to - KEEP), hi: to }
       }
+      if (!next) return
+      growing.current = true
+      stretchTo(next)
     },
-    [measure, first],
+    [doc, measure, stretchTo],
   )
-  const onScroll = useAnimatedScrollHandler((e) => {
-    const y = e.contentOffset.y
-    const dy = y - last.value
-    if (dy > 8 && shown.value === 1) {
-      shown.value = 0
-      scheduleOnRN(onChrome, false)
-    } else if (dy < -14 && shown.value === 0) {
-      shown.value = 1
-      scheduleOnRN(onChrome, true)
-    }
-    if (Math.abs(dy) > 8) last.value = y
-    scheduleOnRN(onScrolled, y)
+  // Only a finger (or the fling after it) moves the chrome: not a jump, or blocks added or
+  // dropped above, which move the offset by far more than a scroll would.
+  const touched = useSharedValue(false)
+  const onScroll = useAnimatedScrollHandler({
+    onBeginDrag: () => {
+      touched.value = true
+    },
+    onEndDrag: () => {
+      touched.value = false
+    },
+    onMomentumBegin: () => {
+      touched.value = true
+    },
+    onMomentumEnd: () => {
+      touched.value = false
+    },
+    onScroll: (e) => {
+      const y = e.contentOffset.y
+      const dy = y - last.value
+      if (!touched.value || Math.abs(dy) > 400) last.value = y
+      else if (dy > 8 && shown.value === 1) {
+        shown.value = 0
+        scheduleOnRN(onChrome, false)
+      } else if (dy < -14 && shown.value === 0) {
+        shown.value = 1
+        scheduleOnRN(onChrome, true)
+      }
+      if (Math.abs(dy) > 8) last.value = y
+      scheduleOnRN(onScrolled, y)
+    },
   })
 
   const toggle = useCallback(() => {
@@ -545,34 +590,20 @@ export function Reader({ book, doc, quote }: { book: BookDetail; doc: BookDocume
       const p = pending.current
       if (p && p.index === index) {
         pending.current = null
-        list.current?.scrollToOffset({ offset: y + p.fraction * height - line, animated: false })
+        const offset = Math.max(0, y + p.fraction * height - line)
+        scroll.current?.scrollTo({ y: offset, animated: false })
+        // It may not be scrolled again: say where it is now, and add what's above it.
         requestAnimationFrame(() => {
           placed.current = true
+          onScrolled(offset)
         })
       }
     },
-    [line],
+    [line, onScrolled],
   )
 
-  const Cell = useMemo(
-    () =>
-      function Cell({ item, onLayout, ...rest }: ViewProps & { item: number; index: number; cellKey: string }) {
-        const { index: _, cellKey: __, ...props } = rest
-        return (
-          <View
-            {...props}
-            onLayout={(e) => {
-              onLayout?.(e)
-              onCell(item, e)
-            }}
-          />
-        )
-      },
-    [onCell],
-  )
-
-  const renderItem = useCallback(
-    ({ item }: { item: number }) => {
+  const renderBlock = useCallback(
+    (item: number) => {
       const b = doc.blocks[item]
       let over = quoted.get(item)
       let handles: { start?: number; end?: number } | undefined
@@ -586,6 +617,18 @@ export function Reader({ book, doc, quote }: { book: BookDetail; doc: BookDocume
     },
     [doc, size, book.files, tokens, jump, quoted, sel, flash, hooks],
   )
+
+  // Kept as they are while only the position changes, which is on every scroll.
+  const blocks = useMemo(() => {
+    const out: ReactNode[] = []
+    for (let i = stretch.lo; i < stretch.hi; i++)
+      out.push(
+        <View key={i} onLayout={(e) => onCell(i, e)}>
+          {renderBlock(i)}
+        </View>,
+      )
+    return out
+  }, [stretch, renderBlock, onCell])
 
   const resize = (by: number) => {
     const next = SIZES[Math.max(0, Math.min(SIZES.length - 1, SIZES.indexOf(size) + by))] ?? 18
@@ -601,27 +644,26 @@ export function Reader({ book, doc, quote }: { book: BookDetail; doc: BookDocume
   return (
     <View className="flex-1 bg-canvas">
       <GestureDetector gesture={gesture}>
-        <AnimatedList
-          ref={list}
-          data={data}
-          keyExtractor={(i) => String(i)}
-          renderItem={renderItem}
-          extraData={renderItem}
-          CellRendererComponent={Cell}
+        <AnimatedScroll
+          ref={scroll}
           onScroll={onScroll}
           scrollEventThrottle={16}
           maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
           onLayout={(e) => (viewport.current.height = e.nativeEvent.layout.height)}
-          onContentSizeChange={(_, h) => (viewport.current.content = h)}
-          initialNumToRender={12}
-          maxToRenderPerBatch={12}
-          windowSize={9}
+          onContentSizeChange={(_, h) => {
+            viewport.current.content = h
+            requestAnimationFrame(() => {
+              growing.current = false
+            })
+          }}
           showsVerticalScrollIndicator={false}
-          contentContainerStyle={{ paddingTop: insets.top + 64, paddingBottom: insets.bottom + 160, paddingHorizontal: 22 }}
-          ListFooterComponent={
+          contentContainerStyle={{ paddingTop: line, paddingBottom: insets.bottom + 160, paddingHorizontal: 22 }}
+        >
+          {blocks}
+          {stretch.hi === doc.blocks.length && (
             <Text className="font-sans mt-12 text-center text-sm text-ink-3">{pct >= 100 ? 'The end' : `${pct}% read`}</Text>
-          }
-        />
+          )}
+        </AnimatedScroll>
       </GestureDetector>
 
       <Animated.View
