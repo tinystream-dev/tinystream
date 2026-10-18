@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
-use std::path::PathBuf;
+use std::path::{Path as FsPath, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Instant;
 
@@ -18,9 +18,11 @@ use serde::Deserialize;
 use tower::ServiceExt;
 use tower_http::services::ServeFile;
 
+use super::books::{self, BookView};
 use super::library::{Title, TitleKind, Video, episode_label};
 use super::schema::{Access, Ctx};
 use crate::auth::{self, User};
+use crate::books::catalog::{self, BookRow};
 use crate::clips::{self, BITMAP_SUBTITLES};
 use crate::db::now;
 use crate::error::{ApiError, ApiResult};
@@ -61,6 +63,9 @@ struct Row {
     rendered_at: Option<i64>,
     public: bool,
     screenshot: bool,
+    quote: Option<String>,
+    author: Option<String>,
+    book_length: Option<i64>,
     created_at: i64,
     shared_at: Option<i64>,
 }
@@ -132,6 +137,14 @@ pub enum SourceStatus {
 }
 
 async fn source_status(state: &AppState, r: &Row) -> ApiResult<SourceStatus> {
+    if r.quote.is_some() {
+        return Ok(match catalog::by_path(&state.db, &r.source_path).await? {
+            None => SourceStatus::Gone,
+            Some(b) if (b.size, b.mtime) != (r.source_size, r.source_mtime) => SourceStatus::Changed,
+            Some(_) => SourceStatus::Ok,
+        });
+    }
+
     Ok(match clips::source_file(state, r.media_id, &r.source_path).await? {
         None => SourceStatus::Gone,
         Some(p) if clips::fingerprint(&p) != Some((r.source_size, r.source_mtime)) => SourceStatus::Changed,
@@ -185,8 +198,95 @@ impl ClipSource<'_> {
         self.0.r.year
     }
 
+    /// The book a quote is from, while it's there and you can see it.
+    async fn book(&self, ctx: &Context<'_>) -> ApiResult<Option<BookView>> {
+        let (r, viewer, state) = (&self.0.r, &self.0.viewer, ctx.state());
+
+        if r.quote.is_none() {
+            return Ok(None);
+        }
+
+        match catalog::by_path(&state.db, &r.source_path).await?.filter(|b| books::sees(state, viewer, &b.library)) {
+            Some(b) => Ok(Some(books::view(state, viewer, b).await?)),
+            None => Ok(None),
+        }
+    }
+
     async fn status(&self, ctx: &Context<'_>) -> ApiResult<SourceStatus> {
         source_status(ctx.state(), &self.0.r).await
+    }
+}
+
+#[derive(SimpleObject)]
+pub struct QuoteRange {
+    start: i64,
+    end: i64,
+}
+
+pub struct ClipQuote<'a>(&'a Clip);
+
+#[Object]
+impl ClipQuote<'_> {
+    /// What was quoted, its paragraphs a line apart.
+    async fn text(&self) -> &str {
+        self.0.r.quote.as_deref().unwrap_or_default()
+    }
+
+    async fn author(&self) -> Option<&str> {
+        self.0.r.author.as_deref()
+    }
+
+    /// Where it is in the book as the book is now, in characters; null when the book was changed
+    /// and the text can't be found in it anymore.
+    async fn range(&self, ctx: &Context<'_>) -> ApiResult<Option<QuoteRange>> {
+        let (r, state) = (&self.0.r, ctx.state());
+        let Some(b) = catalog::by_path(&state.db, &r.source_path).await? else { return Ok(None) };
+
+        if (b.size, b.mtime) == (r.source_size, r.source_mtime) {
+            return Ok(Some(QuoteRange { start: r.range_start as i64, end: r.range_end as i64 }));
+        }
+
+        let Ok(book) = state.books.get(FsPath::new(&b.path), b.mtime).await else { return Ok(None) };
+        let was = r.book_length.filter(|&l| l > 0).unwrap_or(b.length);
+        let near = (r.range_start * b.length as f64 / was as f64).max(0.0) as u64;
+        let text = r.quote.clone().unwrap_or_default();
+        let found = tokio::task::spawn_blocking(move || book.document.find(&text, near))
+            .await
+            .map_err(|e| anyhow::anyhow!("{e}"))?;
+
+        let Some((start, end)) = found else { return Ok(None) };
+
+        sqlx::query(
+            "UPDATE clips SET range_start = ?, range_end = ?, source_size = ?, source_mtime = ?, book_length = ?
+             WHERE id = ?",
+        )
+        .bind(start as f64)
+        .bind(end as f64)
+        .bind(b.size)
+        .bind(b.mtime)
+        .bind(b.length)
+        .bind(r.id)
+        .execute(&state.db)
+        .await?;
+
+        Ok(Some(QuoteRange { start: start as i64, end: end as i64 }))
+    }
+}
+
+#[derive(Enum, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClipKind {
+    Clip,
+    Screenshot,
+    Quote,
+}
+
+impl ClipKind {
+    fn filter(self) -> &'static str {
+        match self {
+            ClipKind::Clip => " AND c.screenshot = 0 AND c.quote IS NULL",
+            ClipKind::Screenshot => " AND c.screenshot = 1",
+            ClipKind::Quote => " AND c.quote IS NOT NULL",
+        }
     }
 }
 
@@ -213,6 +313,20 @@ impl Clip {
 
     async fn screenshot(&self) -> bool {
         self.r.screenshot
+    }
+
+    async fn kind(&self) -> ClipKind {
+        if self.r.quote.is_some() {
+            ClipKind::Quote
+        } else if self.r.screenshot {
+            ClipKind::Screenshot
+        } else {
+            ClipKind::Clip
+        }
+    }
+
+    async fn quote(&self) -> Option<ClipQuote<'_>> {
+        self.r.quote.is_some().then_some(ClipQuote(self))
     }
 
     async fn name(&self) -> &str {
@@ -344,6 +458,25 @@ async fn clip(state: &AppState, user: &User, id: i64) -> ApiResult<Clip> {
     Ok(Clip { r: row(state, user.id, id).await?, viewer: user.clone() })
 }
 
+/// Someone's quotes from a book and the ones sent to them, in the order they're in it.
+pub async fn quotes_of(state: &AppState, user: &User, b: &BookRow) -> ApiResult<Vec<Clip>> {
+    if !state.config.current().clips.enabled {
+        return Ok(Vec::new());
+    }
+
+    let rows: Vec<Row> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
+        "{SELECT} WHERE c.source_path = ?2 AND c.quote IS NOT NULL
+             AND (c.owner_id = ?1 OR (s.user_id IS NOT NULL AND s.hidden = 0))
+         ORDER BY c.range_start, c.id"
+    )))
+    .bind(user.id)
+    .bind(&b.path)
+    .fetch_all(&state.db)
+    .await?;
+
+    Ok(rows.into_iter().map(|r| Clip { r, viewer: user.clone() }).collect())
+}
+
 #[derive(Enum, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ClipScope {
     Mine,
@@ -375,7 +508,7 @@ pub struct ClipAllowance {
 
 async fn allowance(state: &AppState, user: &User) -> ApiResult<ClipAllowance> {
     let (bytes, rendered): (i64, i64) = sqlx::query_as(
-        "SELECT COALESCE(SUM(bytes), 0), COUNT(CASE WHEN screenshot = 0 THEN 1 END) FROM clips
+        "SELECT COALESCE(SUM(bytes), 0), COUNT(CASE WHEN screenshot = 0 AND quote IS NULL THEN 1 END) FROM clips
          WHERE owner_id = ? AND state = 'ready'",
     )
     .bind(user.id)
@@ -424,29 +557,43 @@ pub struct ClipQuery;
 
 #[Object]
 impl ClipQuery {
+    /// `kind` only those of a kind, and `book` only quotes from that book.
     async fn clips(
         &self,
         ctx: &Context<'_>,
         #[graphql(default_with = "ClipScope::Mine")] scope: ClipScope,
+        kind: Option<ClipKind>,
+        book: Option<i64>,
     ) -> ApiResult<Vec<Clip>> {
         let (state, user) = (ctx.state(), ctx.user()?);
         enabled(state)?;
 
-        let filter = match scope {
-            ClipScope::Received => "WHERE s.user_id = ?1 AND s.hidden = 0 ORDER BY s.shared_at DESC",
+        let (filter, order) = match scope {
+            ClipScope::Received => ("s.user_id = ?1 AND s.hidden = 0", "s.shared_at DESC"),
             ClipScope::Sent => {
-                "WHERE c.owner_id = ?1 AND EXISTS (SELECT 1 FROM clip_shares WHERE clip_id = c.id) ORDER BY c.created_at DESC"
+                ("c.owner_id = ?1 AND EXISTS (SELECT 1 FROM clip_shares WHERE clip_id = c.id)", "c.created_at DESC")
             },
-            ClipScope::Mine => "WHERE c.owner_id = ?1 ORDER BY c.created_at DESC",
+            ClipScope::Mine => ("c.owner_id = ?1", "c.created_at DESC"),
             ClipScope::Rendering => {
-                "WHERE c.owner_id = ?1 AND c.screenshot = 0 AND c.state IN ('queued', 'rendering') ORDER BY c.created_at"
+                ("c.owner_id = ?1 AND c.screenshot = 0 AND c.state IN ('queued', 'rendering')", "c.created_at")
             },
         };
 
-        let rows: Vec<Row> = sqlx::query_as(sqlx::AssertSqlSafe(format!("{SELECT} {filter} LIMIT 500")))
-            .bind(user.id)
-            .fetch_all(&state.db)
-            .await?;
+        let path = match book {
+            Some(id) => Some(catalog::book(&state.db, id).await?.ok_or_else(|| ApiError::not_found("book"))?.path),
+            None => None,
+        };
+
+        let kind = kind.map_or("", ClipKind::filter);
+
+        let rows: Vec<Row> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
+            "{SELECT} WHERE {filter}{kind} AND (?2 IS NULL OR (c.quote IS NOT NULL AND c.source_path = ?2))
+             ORDER BY {order} LIMIT 500"
+        )))
+        .bind(user.id)
+        .bind(path)
+        .fetch_all(&state.db)
+        .await?;
 
         Ok(rows.into_iter().map(|r| Clip { r, viewer: user.clone() }).collect())
     }
@@ -475,7 +622,7 @@ impl ClipQuery {
         let rows: Vec<(i64, bool, String, i64, i64, i64)> = sqlx::query_as(
             "SELECT u.id, u.is_admin, u.permissions,
                     COALESCE(SUM(CASE WHEN c.state = 'ready' THEN c.bytes END), 0),
-                    COUNT(CASE WHEN c.state = 'ready' AND c.screenshot = 0 THEN 1 END), COUNT(c.id)
+                    COUNT(CASE WHEN c.state = 'ready' AND c.screenshot = 0 AND c.quote IS NULL THEN 1 END), COUNT(c.id)
              FROM users u LEFT JOIN clips c ON c.owner_id = u.id
              GROUP BY u.id ORDER BY 4 DESC, u.username COLLATE NOCASE",
         )
@@ -647,7 +794,7 @@ async fn check_space(state: &AppState, owner: &User) -> ApiResult<()> {
     }
 
     let (bytes, count): (i64, i64) = sqlx::query_as(
-        "SELECT COALESCE(SUM(bytes), 0), COUNT(CASE WHEN screenshot = 0 THEN 1 END) FROM clips
+        "SELECT COALESCE(SUM(bytes), 0), COUNT(CASE WHEN screenshot = 0 AND quote IS NULL THEN 1 END) FROM clips
          WHERE owner_id = ? AND state = 'ready' AND public = 1",
     )
     .bind(owner.id)
@@ -694,6 +841,26 @@ pub struct NewScreenshot {
     subtitles: Option<String>,
     room: Option<String>,
 }
+
+#[derive(InputObject)]
+pub struct NewQuote {
+    book_id: i64,
+
+    /// Characters into the book, as reading positions count them.
+    start: i64,
+    end: i64,
+    /// A note of your own about it.
+    #[graphql(default)]
+    name: String,
+    #[graphql(default)]
+    public: bool,
+
+    #[graphql(default)]
+    recipients: Vec<i64>,
+}
+
+/// The most characters a quote can have.
+pub const QUOTE_LENGTH: i64 = 3000;
 
 #[derive(InputObject)]
 pub struct ClipPatch {
@@ -855,6 +1022,86 @@ impl ClipMutation {
         clip(state, user, id).await
     }
 
+    async fn create_quote(&self, ctx: &Context<'_>, input: NewQuote) -> ApiResult<Clip> {
+        let (state, user) = (ctx.state(), ctx.user()?);
+        enabled(state)?;
+
+        if !user.permissions.clip {
+            return Err(ApiError::forbidden());
+        }
+
+        let b = catalog::book(&state.db, input.book_id)
+            .await?
+            .filter(|b| books::sees(state, user, &b.library))
+            .ok_or_else(|| ApiError::not_found("book"))?;
+
+        let (start, end) = (input.start, input.end);
+
+        if start < 0 || end <= start || end > b.length {
+            return Err(ApiError::bad_request("pick some of the book's text"));
+        }
+
+        if end - start > QUOTE_LENGTH {
+            return Err(ApiError::bad_request(format!("quotes can be up to {QUOTE_LENGTH} characters long")));
+        }
+
+        if input.public && !clips::pinned(state, user.id).await {
+            return Err(ApiError::new(StatusCode::FORBIDDEN, "you can't make public links"));
+        }
+
+        let book = state
+            .books
+            .get(FsPath::new(&b.path), b.mtime)
+            .await
+            .map_err(|e| ApiError::new(StatusCode::UNPROCESSABLE_ENTITY, format!("can't read this book: {e:#}")))?;
+
+        let text = book.document.text(start as u64, end as u64);
+
+        if text.trim().is_empty() {
+            return Err(ApiError::bad_request("there's no text there to quote"));
+        }
+
+        let chapter =
+            book.document.chapters.iter().take_while(|c| c.at <= start as u64).last().map(|c| c.title.clone());
+        let year: Option<i64> =
+            b.published.as_deref().or(b.online_date.as_deref()).and_then(|d| d.get(..4)?.parse().ok());
+        let authors = b.authors();
+
+        let id: i64 = sqlx::query_scalar(
+            "INSERT INTO clips (code, owner_id, title, library, source_path, source_size, source_mtime, show_title, kind,
+                label, year, range_start, range_end, height, state, public, quote, author, book_length, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'book', ?, ?, ?, ?, 0, 'ready', ?, ?, ?, ?, ?) RETURNING id",
+        )
+        .bind(new_code())
+        .bind(user.id)
+        .bind(clean_title(&input.name))
+        .bind(&b.library)
+        .bind(&b.path)
+        .bind(b.size)
+        .bind(b.mtime)
+        .bind(&b.title)
+        .bind(chapter)
+        .bind(year)
+        .bind(start as f64)
+        .bind(end as f64)
+        .bind(input.public)
+        .bind(&text)
+        .bind((!authors.is_empty()).then(|| authors.join(", ")))
+        .bind(b.length)
+        .bind(now())
+        .fetch_one(&state.db)
+        .await?;
+
+        tracing::info!("{} quoted {} characters of {}", user.username, end - start, b.title);
+
+        if !input.recipients.is_empty() {
+            share_with(state, user, id, &input.recipients).await?;
+        }
+
+        clips::changed(state, id).await;
+        clip(state, user, id).await
+    }
+
     async fn update_clip(&self, ctx: &Context<'_>, id: i64, input: ClipPatch) -> ApiResult<Clip> {
         let (state, user) = (ctx.state(), ctx.user()?);
         enabled(state)?;
@@ -876,7 +1123,7 @@ impl ClipMutation {
 
             sqlx::query("UPDATE clips SET public = ? WHERE id = ?").bind(public).bind(id).execute(&state.db).await?;
 
-            if public && r.state == "evicted" {
+            if public && r.state == "evicted" && r.quote.is_none() {
                 queue(state, &r).await?;
             }
 
@@ -888,6 +1135,10 @@ impl ClipMutation {
         if let Some(recipe) = &input.recipe {
             if r.screenshot {
                 return Err(ApiError::bad_request("a screenshot can't be changed; take another"));
+            }
+
+            if r.quote.is_some() {
+                return Err(ApiError::bad_request("a quote can't be changed; quote it again"));
             }
 
             let media_id = match clips::source_file(state, r.media_id, &r.source_path).await? {
@@ -953,7 +1204,8 @@ impl ClipMutation {
         enabled(state)?;
         let r = watchable(state, user, id).await?;
         let manage = r.owner_id == user.id || user.is_admin;
-        let missing = r.state == "evicted" || (r.state == "ready" && on_disk(state, &r).is_none());
+        let missing =
+            r.quote.is_none() && (r.state == "evicted" || (r.state == "ready" && on_disk(state, &r).is_none()));
 
         if missing || (r.state == "failed" && manage) {
             match source_status(state, &r).await? {
@@ -1066,7 +1318,7 @@ impl ClipMutation {
         let (state, admin) = (ctx.state(), ctx.admin()?);
 
         let rows: Vec<(i64, i64)> = sqlx::query_as(
-            "UPDATE clips SET state = 'evicted', bytes = NULL WHERE state = 'ready' RETURNING id, owner_id",
+            "UPDATE clips SET state = 'evicted', bytes = NULL WHERE state = 'ready' AND quote IS NULL RETURNING id, owner_id",
         )
         .fetch_all(&state.db)
         .await?;
@@ -1140,11 +1392,8 @@ pub async fn still(
 }
 
 async fn share_with(state: &AppState, user: &User, id: i64, users: &[i64]) -> ApiResult<()> {
-    let (owner, title, show, label, rendered_at, screenshot): (i64, String, String, Option<String>, Option<i64>, bool) =
-        sqlx::query_as("SELECT owner_id, title, show_title, label, rendered_at, screenshot FROM clips WHERE id = ?")
-            .bind(id)
-            .fetch_one(&state.db)
-            .await?;
+    let r = row(state, user.id, id).await?;
+    let (owner, title, show, label) = (r.owner_id, r.title.clone(), r.show_title.clone(), r.label.clone());
 
     let mut added = Vec::new();
 
@@ -1175,7 +1424,20 @@ async fn share_with(state: &AppState, user: &User, id: i64, users: &[i64]) -> Ap
     }
 
     if !added.is_empty() {
-        let about = [show, label.unwrap_or_default()].join(" ").trim().to_string();
+        let (what, about, image) = match &r.quote {
+            Some(_) => {
+                let cover = catalog::by_path(&state.db, &r.source_path)
+                    .await?
+                    .filter(BookRow::has_cover)
+                    .map(|b| format!("/api/books/{}/cover?v={}", b.id, b.mtime));
+                ("quote", show, cover)
+            },
+            None => (
+                if r.screenshot { "screenshot" } else { "clip" },
+                [show, label.unwrap_or_default()].join(" ").trim().to_string(),
+                r.rendered_at.map(|t| format!("/api/clips/{id}/poster?v={t}")),
+            ),
+        };
 
         notifications::send(
             state,
@@ -1183,9 +1445,9 @@ async fn share_with(state: &AppState, user: &User, id: i64, users: &[i64]) -> Ap
             New {
                 kind: "clip",
                 priority: true,
-                title: format!("{} sent you a {}", user.username, if screenshot { "screenshot" } else { "clip" }),
+                title: format!("{} sent you a {what}", user.username),
                 body: Some(if title.is_empty() { about } else { format!("{title} · {about}") }),
-                image: rendered_at.map(|t| format!("/api/clips/{id}/poster?v={t}")),
+                image,
                 link: Some(format!("/clips?clip={id}")),
                 actor_id: Some(user.id),
                 ..Default::default()
@@ -1223,6 +1485,10 @@ async fn serve_file(
     req: Request,
     cache: &'static str,
 ) -> ApiResult<Response> {
+    if r.quote.is_some() {
+        return Err(ApiError::not_found("file"));
+    }
+
     let file = match (r.state.as_str(), on_disk(state, r)) {
         ("ready", Some(f)) => f,
         _ => return Err(ApiError::conflict("this clip isn't rendered right now")),
@@ -1256,6 +1522,11 @@ pub async fn poster(State(state): State<Arc<AppState>>, user: User, Path(id): Pa
 }
 
 async fn serve_poster(state: &AppState, r: &Row, cache: &str) -> ApiResult<Response> {
+    if r.quote.is_some() {
+        let b = catalog::by_path(&state.db, &r.source_path).await?.ok_or_else(|| ApiError::not_found("picture"))?;
+        return super::music::image(state, books::cover_file(state, &b).await, Some(600)).await;
+    }
+
     let file = clips::file(state, r.owner_id, r.id)?.with_extension("jpg");
     let data = tokio::fs::read(&file).await.map_err(|_| ApiError::not_found("picture"))?;
 
@@ -1334,7 +1605,7 @@ async fn public_clip(state: &AppState, code: &str) -> Option<Row> {
 }
 
 async fn revive(state: &Arc<AppState>, r: &Row) {
-    if r.state == "evicted" || (r.state == "ready" && on_disk(state, r).is_none()) {
+    if r.quote.is_none() && r.state == "evicted" || (r.state == "ready" && on_disk(state, r).is_none()) {
         let can = auth::load_user(state, r.owner_id).await.ok().flatten().is_some_and(|u| u.permissions.clip);
 
         if can
@@ -1399,6 +1670,11 @@ pub async fn page(
 
     if r.screenshot {
         return Html(screenshot_page(&r, &base, &code, &title, &about, ready, &theme)).into_response();
+    }
+
+    if let Some(quote) = &r.quote {
+        let cover = catalog::by_path(&state.db, &r.source_path).await.ok().flatten().is_some_and(|b| b.has_cover());
+        return Html(quote_page(&r, quote, &base, &code, cover, &theme)).into_response();
     }
 
     if q.embed.is_some() {
@@ -1528,6 +1804,72 @@ fn screenshot_page(r: &Row, base: &str, code: &str, title: &str, about: &str, re
     shell(title, &format!("{meta}\n{theme}\n{refresh}"), &body)
 }
 
+/// The start of a quote, cut at a word, for where there's only room for a line or two.
+fn excerpt(text: &str, max: usize) -> String {
+    let flat = text.split_whitespace().collect::<Vec<_>>().join(" ");
+
+    if flat.chars().count() <= max {
+        return flat;
+    }
+
+    let cut: String = flat.chars().take(max).collect();
+    format!("{}…", cut.rsplit_once(' ').map_or(cut.as_str(), |(head, _)| head).trim_end_matches([',', ';', ':']))
+}
+
+fn quote_page(r: &Row, quote: &str, base: &str, code: &str, cover: bool, theme: &str) -> String {
+    let page_url = format!("{base}/c/{code}");
+    let image = format!("{base}/c/{code}/poster.jpg");
+    let book = match &r.author {
+        Some(a) => format!("{} by {a}", r.show_title),
+        None => r.show_title.clone(),
+    };
+    let image_meta = if cover {
+        format!(
+            "<meta property=\"og:image\" content=\"{0}\">\n<meta name=\"twitter:image\" content=\"{0}\">\n",
+            escape(&image)
+        )
+    } else {
+        String::new()
+    };
+
+    let meta = format!(
+        r##"<meta name="robots" content="noindex">
+<meta property="og:site_name" content="tinystream">
+<meta property="og:type" content="article">
+<meta property="og:url" content="{page}">
+<meta property="og:title" content="{title}">
+<meta property="og:description" content="{desc}">
+{image_meta}<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="{title}">
+<meta name="twitter:description" content="{desc}">
+<meta name="description" content="{desc}">"##,
+        page = escape(&page_url),
+        title = escape(&book),
+        desc = escape(&format!("“{}”", excerpt(quote, 280))),
+    );
+
+    let paragraphs: String = quote
+        .split("\n\n")
+        .map(|p| format!("<p>{}</p>", p.split('\n').map(escape).collect::<Vec<_>>().join("<br>")))
+        .collect();
+    let note = if r.title.is_empty() {
+        String::new()
+    } else {
+        format!("<p class=note>{} · {}</p>", escape(&r.title), escape(&r.owner_name))
+    };
+    let picture = if cover { format!(r#"<img src="{}" alt="">"#, escape(&image)) } else { String::new() };
+    let chapter = r.label.as_deref().map(|l| format!("<span>{}</span>", escape(l))).unwrap_or_default();
+
+    let body = format!(
+        r#"<figure class=quote><blockquote>{paragraphs}</blockquote>{note}
+<figcaption>{picture}<div><h1>{title}</h1><p>{author}</p>{chapter}</div></figcaption></figure>"#,
+        title = escape(&r.show_title),
+        author = escape(r.author.as_deref().unwrap_or_default()),
+    );
+
+    shell(&book, &format!("{meta}\n{theme}"), &body)
+}
+
 fn shell(title: &str, head: &str, body: &str) -> String {
     format!(
         r#"<!doctype html>
@@ -1553,6 +1895,13 @@ p {{ margin: 2px 0 0; color: var(--color-ink-2, #9b9b98); }}
   color: var(--color-on-accent, #191919); font-weight: 600;
   text-decoration: none; }}
 .wait {{ text-align: center; }}
+.quote {{ width: min(100%, 38em); margin: 0 auto; }}
+blockquote {{ margin: 0; font: 21px/1.65 ui-serif, Georgia, serif; text-wrap: pretty; }}
+blockquote p {{ margin: 0 0 0.8em; color: inherit; }}
+figcaption {{ display: flex; align-items: center; gap: 14px; margin-top: 28px; padding-top: 20px;
+  border-top: 1px solid var(--color-line, #2f2f2f); }}
+figcaption img {{ width: 52px; height: 78px; object-fit: cover; border-radius: 6px; background: none; }}
+figcaption span {{ display: block; margin-top: 2px; font-size: 13px; color: var(--color-ink-3, #6f6f6c); }}
 .note {{ color: var(--color-ink-2, #9b9b98); }}
 </style>
 </head>

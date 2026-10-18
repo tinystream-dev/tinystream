@@ -228,6 +228,13 @@
   }
 }
 
+@keyframes quote-flash {
+  0%,
+  45% {
+    background-color: color-mix(in oklab, var(--color-highlight) 55%, transparent);
+  }
+}
+
 @keyframes fade-out {
   to {
     opacity: 0;

@@ -548,7 +548,7 @@ struct Ready {
 async fn ready(state: &AppState, owner: Option<i64>) -> sqlx::Result<Vec<Ready>> {
     let rows: Vec<(i64, i64, i64, bool, bool)> = sqlx::query_as(
         "SELECT id, owner_id, COALESCE(bytes, 0), public, screenshot FROM clips
-         WHERE state = 'ready' AND (?1 IS NULL OR owner_id = ?1)
+         WHERE state = 'ready' AND quote IS NULL AND (?1 IS NULL OR owner_id = ?1)
          ORDER BY COALESCE(viewed_at, rendered_at) DESC, id DESC",
     )
     .bind(owner)

@@ -33,6 +33,17 @@ export type ChangedList =
   | 'REQUESTS'
   | 'USERS';
 
+export type ClipKind =
+  | 'CLIP'
+  | 'QUOTE'
+  | 'SCREENSHOT';
+
+export type ClipPatch = {
+  name?: string | null | undefined;
+  public?: boolean | null | undefined;
+  recipe?: RecipeInput | null | undefined;
+};
+
 export type ClipState =
   | 'EVICTED'
   | 'FAILED'
@@ -187,6 +198,17 @@ export type NetworkConfigInput = {
   port: number;
 };
 
+export type NewQuote = {
+  bookId: number;
+  end: number;
+  /** A note of your own about it. */
+  name?: string;
+  public?: boolean;
+  recipients?: Array<number>;
+  /** Characters into the book, as reading positions count them. */
+  start: number;
+};
+
 export type NewRequest = {
   library: string;
   name: string;
@@ -294,6 +316,15 @@ export type ProfileInput = {
 export type Provider =
   | 'ANILIST'
   | 'TMDB';
+
+export type RecipeInput = {
+  audio?: number | null | undefined;
+  end: number;
+  halfRate?: boolean;
+  height: number;
+  start: number;
+  subtitles?: string | null | undefined;
+};
 
 export type ReleaseInput = {
   infoHash?: string | null | undefined;
@@ -932,7 +963,7 @@ export type TakeScreenshotMutationVariables = Exact<{
 }>;
 
 
-export type TakeScreenshotMutation = { takeScreenshot: { id: number, screenshot: boolean, name: string, mine: boolean, canManage: boolean, start: number, end: number, audio: number | null, subtitles: string | null, state: ClipState, progress: number | null, error: string | null, bytes: number | null, width: number | null, height: number | null, fps: number | null, renderedAt: number | null, createdAt: number, sharedAt: number | null, public: boolean, link: string | null, linkLive: boolean, file: string, poster: string | null, owner: { id: number, username: string, avatar: string | null }, source: { name: string, kind: TitleKind, label: string | null, year: number | null, status: SourceStatus, video: { id: number } | null, title: { id: number } | null }, quality: { height: number, halfRate: boolean }, recipients: Array<{ sharedAt: number, hidden: boolean, user: { id: number, username: string, avatar: string | null } }> } };
+export type TakeScreenshotMutation = { takeScreenshot: { id: number, kind: ClipKind, screenshot: boolean, name: string, mine: boolean, canManage: boolean, start: number, end: number, audio: number | null, subtitles: string | null, state: ClipState, progress: number | null, error: string | null, bytes: number | null, width: number | null, height: number | null, fps: number | null, renderedAt: number | null, createdAt: number, sharedAt: number | null, public: boolean, link: string | null, linkLive: boolean, file: string, poster: string | null, owner: { id: number, username: string, avatar: string | null }, source: { name: string, kind: TitleKind, label: string | null, year: number | null, status: SourceStatus, video: { id: number } | null, title: { id: number } | null, book: { id: number, title: string, cover: string | null, coverTint: string | null } | null }, quote: { text: string, author: string | null } | null, quality: { height: number, halfRate: boolean }, recipients: Array<{ sharedAt: number, hidden: boolean, user: { id: number, username: string, avatar: string | null } }> } };
 
 export type PlayerScheduleQueryVariables = Exact<{
   id: number;
@@ -980,6 +1011,50 @@ export type PeopleQueryVariables = Exact<{ [key: string]: never; }>;
 
 
 export type PeopleQuery = { users: Array<{ id: number, username: string, avatar: string | null }> };
+
+export type BookQuotesQueryVariables = Exact<{
+  id: number;
+}>;
+
+
+export type BookQuotesQuery = { book: { id: number, quotes: Array<{ id: number, name: string, mine: boolean, canManage: boolean, public: boolean, link: string | null, linkLive: boolean, createdAt: number, sharedAt: number | null, owner: { id: number, username: string, avatar: string | null }, source: { label: string | null }, quote: { text: string, range: { start: number, end: number } | null } | null, recipients: Array<{ user: { id: number, username: string, avatar: string | null } }> }> } | null };
+
+export type CreateQuoteMutationVariables = Exact<{
+  input: NewQuote;
+}>;
+
+
+export type CreateQuoteMutation = { createQuote: { id: number, name: string, mine: boolean, canManage: boolean, public: boolean, link: string | null, linkLive: boolean, createdAt: number, sharedAt: number | null, owner: { id: number, username: string, avatar: string | null }, source: { label: string | null }, quote: { text: string, range: { start: number, end: number } | null } | null, recipients: Array<{ user: { id: number, username: string, avatar: string | null } }> } };
+
+export type UpdateQuoteMutationVariables = Exact<{
+  id: number;
+  input: ClipPatch;
+}>;
+
+
+export type UpdateQuoteMutation = { updateClip: { id: number } };
+
+export type ShareQuoteMutationVariables = Exact<{
+  id: number;
+  users: Array<number> | number;
+}>;
+
+
+export type ShareQuoteMutation = { shareClip: { id: number } };
+
+export type DeleteQuoteMutationVariables = Exact<{
+  id: number;
+}>;
+
+
+export type DeleteQuoteMutation = { deleteClip: number };
+
+export type HideQuoteMutationVariables = Exact<{
+  id: number;
+}>;
+
+
+export type HideQuoteMutation = { hideClip: number };
 
 export type SignOutMutationVariables = Exact<{ [key: string]: never; }>;
 
@@ -1306,7 +1381,7 @@ export type TranscodingFieldsFragment = { vaapi: string | null, vaapiError: stri
 
 export type DiscoverResultFieldsFragment = { category: MediaCategory, provider: Provider, id: string, name: string, romaji: string | null, year: number | null, poster: string | null, overview: string | null, library: string, titleId: number | null, seriesId: number | null, monitor: Monitor | null, requestState: RequestState | null, because: string | null };
 
-export type ClipFieldsFragment = { id: number, screenshot: boolean, name: string, mine: boolean, canManage: boolean, start: number, end: number, audio: number | null, subtitles: string | null, state: ClipState, progress: number | null, error: string | null, bytes: number | null, width: number | null, height: number | null, fps: number | null, renderedAt: number | null, createdAt: number, sharedAt: number | null, public: boolean, link: string | null, linkLive: boolean, file: string, poster: string | null, owner: { id: number, username: string, avatar: string | null }, source: { name: string, kind: TitleKind, label: string | null, year: number | null, status: SourceStatus, video: { id: number } | null, title: { id: number } | null }, quality: { height: number, halfRate: boolean }, recipients: Array<{ sharedAt: number, hidden: boolean, user: { id: number, username: string, avatar: string | null } }> };
+export type ClipFieldsFragment = { id: number, kind: ClipKind, screenshot: boolean, name: string, mine: boolean, canManage: boolean, start: number, end: number, audio: number | null, subtitles: string | null, state: ClipState, progress: number | null, error: string | null, bytes: number | null, width: number | null, height: number | null, fps: number | null, renderedAt: number | null, createdAt: number, sharedAt: number | null, public: boolean, link: string | null, linkLive: boolean, file: string, poster: string | null, owner: { id: number, username: string, avatar: string | null }, source: { name: string, kind: TitleKind, label: string | null, year: number | null, status: SourceStatus, video: { id: number } | null, title: { id: number } | null, book: { id: number, title: string, cover: string | null, coverTint: string | null } | null }, quote: { text: string, author: string | null } | null, quality: { height: number, halfRate: boolean }, recipients: Array<{ sharedAt: number, hidden: boolean, user: { id: number, username: string, avatar: string | null } }> };
 
 export type ClipAllowanceFieldsFragment = { canClip: boolean, canLink: boolean, maxLength: number, bytes: number, rendered: number, storage: number, limit: number, customDefaultFont: boolean };
 
@@ -1339,6 +1414,8 @@ export type PlaylistCardFragment = { id: number, name: string, comment: string |
 export type BookCardFragment = { id: number, library: string, title: string, authors: Array<string>, series: string | null, seriesIndex: number | null, year: number | null, cover: string | null, length: number, addedAt: number, reading: { position: number, progress: number, finished: boolean, updatedAt: number } | null };
 
 export type BookDetailFragment = { description: string | null, publisher: string | null, published: string | null, language: string | null, isbn: string | null, genres: Array<string>, format: BookFormat, chapterCount: number, pages: number | null, rating: number | null, size: number, provider: string | null, providerUrl: string | null, fetched: boolean, coverTint: string | null, content: string, files: string, file: string, id: number, library: string, title: string, authors: Array<string>, series: string | null, seriesIndex: number | null, year: number | null, cover: string | null, length: number, addedAt: number, reading: { position: number, progress: number, finished: boolean, updatedAt: number } | null };
+
+export type QuoteMarkFragment = { id: number, name: string, mine: boolean, canManage: boolean, public: boolean, link: string | null, linkLive: boolean, createdAt: number, sharedAt: number | null, owner: { id: number, username: string, avatar: string | null }, source: { label: string | null }, quote: { text: string, range: { start: number, end: number } | null } | null, recipients: Array<{ user: { id: number, username: string, avatar: string | null } }> };
 
 export class TypedDocumentString<TResult, TVariables>
   extends String
@@ -1689,6 +1766,7 @@ export const DiscoverResultFieldsFragmentDoc = new TypedDocumentString(`
 export const ClipFieldsFragmentDoc = new TypedDocumentString(`
     fragment ClipFields on Clip {
   id
+  kind
   screenshot
   name
   mine
@@ -1703,11 +1781,21 @@ export const ClipFieldsFragmentDoc = new TypedDocumentString(`
     title {
       id
     }
+    book {
+      id
+      title
+      cover
+      coverTint
+    }
     name
     kind
     label
     year
     status
+  }
+  quote {
+    text
+    author
   }
   start
   end
@@ -2256,6 +2344,41 @@ export const BookDetailFragmentDoc = new TypedDocumentString(`
     updatedAt
   }
 }`, {"fragmentName":"BookDetail"}) as unknown as TypedDocumentString<BookDetailFragment, unknown>;
+export const QuoteMarkFragmentDoc = new TypedDocumentString(`
+    fragment QuoteMark on Clip {
+  id
+  name
+  mine
+  canManage
+  public
+  link
+  linkLive
+  createdAt
+  sharedAt
+  owner {
+    ...Person
+  }
+  source {
+    label
+  }
+  quote {
+    text
+    range {
+      start
+      end
+    }
+  }
+  recipients {
+    user {
+      ...Person
+    }
+  }
+}
+    fragment Person on User {
+  id
+  username
+  avatar
+}`, {"fragmentName":"QuoteMark"}) as unknown as TypedDocumentString<QuoteMarkFragment, unknown>;
 export const CalendarDocument = new TypedDocumentString(`
     query Calendar($from: Int!, $to: Int!) {
   calendar(from: $from, to: $to) {
@@ -3650,6 +3773,7 @@ export const TakeScreenshotDocument = new TypedDocumentString(`
 }
 fragment ClipFields on Clip {
   id
+  kind
   screenshot
   name
   mine
@@ -3664,11 +3788,21 @@ fragment ClipFields on Clip {
     title {
       id
     }
+    book {
+      id
+      title
+      cover
+      coverTint
+    }
     name
     kind
     label
     year
     status
+  }
+  quote {
+    text
+    author
   }
   start
   end
@@ -4041,6 +4175,113 @@ export const PeopleDocument = new TypedDocumentString(`
   username
   avatar
 }`) as unknown as TypedDocumentString<PeopleQuery, PeopleQueryVariables>;
+export const BookQuotesDocument = new TypedDocumentString(`
+    query BookQuotes($id: Int!) {
+  book(id: $id) {
+    id
+    quotes {
+      ...QuoteMark
+    }
+  }
+}
+    fragment Person on User {
+  id
+  username
+  avatar
+}
+fragment QuoteMark on Clip {
+  id
+  name
+  mine
+  canManage
+  public
+  link
+  linkLive
+  createdAt
+  sharedAt
+  owner {
+    ...Person
+  }
+  source {
+    label
+  }
+  quote {
+    text
+    range {
+      start
+      end
+    }
+  }
+  recipients {
+    user {
+      ...Person
+    }
+  }
+}`) as unknown as TypedDocumentString<BookQuotesQuery, BookQuotesQueryVariables>;
+export const CreateQuoteDocument = new TypedDocumentString(`
+    mutation CreateQuote($input: NewQuote!) {
+  createQuote(input: $input) {
+    ...QuoteMark
+  }
+}
+    fragment Person on User {
+  id
+  username
+  avatar
+}
+fragment QuoteMark on Clip {
+  id
+  name
+  mine
+  canManage
+  public
+  link
+  linkLive
+  createdAt
+  sharedAt
+  owner {
+    ...Person
+  }
+  source {
+    label
+  }
+  quote {
+    text
+    range {
+      start
+      end
+    }
+  }
+  recipients {
+    user {
+      ...Person
+    }
+  }
+}`) as unknown as TypedDocumentString<CreateQuoteMutation, CreateQuoteMutationVariables>;
+export const UpdateQuoteDocument = new TypedDocumentString(`
+    mutation UpdateQuote($id: Int!, $input: ClipPatch!) {
+  updateClip(id: $id, input: $input) {
+    id
+  }
+}
+    `) as unknown as TypedDocumentString<UpdateQuoteMutation, UpdateQuoteMutationVariables>;
+export const ShareQuoteDocument = new TypedDocumentString(`
+    mutation ShareQuote($id: Int!, $users: [Int!]!) {
+  shareClip(id: $id, users: $users) {
+    id
+  }
+}
+    `) as unknown as TypedDocumentString<ShareQuoteMutation, ShareQuoteMutationVariables>;
+export const DeleteQuoteDocument = new TypedDocumentString(`
+    mutation DeleteQuote($id: Int!) {
+  deleteClip(id: $id)
+}
+    `) as unknown as TypedDocumentString<DeleteQuoteMutation, DeleteQuoteMutationVariables>;
+export const HideQuoteDocument = new TypedDocumentString(`
+    mutation HideQuote($id: Int!) {
+  hideClip(id: $id)
+}
+    `) as unknown as TypedDocumentString<HideQuoteMutation, HideQuoteMutationVariables>;
 export const SignOutDocument = new TypedDocumentString(`
     mutation SignOut {
   signOut

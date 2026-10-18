@@ -2,12 +2,13 @@
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, createFileRoute } from '@tanstack/react-router'
-import { BookOpen, Check, Download, ExternalLink, RefreshCw, Star, Undo2 } from 'lucide-react'
+import { BookOpen, Check, Download, ExternalLink, Highlighter, RefreshCw, Star, Undo2 } from 'lucide-react'
 import { type CSSProperties, useState } from 'react'
 import { percent } from '@tinystream/shared/books'
 import { language } from '@tinystream/shared/format'
 import { type BookCard, BooksQuery, RefreshBook, SetBookFinished, bookQuery, byline, contentQuery, patchReading, volume } from '../books/api'
 import { BookCover, BookGrid, BookTile } from '../books/components'
+import { useQuotes } from '../books/quotes'
 import { Empty, Page, Section } from '../components/Page'
 import { TitleSkeleton } from '../components/Skeleton'
 import { toast, toastError } from '../components/feedback'
@@ -138,6 +139,7 @@ function BookPage() {
                   <RefreshCw className="size-4.5" /> Refresh details
                 </Button>
               )}
+              <QuotesLink book={book.id} />
             </div>
           </div>
         </div>
@@ -196,5 +198,18 @@ function BookPage() {
         )}
       </Page>
     </div>
+  )
+}
+
+/** How many quotes you've taken from it, to see them in Clips. */
+function QuotesLink({ book }: { book: number }) {
+  const mine = useQuotes(book).filter((m) => m.quote.mine).length
+  if (mine === 0) return null
+  return (
+    <Link to="/clips" search={{ tab: 'mine', book }}>
+      <Button size="lg" variant="plain" tabIndex={-1}>
+        <Highlighter className="size-4.5" /> {mine === 1 ? '1 quote' : `${mine} quotes`}
+      </Button>
+    </Link>
   )
 }

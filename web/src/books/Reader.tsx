@@ -17,14 +17,17 @@ import {
   lengthOf,
   locate,
   percent,
+  pieces,
   positionOf,
   styleOf,
 } from '@tinystream/shared/books'
 import { Empty, Page } from '../components/Page'
 import { IconButton, Panel, Popover, Spinner } from '../components/ui'
 import { request } from '../lib/api'
+import { useClipsOn } from '../lib/hooks'
 import { type BookDetail, SaveReading, contentQuery, patchReading } from './api'
 import { setFocus, useFocus } from './focus'
+import { type Mark, QuoteCard, QuoteList, SelectionBar, marksByBlock, useQuotes, useSelectionIn } from './quotes'
 
 const SIZES = [15, 16, 17, 18, 20, 22, 24, 27]
 const SIZE_KEY = 'reader.size'
@@ -73,27 +76,67 @@ function SpanView({ span, onJump }: { span: Span; onJump: (block: number) => voi
   return node
 }
 
+/** How a highlight looks: yours filled in, ones sent to you underlined, the one just opened flashing. */
+function markClass(marks: Mark[], flash: number | null) {
+  const flashing = flash !== null && marks.some((m) => m.quote.id === flash) ? 'animate-[quote-flash_2s_ease-out]' : ''
+  return marks.some((m) => m.quote.mine)
+    ? `cursor-pointer rounded-[0.15em] bg-highlight/25 text-inherit box-decoration-clone ${flashing}`
+    : `cursor-pointer bg-transparent text-inherit underline decoration-highlight/70 decoration-2 underline-offset-[0.22em] ${flashing}`
+}
+
 // Space above a block is padding, never margin: margins between blocks would collapse into whichever
 // was laid out, so the heights measured of them wouldn't add up to the page.
 const headings = ['', 'text-[1.6em] pt-[1.45em] mb-[0.9em]', 'text-[1.35em] pt-[1.15em] mb-[0.8em]', 'text-[1.15em] pt-[0.8em] mb-[0.7em]']
 
-const BlockView = memo(function BlockView({ block: b, files, onJump }: { block: Block; files: string; onJump: (block: number) => void }) {
-  const spans = b.s?.map((s, i) => <SpanView key={i} span={s} onJump={onJump} />)
+const BlockView = memo(function BlockView({
+  block: b,
+  index,
+  files,
+  marks,
+  flash,
+  onJump,
+}: {
+  block: Block
+  index: number
+  files: string
+  marks?: Mark[]
+  flash: number | null
+  onJump: (block: number) => void
+}) {
+  const spans = marks
+    ? pieces(b, marks).map((p, i) =>
+        p.marks.length === 0 ? (
+          <SpanView key={i} span={p.span} onJump={onJump} />
+        ) : (
+          <mark key={i} data-q={p.marks.map((m) => m.quote.id).join(',')} className={markClass(p.marks, flash)}>
+            <SpanView span={p.span} onJump={onJump} />
+          </mark>
+        ),
+      )
+    : b.s?.map((s, i) => <SpanView key={i} span={s} onJump={onJump} />)
   const align = b.c ? 'text-center' : ''
   switch (b.k) {
     case 'h':
-      return <h2 className={`font-semibold leading-snug tracking-[-0.01em] text-balance whitespace-pre-line ${headings[b.l ?? 1] ?? 'pt-[0.5em] mb-[0.6em]'} ${align}`}>{spans}</h2>
+      return (
+        <h2 data-b={index} className={`font-semibold leading-snug tracking-[-0.01em] text-balance whitespace-pre-line ${headings[b.l ?? 1] ?? 'pt-[0.5em] mb-[0.6em]'} ${align}`}>
+          {spans}
+        </h2>
+      )
     case 'quote':
       return (
-        <blockquote className={`mb-[0.9em] border-l-2 border-line-strong pl-[1em] whitespace-pre-line text-ink-2 ${align}`} style={{ marginLeft: `${((b.l ?? 1) - 1) * 1}em` }}>
+        <blockquote data-b={index} className={`mb-[0.9em] border-l-2 border-line-strong pl-[1em] whitespace-pre-line text-ink-2 ${align}`} style={{ marginLeft: `${((b.l ?? 1) - 1) * 1}em` }}>
           {spans}
         </blockquote>
       )
     case 'pre':
-      return <pre className="mb-[0.9em] overflow-x-auto font-mono text-[0.85em] leading-relaxed whitespace-pre-wrap">{spans}</pre>
+      return (
+        <pre data-b={index} className="mb-[0.9em] overflow-x-auto font-mono text-[0.85em] leading-relaxed whitespace-pre-wrap">
+          {spans}
+        </pre>
+      )
     case 'li':
       return (
-        <p className="relative mb-[0.4em] whitespace-pre-line" style={{ paddingLeft: `${(b.l ?? 1) * 1.25}em` }}>
+        <p data-b={index} className="relative mb-[0.4em] whitespace-pre-line" style={{ paddingLeft: `${(b.l ?? 1) * 1.25}em` }}>
           <span aria-hidden className="absolute text-ink-3" style={{ left: `${(b.l ?? 1) * 1.25 - 0.9}em` }}>
             •
           </span>
@@ -113,7 +156,11 @@ const BlockView = memo(function BlockView({ block: b, files, onJump }: { block: 
         </div>
       )
     default:
-      return <p className={`mb-[0.9em] whitespace-pre-line ${align}`}>{spans}</p>
+      return (
+        <p data-b={index} className={`mb-[0.9em] whitespace-pre-line ${align}`}>
+          {spans}
+        </p>
+      )
   }
 })
 
@@ -129,7 +176,10 @@ const Text = memo(function Text({
   above,
   below,
   files,
+  marks,
+  flash,
   onJump,
+  onMark,
   articleRef,
 }: {
   doc: BookDocument
@@ -137,15 +187,27 @@ const Text = memo(function Text({
   above: number
   below: number
   files: string
+  marks: Map<number, Mark[]>
+  flash: number | null
   onJump: (block: number) => void
+  onMark: (ids: number[], rect: DOMRect) => void
   articleRef: React.RefObject<HTMLElement | null>
 }) {
   return (
-    <article ref={articleRef} className="reader-text">
+    <article
+      ref={articleRef}
+      className="reader-text"
+      onClick={(e) => {
+        const mark = (e.target as Element).closest<HTMLElement>('mark[data-q]')
+        if (!mark || !getSelection()?.isCollapsed) return
+        onMark(mark.dataset.q!.split(',').map(Number), mark.getBoundingClientRect())
+      }}
+    >
       <div aria-hidden className="[overflow-anchor:none]" style={{ height: above }} />
-      {doc.blocks.slice(win.from, win.to).map((b, i) => (
-        <BlockView key={win.from + i} block={b} files={files} onJump={onJump} />
-      ))}
+      {doc.blocks.slice(win.from, win.to).map((b, i) => {
+        const marked = marks.get(win.from + i)
+        return <BlockView key={win.from + i} block={b} index={win.from + i} files={files} marks={marked} flash={marked ? flash : null} onJump={onJump} />
+      })}
       <div aria-hidden className="[overflow-anchor:none]" style={{ height: below }} />
     </article>
   )
@@ -308,7 +370,7 @@ function childAt(kids: HTMLCollection, y: number) {
   return lo
 }
 
-export function Reader({ book }: { book: BookDetail }) {
+export function Reader({ book, quote }: { book: BookDetail; quote?: number }) {
   const qc = useQueryClient()
   const { data: doc, error } = useQuery(contentQuery(book.content))
   const focus = useFocus()
@@ -328,6 +390,13 @@ export function Reader({ book }: { book: BookDetail }) {
   // A position to put on the reading line once laid out, or a block to keep where it was in the page.
   const target = useRef<number | null>(null)
   const anchor = useRef<{ index: number; y: number } | null>(null)
+  const clipsOn = useClipsOn()
+  const marks = useQuotes(book.id)
+  const byBlock = useMemo(() => (doc ? marksByBlock(doc, marks) : new Map<number, Mark[]>()), [doc, marks])
+  const [picked, unpick] = useSelectionIn(article, doc)
+  const [card, setCard] = useState<{ ids: number[]; rect: DOMRect } | null>(null)
+  const [flash, setFlash] = useState<number | null>(null)
+  const onMark = useCallback((ids: number[], rect: DOMRect) => setCard({ ids, rect }), [])
 
   const saver = useMemo(
     () =>
@@ -416,6 +485,18 @@ export function Reader({ book }: { book: BookDetail }) {
   useLayoutEffect(() => {
     if (doc && !placed) goTo(start.current)
   }, [doc, placed, goTo])
+
+  // Opened from a quote: go to it, and point it out.
+  const shownQuote = useRef(false)
+  useEffect(() => {
+    const m = marks.find((m) => m.quote.id === quote)
+    if (!placed || !m || shownQuote.current) return
+    shownQuote.current = true
+    goTo(m.start)
+    setFlash(m.quote.id)
+    const t = setTimeout(() => setFlash(null), 2200)
+    return () => clearTimeout(t)
+  }, [placed, marks, quote, goTo])
 
   // A new text size moves everything (and focus mode moves the reading line): stay on the same sentence.
   const laid = useRef({ size: text.size, focus })
@@ -544,6 +625,7 @@ export function Reader({ book }: { book: BookDetail }) {
               <p className="truncate text-xs text-ink-3">{chapter?.title ?? book.authors.join(', ')}</p>
             </div>
             <span className="px-2 text-xs text-ink-3 tabular">{pct}%</span>
+            {doc && clipsOn && <QuoteList doc={doc} marks={marks} onJump={goTo} />}
             {doc && <Contents doc={doc} position={position} onJump={jump} />}
             <TextSize text={text} />
             <IconButton label="Focus (F)" onClick={() => setFocus(true)}>
@@ -564,7 +646,7 @@ export function Reader({ book }: { book: BookDetail }) {
           className={`mx-auto max-w-[38em] px-6 leading-[1.75] text-ink transition-opacity duration-150 ${focus ? 'py-[18vh]' : 'pt-10 pb-[40vh]'} ${placed ? 'opacity-100' : 'opacity-0'}`}
           style={{ fontSize: text.size } as CSSProperties}
         >
-          <Text doc={doc} win={win} above={above} below={below} files={book.files} onJump={jump} articleRef={article} />
+          <Text doc={doc} win={win} above={above} below={below} files={book.files} marks={byBlock} flash={flash} onJump={jump} onMark={onMark} articleRef={article} />
           <p className="mt-16 text-center text-sm text-ink-3 tabular">{pct >= 100 ? 'The end' : `${pct}% read`}</p>
         </div>
       )}
@@ -576,6 +658,14 @@ export function Reader({ book }: { book: BookDetail }) {
         >
           <Focus className="size-4.5" />
         </button>
+      )}
+      {picked && doc && !card && <SelectionBar book={book.id} doc={doc} picked={picked} onDone={unpick} />}
+      {card && (
+        <QuoteCard
+          quotes={card.ids.flatMap((id) => marks.find((m) => m.quote.id === id)?.quote ?? [])}
+          rect={card.rect}
+          onClose={() => setCard(null)}
+        />
       )}
       {hint && (
         <div className="pointer-events-none fixed inset-x-0 top-6 z-50 flex justify-center">

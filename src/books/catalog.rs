@@ -103,6 +103,13 @@ pub async fn book(db: &SqlitePool, id: i64) -> sqlx::Result<Option<BookRow>> {
         .await
 }
 
+pub async fn by_path(db: &SqlitePool, path: &str) -> sqlx::Result<Option<BookRow>> {
+    sqlx::query_as(sqlx::AssertSqlSafe(format!("SELECT {COLUMNS} FROM books WHERE path = ?")))
+        .bind(path)
+        .fetch_optional(db)
+        .await
+}
+
 pub async fn books(db: &SqlitePool, library: &str) -> sqlx::Result<Vec<BookRow>> {
     sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "SELECT {COLUMNS} FROM books WHERE library = ?

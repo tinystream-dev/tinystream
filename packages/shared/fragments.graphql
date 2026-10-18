@@ -190,6 +190,7 @@ fragment DiscoverResultFields on DiscoverResult {
 
 fragment ClipFields on Clip {
   id
+  kind
   screenshot
   name
   mine
@@ -204,11 +205,21 @@ fragment ClipFields on Clip {
     title {
       id
     }
+    book {
+      id
+      title
+      cover
+      coverTint
+    }
     name
     kind
     label
     year
     status
+  }
+  quote {
+    text
+    author
   }
   start
   end
@@ -709,4 +720,34 @@ fragment BookDetail on Book {
   content
   files
   file
+}
+
+fragment QuoteMark on Clip {
+  id
+  name
+  mine
+  canManage
+  public
+  link
+  linkLive
+  createdAt
+  sharedAt
+  owner {
+    ...Person
+  }
+  source {
+    label
+  }
+  quote {
+    text
+    range {
+      start
+      end
+    }
+  }
+  recipients {
+    user {
+      ...Person
+    }
+  }
 }

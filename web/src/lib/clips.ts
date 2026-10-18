@@ -88,11 +88,17 @@ export function length(seconds: number) {
 
 export function clipName(c: Clip) {
   if (c.name) return c.name
+  if (c.quote) return c.source.name
   return [c.source.name, c.source.label].filter(Boolean).join(' ')
 }
 
 export const clipSource = (c: Clip) =>
-  c.source.kind === 'SHOW' ? [c.source.name, c.source.label].filter(Boolean).join(' · ') : `${c.source.name}${c.source.year ? ` (${c.source.year})` : ''}`
+  c.source.kind === 'SHOW' || c.quote
+    ? [c.source.name, c.source.label].filter(Boolean).join(' · ')
+    : `${c.source.name}${c.source.year ? ` (${c.source.year})` : ''}`
+
+/** A cover tint ("r g b") as a colour, `alpha` see-through. */
+export const tint = (rgb: string | null | undefined, alpha: number) => (rgb ? `rgb(${rgb} / ${alpha})` : undefined)
 
 /** Copies a public link, made absolute. */
 export async function copyLink(path: string) {

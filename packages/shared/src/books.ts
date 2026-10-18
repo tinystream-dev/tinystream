@@ -82,6 +82,111 @@ export function fileUrl(files: string, src: string): string {
   return files + src.split('/').map(encodeURIComponent).join('/')
 }
 
+/** The most characters a quote can have (the server's QUOTE_LENGTH). */
+export const QUOTE_LENGTH = 3000
+
+/** How many characters `s` has, counted as positions count them: by code point, not UTF-16 unit. */
+export function chars(s: string): number {
+  let n = 0
+  for (const _ of s) n++
+  return n
+}
+
+/** `s` from character `from` up to `to`, counted as positions count them. */
+export function slice(s: string, from: number, to = Infinity): string {
+  let n = 0
+  let k = 0
+  let a = s.length
+  let b = s.length
+  for (const c of s) {
+    if (n === from) a = k
+    if (n === to) {
+      b = k
+      break
+    }
+    k += c.length
+    n++
+  }
+  return s.slice(a, b)
+}
+
+const textOfBlock = (b: Block) => (b.s ?? []).map((s) => s.t).join('')
+
+/** The text from position `start` to `end`, its blocks a blank line apart (as the server cuts quotes). */
+export function textOf(doc: BookDocument, start: number, end: number): string {
+  const out: string[] = []
+  for (let i = locate(doc, start).index; i < doc.blocks.length; i++) {
+    const b = doc.blocks[i]
+    if (b.at >= end) break
+    if (b.k === 'img') continue
+    const part = slice(textOfBlock(b), Math.max(0, start - b.at), end - b.at)
+    if (part) out.push(part)
+  }
+  return out.join('\n\n')
+}
+
+const space = /\s/
+
+/** The word at a position (or the nearest one in its block, between words), as positions. */
+export function wordAt(doc: BookDocument, position: number): { start: number; end: number } | null {
+  const { index } = locate(doc, position)
+  const b = doc.blocks[index]
+  if (!b || b.k === 'img') return null
+  const t = [...textOfBlock(b)]
+  if (t.length === 0) return null
+  let i = Math.max(0, Math.min(t.length - 1, position - b.at))
+  if (space.test(t[i])) {
+    let j = i
+    while (j < t.length && space.test(t[j])) j++
+    if (j === t.length) {
+      while (i > 0 && space.test(t[i])) i--
+      if (space.test(t[i])) return null
+    } else i = j
+  }
+  let a = i
+  let z = i + 1
+  while (a > 0 && !space.test(t[a - 1])) a--
+  while (z < t.length && !space.test(t[z])) z++
+  return { start: b.at + a, end: b.at + z }
+}
+
+/** A range widened to whole words at both ends. */
+export function snapToWords(doc: BookDocument, start: number, end: number): { start: number; end: number } {
+  const [from, to] = start <= end ? [start, end] : [end, start]
+  const a = wordAt(doc, from)
+  const z = wordAt(doc, Math.max(from, to - 1))
+  return { start: Math.min(a?.start ?? from, z?.start ?? from), end: Math.max(a?.end ?? to, z?.end ?? to) }
+}
+
+/** A run of text in one style, and the marks over it. */
+export type Piece<M> = { span: Span; marks: M[] }
+
+/** A block's spans, cut where `marks` (ranges of positions) start and end. */
+export function pieces<M extends { start: number; end: number }>(b: Block, marks: M[]): Piece<M>[] {
+  const spans = b.s ?? []
+  let at = b.at
+  const end = at + spans.reduce((n, s) => n + chars(s.t), 0)
+  const over = marks.filter((m) => m.start < end && m.end > at)
+  if (over.length === 0) return spans.map((span) => ({ span, marks: [] }))
+  const out: Piece<M>[] = []
+  for (const span of spans) {
+    const length = chars(span.t)
+    const cuts = new Set([0, length])
+    for (const m of over) {
+      if (m.start > at && m.start < at + length) cuts.add(m.start - at)
+      if (m.end > at && m.end < at + length) cuts.add(m.end - at)
+    }
+    const sorted = [...cuts].sort((x, y) => x - y)
+    for (let k = 0; k + 1 < sorted.length; k++) {
+      const [a, z] = [at + sorted[k], at + sorted[k + 1]]
+      const piece = sorted.length === 2 ? span : { ...span, t: slice(span.t, sorted[k], sorted[k + 1]) }
+      out.push({ span: piece, marks: over.filter((m) => m.start < z && m.end > a) })
+    }
+    at += length
+  }
+  return out
+}
+
 /** What a span's style flags make it, in CSS-ish terms both apps map to their own. */
 export function styleOf(f = 0) {
   return {

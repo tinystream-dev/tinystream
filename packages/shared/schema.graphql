@@ -215,6 +215,10 @@ type Book {
 	"""
 	file: String!
 	reading: ReadingState
+	"""
+	Your quotes from it and the ones sent to you, in the order they're in the book.
+	"""
+	quotes: [Clip!]!
 }
 
 enum BookFormat {
@@ -269,6 +273,8 @@ type Chapter {
 type Clip {
 	id: Int!
 	screenshot: Boolean!
+	kind: ClipKind!
+	quote: ClipQuote
 	name: String!
 	mine: Boolean!
 	canManage: Boolean!
@@ -314,6 +320,12 @@ type ClipChanged {
 	progress: Float
 }
 
+enum ClipKind {
+	CLIP
+	SCREENSHOT
+	QUOTE
+}
+
 input ClipPatch {
 	name: String
 	public: Boolean
@@ -323,6 +335,19 @@ input ClipPatch {
 type ClipQuality {
 	height: Int!
 	halfRate: Boolean!
+}
+
+type ClipQuote {
+	"""
+	What was quoted, its paragraphs a line apart.
+	"""
+	text: String!
+	author: String
+	"""
+	Where it is in the book as the book is now, in characters; null when the book was changed
+	and the text can't be found in it anymore.
+	"""
+	range: QuoteRange
 }
 
 type ClipRecipient {
@@ -345,6 +370,10 @@ type ClipSource {
 	kind: TitleKind!
 	label: String
 	year: Int
+	"""
+	The book a quote is from, while it's there and you can see it.
+	"""
+	book: Book
 	status: SourceStatus!
 }
 
@@ -972,6 +1001,7 @@ type Mutation {
 	startListenRoom(input: NewListenRoom!): ListenRoom!
 	createClip(input: NewClip!): Clip!
 	takeScreenshot(input: NewScreenshot!): Clip!
+	createQuote(input: NewQuote!): Clip!
 	updateClip(id: Int!, input: ClipPatch!): Clip!
 	deleteClip(id: Int!): Int!
 	renderClip(id: Int!): Clip!
@@ -1083,6 +1113,21 @@ input NewListenRoom {
 	position: Float! = 0.0
 	paused: Boolean! = false
 	public: Boolean! = false
+}
+
+input NewQuote {
+	bookId: Int!
+	"""
+	Characters into the book, as reading positions count them.
+	"""
+	start: Int!
+	end: Int!
+	"""
+	A note of your own about it.
+	"""
+	name: String! = ""
+	public: Boolean! = false
+	recipients: [Int!]! = []
 }
 
 input NewRequest {
@@ -1429,7 +1474,10 @@ type Query {
 	forYou(library: String): ForYou!
 	room(code: String!): Room!
 	listenRoom(code: String!): ListenRoom!
-	clips(scope: ClipScope! = MINE): [Clip!]!
+	"""
+	`kind` only those of a kind, and `book` only quotes from that book.
+	"""
+	clips(scope: ClipScope! = MINE, kind: ClipKind, book: Int): [Clip!]!
 	clip(id: Int!): Clip
 	clipAllowance: ClipAllowance!
 	clipStorage: ClipStorage!
@@ -1475,6 +1523,11 @@ input QueueInput {
 	position: Float!
 	shuffled: Boolean! = false
 	repeat: Repeat! = OFF
+}
+
+type QuoteRange {
+	start: Int!
+	end: Int!
 }
 
 type ReadingState {

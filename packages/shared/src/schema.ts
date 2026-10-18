@@ -182,6 +182,8 @@ export type Book = {
   /** A date, or just a year. */
   published?: Maybe<Scalars['String']['output']>;
   publisher?: Maybe<Scalars['String']['output']>;
+  /** Your quotes from it and the ones sent to you, in the order they're in the book. */
+  quotes: Array<Clip>;
   /** Out of 10. */
   rating?: Maybe<Scalars['Float']['output']>;
   reading?: Maybe<ReadingState>;
@@ -249,6 +251,7 @@ export type Clip = {
   fps?: Maybe<Scalars['Float']['output']>;
   height?: Maybe<Scalars['Int']['output']>;
   id: Scalars['Int']['output'];
+  kind: ClipKind;
   link?: Maybe<Scalars['String']['output']>;
   linkLive: Scalars['Boolean']['output'];
   mine: Scalars['Boolean']['output'];
@@ -258,6 +261,7 @@ export type Clip = {
   progress?: Maybe<Scalars['Float']['output']>;
   public: Scalars['Boolean']['output'];
   quality: ClipQuality;
+  quote?: Maybe<ClipQuote>;
   recipients: Array<ClipRecipient>;
   renderedAt?: Maybe<Scalars['Int']['output']>;
   screenshot: Scalars['Boolean']['output'];
@@ -286,6 +290,11 @@ export type ClipChanged = {
   state?: Maybe<ClipState>;
 };
 
+export type ClipKind =
+  | 'CLIP'
+  | 'QUOTE'
+  | 'SCREENSHOT';
+
 export type ClipPatch = {
   name?: InputMaybe<Scalars['String']['input']>;
   public?: InputMaybe<Scalars['Boolean']['input']>;
@@ -295,6 +304,17 @@ export type ClipPatch = {
 export type ClipQuality = {
   halfRate: Scalars['Boolean']['output'];
   height: Scalars['Int']['output'];
+};
+
+export type ClipQuote = {
+  author?: Maybe<Scalars['String']['output']>;
+  /**
+   * Where it is in the book as the book is now, in characters; null when the book was changed
+   * and the text can't be found in it anymore.
+   */
+  range?: Maybe<QuoteRange>;
+  /** What was quoted, its paragraphs a line apart. */
+  text: Scalars['String']['output'];
 };
 
 export type ClipRecipient = {
@@ -310,6 +330,8 @@ export type ClipScope =
   | 'SENT';
 
 export type ClipSource = {
+  /** The book a quote is from, while it's there and you can see it. */
+  book?: Maybe<Book>;
   kind: TitleKind;
   label?: Maybe<Scalars['String']['output']>;
   name: Scalars['String']['output'];
@@ -853,6 +875,7 @@ export type Mutation = {
   createAppPassword: NewAppPassword;
   createClip: Clip;
   createPlaylist: Playlist;
+  createQuote: Clip;
   createRequest: Request;
   createUser: User;
   declineRequest: Request;
@@ -1011,6 +1034,11 @@ export type MutationCreateClipArgs = {
 export type MutationCreatePlaylistArgs = {
   name: Scalars['String']['input'];
   tracks?: Array<Scalars['Int']['input']>;
+};
+
+
+export type MutationCreateQuoteArgs = {
+  input: NewQuote;
 };
 
 
@@ -1485,6 +1513,17 @@ export type NewListenRoom = {
   tracks: Array<Scalars['Int']['input']>;
 };
 
+export type NewQuote = {
+  bookId: Scalars['Int']['input'];
+  end: Scalars['Int']['input'];
+  /** A note of your own about it. */
+  name?: Scalars['String']['input'];
+  public?: Scalars['Boolean']['input'];
+  recipients?: Array<Scalars['Int']['input']>;
+  /** Characters into the book, as reading positions count them. */
+  start: Scalars['Int']['input'];
+};
+
 export type NewRequest = {
   library: Scalars['String']['input'];
   name: Scalars['String']['input'];
@@ -1777,6 +1816,7 @@ export type Query = {
   clip?: Maybe<Clip>;
   clipAllowance: ClipAllowance;
   clipStorage: ClipStorage;
+  /** `kind` only those of a kind, and `book` only quotes from that book. */
   clips: Array<Clip>;
   colorScheme?: Maybe<ColorScheme>;
   /** Built-ins, then published schemes, then your own. */
@@ -1887,6 +1927,8 @@ export type QueryClipArgs = {
 
 
 export type QueryClipsArgs = {
+  book?: InputMaybe<Scalars['Int']['input']>;
+  kind?: InputMaybe<ClipKind>;
   scope?: ClipScope;
 };
 
@@ -2043,6 +2085,11 @@ export type QueueInput = {
   repeat?: Repeat;
   shuffled?: Scalars['Boolean']['input'];
   tracks: Array<Scalars['Int']['input']>;
+};
+
+export type QuoteRange = {
+  end: Scalars['Int']['output'];
+  start: Scalars['Int']['output'];
 };
 
 export type ReadingState = {

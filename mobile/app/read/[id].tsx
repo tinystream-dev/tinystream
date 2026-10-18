@@ -11,7 +11,8 @@ import { Reader } from '../../src/reader/Reader'
 import { useApi } from '../../src/session'
 
 export default function Read() {
-  const id = Number(useLocalSearchParams<{ id: string }>().id)
+  const params = useLocalSearchParams<{ id: string; quote?: string }>()
+  const id = Number(params.id)
   const api = useApi()
   const { data: book, isFetchedAfterMount } = useQuery({ ...bookQuery(api, id), refetchOnMount: 'always' })
   const content = useBookContent(book?.content)
@@ -29,5 +30,5 @@ export default function Read() {
         <Spinner size="large" />
       </View>
     )
-  return <Reader key={book.id} book={book} doc={content.data} />
+  return <Reader key={book.id} book={book} doc={content.data} quote={params.quote ? Number(params.quote) : undefined} />
 }

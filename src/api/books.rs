@@ -12,6 +12,7 @@ use sha2::{Digest, Sha256};
 use tower::ServiceExt;
 use tower_http::services::ServeFile;
 
+use super::clips::Clip;
 use super::music::CoverQuery;
 use super::schema::Ctx;
 use crate::auth::User;
@@ -196,6 +197,11 @@ impl BookView {
     async fn reading(&self) -> Option<ReadingState> {
         self.reading.map(|r| ReadingState::of(r, self.b.length))
     }
+
+    /// Your quotes from it and the ones sent to you, in the order they're in the book.
+    async fn quotes(&self, ctx: &Context<'_>) -> ApiResult<Vec<Clip>> {
+        super::clips::quotes_of(ctx.state(), ctx.user()?, &self.b).await
+    }
 }
 
 async fn views(state: &AppState, user: &User, books: Vec<BookRow>) -> ApiResult<Vec<BookView>> {
@@ -205,7 +211,7 @@ async fn views(state: &AppState, user: &User, books: Vec<BookRow>) -> ApiResult<
     Ok(books.into_iter().map(|b| BookView { reading: reading.remove(&b.path), b }).collect())
 }
 
-fn sees(state: &AppState, user: &User, library: &str) -> bool {
+pub(super) fn sees(state: &AppState, user: &User, library: &str) -> bool {
     user.permissions.can_see(library) && state.config.current().library(library).is_some_and(|l| l.is_books())
 }
 
@@ -216,7 +222,7 @@ async fn visible(state: &AppState, user: &User, id: i64) -> ApiResult<BookRow> {
         .ok_or_else(|| ApiError::not_found("book"))
 }
 
-async fn view(state: &AppState, user: &User, b: BookRow) -> ApiResult<BookView> {
+pub(super) async fn view(state: &AppState, user: &User, b: BookRow) -> ApiResult<BookView> {
     Ok(views(state, user, vec![b]).await?.pop().expect("one book in, one out"))
 }
 
@@ -363,6 +369,18 @@ async fn embedded_cover(state: &AppState, b: &BookRow) -> Option<PathBuf> {
     Some(file)
 }
 
+/// The cover as a file here, fetching the one found online if it hasn't been yet.
+pub(super) async fn cover_file(state: &AppState, b: &BookRow) -> Option<PathBuf> {
+    match cover_source(state, b).await? {
+        Source::File(f) => Some(f),
+        Source::Remote(url) => {
+            let dir = state.paths.cache_dir().join("images");
+            super::image_cache::remote(&state.http, &dir, &url).await.ok()
+        },
+        _ => None,
+    }
+}
+
 pub async fn cover(
     State(state): State<Arc<AppState>>,
     user: User,
@@ -370,16 +388,7 @@ pub async fn cover(
     Query(q): Query<CoverQuery>,
 ) -> ApiResult<Response> {
     let b = visible(&state, &user, id).await?;
-
-    let file = match cover_source(&state, &b).await {
-        Some(Source::File(f)) => Some(f),
-        Some(Source::Remote(url)) => {
-            let dir = state.paths.cache_dir().join("images");
-            super::image_cache::remote(&state.http, &dir, &url).await.ok()
-        },
-        _ => None,
-    };
-
+    let file = cover_file(&state, &b).await;
     super::music::image(&state, file, q.size).await
 }
 

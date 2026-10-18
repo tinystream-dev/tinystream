@@ -93,6 +93,71 @@ impl Document {
     pub fn images(&self) -> impl Iterator<Item = &str> {
         self.blocks.iter().filter_map(|b| b.src.as_deref())
     }
+
+    /// The text from character `start` to `end`, its blocks a line apart (as
+    /// `packages/shared/src/books.ts` cuts it too).
+    pub fn text(&self, start: u64, end: u64) -> String {
+        let mut out = String::new();
+
+        for b in self.blocks.iter().filter(|b| b.k != Kind::Img) {
+            let to = b.at + b.len();
+
+            if to <= start || b.at >= end {
+                continue;
+            }
+
+            let (from, until) = (start.saturating_sub(b.at) as usize, (end.min(to) - b.at) as usize);
+            let part: String = b.text().chars().skip(from).take(until - from).collect();
+
+            if part.is_empty() {
+                continue;
+            }
+
+            if !out.is_empty() {
+                out.push_str("\n\n");
+            }
+
+            out.push_str(&part);
+        }
+
+        out
+    }
+
+    /// Where `text` (cut as `text` cuts it) is in the book, nearest to character `near`.
+    pub fn find(&self, text: &str, near: u64) -> Option<(u64, u64)> {
+        if text.is_empty() {
+            return None;
+        }
+
+        let mut all = String::new();
+        let mut starts: Vec<(usize, u64)> = Vec::new();
+
+        for b in self.blocks.iter().filter(|b| b.k != Kind::Img) {
+            let t = b.text();
+
+            if t.is_empty() {
+                continue;
+            }
+
+            if !all.is_empty() {
+                all.push_str("\n\n");
+            }
+
+            starts.push((all.len(), b.at));
+            all.push_str(&t);
+        }
+
+        let place = |byte: usize| {
+            let i = starts.partition_point(|&(s, _)| s <= byte).saturating_sub(1);
+            let (s, at) = starts[i];
+            at + all[s..byte].chars().count() as u64
+        };
+
+        all.match_indices(text)
+            .take(1000)
+            .map(|(i, m)| (place(i), place(i + m.len())))
+            .min_by_key(|&(start, _)| start.abs_diff(near))
+    }
 }
 
 fn is_zero(n: &u8) -> bool {
@@ -371,6 +436,28 @@ mod tests {
         let doc = b.finish(Vec::new());
 
         assert_eq!(doc.blocks[0].s[1].to, Some(2));
+    }
+
+    #[test]
+    fn cuts_and_finds_quotes() {
+        let mut b = Builder::new();
+        b.text("Call me Ishmael.", 0, None);
+        b.flush(Shape::default());
+        b.image("whale.png".into(), None, Shape::default());
+        b.text("Some years ago, ", 0, None);
+        b.text("never mind", ITALIC, None);
+        b.text(" how long.", 0, None);
+        b.flush(Shape::default());
+        b.text("Call me Ishmael.", 0, None);
+        b.flush(Shape::default());
+        let doc = b.finish(Vec::new());
+
+        let quote = doc.text(8, 31);
+        assert_eq!(quote, "Ishmael.\n\nSome years ago");
+        assert_eq!(doc.find(&quote, 0), Some((8, 31)));
+        assert_eq!(doc.find("Call me", 60), Some((53, 60)));
+        assert_eq!(doc.find("Call me", 3), Some((0, 7)));
+        assert_eq!(doc.find("Ahab", 0), None);
     }
 
     #[test]

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import { expect, test } from 'bun:test'
-import { type BookDocument, chapterAt, createProgressSaver, fileUrl, locate, percent, positionOf } from './books'
+import { type BookDocument, chapterAt, chars, createProgressSaver, fileUrl, locate, percent, pieces, positionOf, slice, snapToWords, textOf, wordAt } from './books'
 
 const doc: BookDocument = {
   length: 30,
@@ -59,4 +59,47 @@ test('saves once scrolling stops, and on flush', async () => {
   saver.update(9)
   saver.flush()
   expect(saved).toEqual([7, 9])
+})
+
+const quoted: BookDocument = {
+  length: 69,
+  chapters: [],
+  blocks: [
+    { k: 'p', at: 0, s: [{ t: 'Call me Ishmael.' }] },
+    { k: 'img', at: 16, src: 'whale.png' },
+    { k: 'p', at: 17, s: [{ t: 'Some years ago, ' }, { t: 'never mind', f: 2 }, { t: ' how long.' }] },
+    { k: 'p', at: 53, s: [{ t: 'Call me Ishmael.' }] },
+  ],
+}
+
+test('quotes are cut as the server cuts them', () => {
+  expect(textOf(quoted, 8, 31)).toBe('Ishmael.\n\nSome years ago')
+  expect(textOf(quoted, 33, 43)).toBe('never mind')
+})
+
+test('characters are counted by code point', () => {
+  expect(chars('a😀b')).toBe(3)
+  expect(slice('a😀bc', 1, 3)).toBe('😀b')
+  expect(slice('abc', 5)).toBe('')
+})
+
+test('selections snap to whole words', () => {
+  expect(wordAt(quoted, 10)).toEqual({ start: 8, end: 16 })
+  expect(wordAt(quoted, 21)).toEqual({ start: 22, end: 27 })
+  expect(snapToWords(quoted, 10, 19)).toEqual({ start: 8, end: 21 })
+  expect(snapToWords(quoted, 19, 10)).toEqual({ start: 8, end: 21 })
+})
+
+test('marks cut spans where they start and end', () => {
+  const b = quoted.blocks[2]
+  const cut = pieces(b, [{ start: 22, end: 38, id: 1 }])
+  expect(cut.map((p) => [p.span.t, p.marks.length])).toEqual([
+    ['Some ', 0],
+    ['years ago, ', 1],
+    ['never', 1],
+    [' mind', 0],
+    [' how long.', 0],
+  ])
+  expect(cut[2].span.f).toBe(2)
+  expect(pieces(b, [{ start: 0, end: 5, id: 1 }])[0].span).toBe(b.s![0])
 })
