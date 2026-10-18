@@ -1233,7 +1233,7 @@ dependencies = [
 
 [[package]]
 name = "ffmpeg-sys"
-version = "0.37.0"
+version = "0.37.1"
 dependencies = [
  "bindgen",
  "ffmpeg-src",
@@ -2066,7 +2066,7 @@ dependencies = [
 
 [[package]]
 name = "libtorrent-sys"
-version = "0.37.0"
+version = "0.37.1"
 dependencies = [
  "cxx",
  "cxx-build",
@@ -2286,7 +2286,7 @@ dependencies = [
 
 [[package]]
 name = "native-support"
-version = "0.37.0"
+version = "0.37.1"
 
 [[package]]
 name = "nix"
@@ -3135,7 +3135,7 @@ checksum = "cf54715a573b99ac80df0bc206da022bcd442c974952c7b9720069370852e21f"
 
 [[package]]
 name = "rustyass"
-version = "0.37.0"
+version = "0.37.1"
 dependencies = [
  "harfrust",
  "rustc-hash",
@@ -3145,7 +3145,7 @@ dependencies = [
 
 [[package]]
 name = "rustyass-compare"
-version = "0.37.0"
+version = "0.37.1"
 dependencies = [
  "libass-src",
  "pkg-config",
@@ -3966,7 +3966,7 @@ dependencies = [
 
 [[package]]
 name = "tinystream"
-version = "0.37.0"
+version = "0.37.1"
 dependencies = [
  "anyhow",
  "argon2",
@@ -4023,7 +4023,7 @@ dependencies = [
 
 [[package]]
 name = "tinystream-decoder"
-version = "0.37.0"
+version = "0.37.1"
 dependencies = [
  "tinystream-decoder-core",
  "wasm-bindgen",
@@ -4031,7 +4031,7 @@ dependencies = [
 
 [[package]]
 name = "tinystream-decoder-core"
-version = "0.37.0"
+version = "0.37.1"
 dependencies = [
  "rubato",
  "symphonia",
@@ -4040,7 +4040,7 @@ dependencies = [
 
 [[package]]
 name = "tinystream-subtitles"
-version = "0.37.0"
+version = "0.37.1"
 dependencies = [
  "rustyass",
  "wasm-bindgen",
