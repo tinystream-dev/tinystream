@@ -722,11 +722,9 @@ impl Library {
             .await?)
     }
 
+    /// A series counting as one, as its books are shown.
     async fn book_count(&self, ctx: &Context<'_>) -> ApiResult<i64> {
-        Ok(sqlx::query_scalar("SELECT COUNT(*) FROM books WHERE library = ?")
-            .bind(&self.name)
-            .fetch_one(&ctx.state().db)
-            .await?)
+        Ok(crate::books::catalog::count(&ctx.state().db, &self.name).await? as i64)
     }
 
     async fn show_count(&self, ctx: &Context<'_>) -> ApiResult<i64> {

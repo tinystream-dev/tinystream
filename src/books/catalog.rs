@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use sqlx::SqlitePool;
 
@@ -144,6 +144,23 @@ pub async fn books(db: &SqlitePool, library: &str) -> sqlx::Result<Vec<BookRow>>
     });
 
     Ok(keyed.into_iter().map(|(.., b)| b).collect())
+}
+
+/// How many books a library has, a series counting as one.
+pub async fn count(db: &SqlitePool, library: &str) -> sqlx::Result<usize> {
+    let rows: Vec<(String, String, Option<String>)> =
+        sqlx::query_as("SELECT title, path, series FROM books WHERE library = ?").bind(library).fetch_all(db).await?;
+    let mut series = HashSet::new();
+    let mut alone = 0;
+
+    for (title, path, s) in rows {
+        match s.or_else(|| super::series::guess(&title, &path).map(|(s, _)| s)) {
+            Some(s) => _ = series.insert(s.to_lowercase()),
+            None => alone += 1,
+        }
+    }
+
+    Ok(series.len() + alone)
 }
 
 pub async fn recently_added(db: &SqlitePool, library: &str, limit: i64) -> sqlx::Result<Vec<BookRow>> {

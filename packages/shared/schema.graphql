@@ -780,6 +780,9 @@ type Library {
 	kind: LibraryKind!
 	albumCount: Int!
 	trackCount: Int!
+	"""
+	A series counting as one, as its books are shown.
+	"""
 	bookCount: Int!
 	showCount: Int!
 	movieCount: Int!

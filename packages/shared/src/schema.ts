@@ -714,6 +714,7 @@ export type Inbox = {
 
 export type Library = {
   albumCount: Scalars['Int']['output'];
+  /** A series counting as one, as its books are shown. */
   bookCount: Scalars['Int']['output'];
   kind: LibraryKind;
   movieCount: Scalars['Int']['output'];
