@@ -238,3 +238,45 @@ export function createProgressSaver(save: (position: number) => Promise<unknown>
     },
   }
 }
+
+/** What a library's tile needs of a book to put it on a shelf. */
+type Shelved = { series?: string | null; seriesIndex?: number | null; reading?: { position: number; finished: boolean; updatedAt: number } | null }
+
+/** A book on its own, or a series' books stacked as one. */
+export type Shelf<B> = { kind: 'book'; book: B } | { kind: 'series'; series: string; books: B[]; current: B; read: number }
+
+/** The book a series is at: the one being read (the latest), or else the next one not read yet. */
+export function currentOf<B extends Shelved>(books: B[]): B {
+  const reading = books.filter((b) => b.reading && !b.reading.finished && b.reading.position > 0)
+  if (reading.length) return reading.reduce((a, b) => (b.reading!.updatedAt > a.reading!.updatedAt ? b : a))
+  const last = books.map((b) => !!b.reading?.finished).lastIndexOf(true)
+  return books.slice(last + 1).find((b) => !b.reading?.finished) ?? books.find((b) => !b.reading?.finished) ?? books[0]
+}
+
+/** A series' books in order, the ones without a number last. */
+export function inOrder<B extends Shelved>(books: B[]): B[] {
+  return [...books].sort((a, b) => (a.seriesIndex ?? Infinity) - (b.seriesIndex ?? Infinity))
+}
+
+/** Books as they're shelved: a series with two or more of them is one stack, where the first of them is. */
+export function shelve<B extends Shelved>(books: B[]): Shelf<B>[] {
+  const series = new Map<string, B[]>()
+  for (const b of books) {
+    if (!b.series) continue
+    const key = b.series.toLowerCase()
+    series.set(key, [...(series.get(key) ?? []), b])
+  }
+  const out: Shelf<B>[] = []
+  const placed = new Set<string>()
+  for (const b of books) {
+    const key = b.series?.toLowerCase()
+    const all = key ? series.get(key)! : []
+    if (all.length < 2) out.push({ kind: 'book', book: b })
+    else if (!placed.has(key!)) {
+      placed.add(key!)
+      const ordered = inOrder(all)
+      out.push({ kind: 'series', series: b.series!, books: ordered, current: currentOf(ordered), read: all.filter((v) => v.reading?.finished).length })
+    }
+  }
+  return out
+}

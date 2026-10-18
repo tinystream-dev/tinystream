@@ -2,12 +2,13 @@
 
 import { useQuery } from '@tanstack/react-query'
 import { useMemo, useState } from 'react'
+import { shelve } from '@tinystream/shared/books'
 import { Empty, Page, PageTitle } from '../components/Page'
 import { PosterGridSkeleton } from '../components/Skeleton'
 import { Chip } from '../components/ui'
 import { request } from '../lib/api'
 import { type BookCard, BooksQuery } from './api'
-import { BookGrid, BookTile } from './components'
+import { BookGrid, BookTile, SeriesTile } from './components'
 
 type Filter = 'all' | 'reading' | 'unread' | 'read'
 type Sort = 'title' | 'author' | 'added'
@@ -34,12 +35,12 @@ export function BookLibrary({ name }: { name: string }) {
   const [filter, setFilter] = useState<Filter>('all')
   const [sort, setSort] = useState<Sort>('title')
 
-  const books = useMemo(() => {
+  const shelves = useMemo(() => {
     const list = (data ?? []).filter((b) => matches(b, filter))
     // The server's order already keeps a series' books together.
     if (sort === 'author') list.sort((a, b) => surname(a).localeCompare(surname(b)))
     if (sort === 'added') list.sort((a, b) => b.addedAt - a.addedAt)
-    return list
+    return shelve(list)
   }, [data, filter, sort])
 
   return (
@@ -62,12 +63,10 @@ export function BookLibrary({ name }: { name: string }) {
           Newest
         </Chip>
       </div>
-      {data && books.length === 0 && <Empty title={data.length ? 'Nothing matches this filter' : 'This library is empty'} />}
+      {data && shelves.length === 0 && <Empty title={data.length ? 'Nothing matches this filter' : 'This library is empty'} />}
       {data ? (
         <BookGrid>
-          {books.map((b) => (
-            <BookTile key={b.id} book={b} />
-          ))}
+          {shelves.map((s) => (s.kind === 'book' ? <BookTile key={s.book.id} book={s.book} /> : <SeriesTile key={`series:${s.series}`} library={name} shelf={s} />))}
         </BookGrid>
       ) : (
         <PosterGridSkeleton />

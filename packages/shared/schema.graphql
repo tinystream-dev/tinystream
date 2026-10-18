@@ -154,6 +154,9 @@ type Book {
 	title: String!
 	sortTitle: String!
 	authors: [String!]!
+	"""
+	What the file says, or else what its title (or file name) does.
+	"""
 	series: String
 	seriesIndex: Float
 	"""

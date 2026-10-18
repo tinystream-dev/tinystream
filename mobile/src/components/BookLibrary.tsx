@@ -1,13 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // A book library (web/src/books/Library.tsx): filters by how far they've
-// been read, and every book as a cover, a series' books together.
+// been read, and every book as a cover, a series' books stacked as one.
 
 import { useQuery } from '@tanstack/react-query'
+import { type Shelf, shelve } from '@tinystream/shared/books'
 import { type ReactNode, useCallback, useDeferredValue, useMemo, useState } from 'react'
 import { ScrollView, Text, View } from 'react-native'
 import { type BookCard, BooksQuery } from '../books'
 import { useApi } from '../session'
-import { BookTile } from './BookTile'
+import { BookTile, SeriesTile } from './BookTile'
 import { Page } from './Page'
 import { PosterGridSkeleton, useArrived, useColumnWidth } from './Skeleton'
 import { Chip, Empty } from './ui'
@@ -53,7 +54,12 @@ export function BookLibrary({ name, switcher }: { name: string; switcher: ReactN
     if (shownSort === 'added') list.sort((a, b) => b.addedAt - a.addedAt)
     return list
   }, [data, shownFilter, shownSort])
-  const renderItem = useCallback(({ item }: { item: BookCard }) => <BookTile book={item} width={width} />, [width])
+  const shelves = useMemo(() => shelve(books), [books])
+  const renderItem = useCallback(
+    ({ item }: { item: Shelf<BookCard> }) =>
+      item.kind === 'book' ? <BookTile book={item.book} width={width} /> : <SeriesTile library={name} shelf={item} width={width} />,
+    [width, name],
+  )
 
   const header = (
     <View className="gap-3 pb-5">
@@ -86,14 +92,14 @@ export function BookLibrary({ name, switcher }: { name: string; switcher: ReactN
   )
 
   return (
-    <Page<BookCard>
+    <Page<Shelf<BookCard>>
       title={name}
       header={header}
       onRefresh={() => refetch()}
       list={{
-        data: books,
+        data: shelves,
         numColumns: 3,
-        keyExtractor: (b) => String(b.id),
+        keyExtractor: (s) => (s.kind === 'book' ? String(s.book.id) : `series:${s.series}`),
         renderItem,
         columnWrapperStyle: { gap: GAP, paddingHorizontal: 20 },
         contentContainerStyle: { rowGap: 20 },

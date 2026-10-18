@@ -27,6 +27,7 @@ import { Route as ReadIdRouteImport } from './routes/read.$id'
 import { Route as TitleIdRouteImport } from './routes/title.$id'
 import { Route as TogetherCodeRouteImport } from './routes/together.$code'
 import { Route as WatchIdRouteImport } from './routes/watch.$id'
+import { Route as LibraryNameSeriesSeriesRouteImport } from './routes/library_.$name.series.$series'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -118,6 +119,11 @@ const WatchIdRoute = WatchIdRouteImport.update({
   path: '/watch/$id',
   getParentRoute: () => rootRouteImport,
 } as any)
+const LibraryNameSeriesSeriesRoute = LibraryNameSeriesSeriesRouteImport.update({
+  id: '/library_/$name/series/$series',
+  path: '/library/$name/series/$series',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -138,6 +144,7 @@ export interface FileRoutesByFullPath {
   '/title/$id': typeof TitleIdRoute
   '/together/$code': typeof TogetherCodeRoute
   '/watch/$id': typeof WatchIdRoute
+  '/library/$name/series/$series': typeof LibraryNameSeriesSeriesRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -158,6 +165,7 @@ export interface FileRoutesByTo {
   '/title/$id': typeof TitleIdRoute
   '/together/$code': typeof TogetherCodeRoute
   '/watch/$id': typeof WatchIdRoute
+  '/library/$name/series/$series': typeof LibraryNameSeriesSeriesRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -179,6 +187,7 @@ export interface FileRoutesById {
   '/title/$id': typeof TitleIdRoute
   '/together/$code': typeof TogetherCodeRoute
   '/watch/$id': typeof WatchIdRoute
+  '/library_/$name/series/$series': typeof LibraryNameSeriesSeriesRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -201,6 +210,7 @@ export interface FileRouteTypes {
     | '/title/$id'
     | '/together/$code'
     | '/watch/$id'
+    | '/library/$name/series/$series'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -221,6 +231,7 @@ export interface FileRouteTypes {
     | '/title/$id'
     | '/together/$code'
     | '/watch/$id'
+    | '/library/$name/series/$series'
   id:
     | '__root__'
     | '/'
@@ -241,6 +252,7 @@ export interface FileRouteTypes {
     | '/title/$id'
     | '/together/$code'
     | '/watch/$id'
+    | '/library_/$name/series/$series'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -262,6 +274,7 @@ export interface RootRouteChildren {
   TitleIdRoute: typeof TitleIdRoute
   TogetherCodeRoute: typeof TogetherCodeRoute
   WatchIdRoute: typeof WatchIdRoute
+  LibraryNameSeriesSeriesRoute: typeof LibraryNameSeriesSeriesRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -392,6 +405,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof WatchIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/library_/$name/series/$series': {
+      id: '/library_/$name/series/$series'
+      path: '/library/$name/series/$series'
+      fullPath: '/library/$name/series/$series'
+      preLoaderRoute: typeof LibraryNameSeriesSeriesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -414,6 +434,7 @@ const rootRouteChildren: RootRouteChildren = {
   TitleIdRoute: TitleIdRoute,
   TogetherCodeRoute: TogetherCodeRoute,
   WatchIdRoute: WatchIdRoute,
+  LibraryNameSeriesSeriesRoute: LibraryNameSeriesSeriesRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

@@ -73,12 +73,13 @@ impl BookView {
         self.b.authors()
     }
 
-    async fn series(&self) -> Option<&str> {
-        self.b.series.as_deref()
+    /// What the file says, or else what its title (or file name) does.
+    async fn series(&self) -> Option<String> {
+        self.b.series().0
     }
 
     async fn series_index(&self) -> Option<f64> {
-        self.b.series_index
+        self.b.series().1
     }
 
     /// The book's own, or else what was found online.

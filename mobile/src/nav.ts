@@ -31,6 +31,7 @@ export function place(link: string): { tab?: Tab; path: Place; root?: boolean } 
     case 'read':
       return parts[1] ? { path: `read/${parts[1]}`, root: true } : null
     case 'library':
+      if (parts[2] === 'series' && parts[3]) return { path: `series?library=${encodeURIComponent(parts[1])}&name=${encodeURIComponent(parts[3])}` }
       return { tab: '(library)', path: parts[1] ? `library?name=${encodeURIComponent(parts[1])}` : 'library' }
     case 'discover':
       return { tab: '(search)', path: q.get('q') ? `search?q=${encodeURIComponent(q.get('q')!)}` : 'search' }

@@ -187,6 +187,7 @@ export type Book = {
   /** Out of 10. */
   rating?: Maybe<Scalars['Float']['output']>;
   reading?: Maybe<ReadingState>;
+  /** What the file says, or else what its title (or file name) does. */
   series?: Maybe<Scalars['String']['output']>;
   seriesIndex?: Maybe<Scalars['Float']['output']>;
   size: Scalars['Int']['output'];

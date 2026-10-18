@@ -62,6 +62,16 @@ impl BookRow {
     pub fn has_cover(&self) -> bool {
         self.embedded_cover || self.online_cover.is_some()
     }
+
+    /// Its series and which book in it: what the file says, or else what its title or name does.
+    pub fn series(&self) -> (Option<String>, Option<f64>) {
+        let guess = || super::series::guess(&self.title, &self.path);
+
+        match &self.series {
+            Some(s) => (Some(s.clone()), self.series_index.or_else(|| guess().map(|(_, n)| n))),
+            None => guess().map_or((None, None), |(s, n)| (Some(s), Some(n))),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default, sqlx::FromRow)]
@@ -110,14 +120,30 @@ pub async fn by_path(db: &SqlitePool, path: &str) -> sqlx::Result<Option<BookRow
         .await
 }
 
+/// A library's books by title, a series' books together in order.
 pub async fn books(db: &SqlitePool, library: &str) -> sqlx::Result<Vec<BookRow>> {
-    sqlx::query_as(sqlx::AssertSqlSafe(format!(
-        "SELECT {COLUMNS} FROM books WHERE library = ?
-         ORDER BY lower(COALESCE(series, sort_title)), series_index, sort_title"
-    )))
-    .bind(library)
-    .fetch_all(db)
-    .await
+    let rows: Vec<BookRow> =
+        sqlx::query_as(sqlx::AssertSqlSafe(format!("SELECT {COLUMNS} FROM books WHERE library = ?")))
+            .bind(library)
+            .fetch_all(db)
+            .await?;
+
+    let mut keyed: Vec<_> = rows
+        .into_iter()
+        .map(|b| {
+            let (series, index) = b.series();
+            let key = series.map_or_else(|| b.sort_title.clone(), |s| crate::library::parse::sort_title(&s));
+            (key, index, b)
+        })
+        .collect();
+
+    keyed.sort_by(|a, b| {
+        a.0.cmp(&b.0)
+            .then_with(|| a.1.unwrap_or(f64::MAX).total_cmp(&b.1.unwrap_or(f64::MAX)))
+            .then_with(|| a.2.sort_title.cmp(&b.2.sort_title))
+    });
+
+    Ok(keyed.into_iter().map(|(.., b)| b).collect())
 }
 
 pub async fn recently_added(db: &SqlitePool, library: &str, limit: i64) -> sqlx::Result<Vec<BookRow>> {

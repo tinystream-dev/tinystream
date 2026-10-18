@@ -6,6 +6,7 @@ pub mod epub;
 pub mod fb2;
 pub mod markup;
 pub mod online;
+pub mod series;
 pub mod txt;
 
 use std::collections::HashMap;
