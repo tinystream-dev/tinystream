@@ -32,7 +32,7 @@ members = ["ffmpeg-sys", "libtorrent-sys", "native/*", "rustyass", "rustyass/com
 exclude = ["mobile"]
 
 [workspace.package]
-version = "0.37.1"
+version = "0.37.2"
 edition = "2024"
 rust-version = "1.94"
 license = "AGPL-3.0-or-later"
