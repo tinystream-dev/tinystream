@@ -38,7 +38,18 @@ import { ClipEditor } from './ClipEditor'
 import { StreamEngine, plan } from './engine'
 import { type RoomContext, RoomButton, RoomNotices, TapToJoin, controlledBy, useRoomSnapshot } from './Room'
 import { SubtitleRenderer } from './subtitles'
-import { canControl, pickShared, roomSubtitle, sameSubtitle, subtitleChoice, type SubtitleChoice } from './sync'
+import {
+  type AudioChoice,
+  type SubtitleChoice,
+  audioChoice,
+  canControl,
+  pickShared,
+  roomAudio,
+  roomSubtitle,
+  sameAudio,
+  sameSubtitle,
+  subtitleChoice,
+} from './sync'
 
 type Quality = 'auto' | 1080 | 720 | 480
 
@@ -58,21 +69,32 @@ export const pref = {
   set: (k: string, v: string) => localStorage.setItem(`tinystream.${k}`, v),
 }
 
-function readChoice(k: string): SubtitleChoice | 'off' | null {
+function readChoice<T>(k: string): T | 'off' | null {
   const v = pref.get(k)
   if (!v) return null
   if (v === 'off') return v
   try {
-    return JSON.parse(v) as SubtitleChoice
+    return JSON.parse(v) as T
   } catch {
     return null
   }
 }
 
+/** The audio picked last for this show, or anywhere when it's new. */
+function defaultAudio(pb: Playback): number | null {
+  const choice = readChoice<AudioChoice>(`audio.${pb.title.id}`) ?? readChoice<AudioChoice>('audioTrack')
+  const lang = pref.get('audioLanguage')
+  const a =
+    (choice && choice !== 'off' && sameAudio(pb.media.audio, choice)) ||
+    (lang && pb.media.audio.find((t) => t.language === lang)) ||
+    pb.media.audio.find((t) => t.default)
+  return a?.index ?? null
+}
+
 /** The subtitles picked last for this show, or anywhere when it's new. */
 function defaultSubtitle(pb: Playback): string | null {
   const usable = pb.media.subtitles.filter((s) => s.supported)
-  const choice = readChoice(`subtitles.${pb.title.id}`) ?? readChoice('subtitleTrack')
+  const choice = readChoice<SubtitleChoice>(`subtitles.${pb.title.id}`) ?? readChoice<SubtitleChoice>('subtitleTrack')
   if (!usable.length || choice === 'off' || (!choice && pref.get('subtitles') === 'off')) return null
   const lang = pref.get('subtitleLanguage')
   return (
@@ -263,9 +285,7 @@ export function Player({ mediaId, room, editClip, startAt }: { mediaId: number; 
   // Pick initial tracks once the file's info arrives. (Rooms pick below.)
   useEffect(() => {
     if (!pb || room) return
-    const lang = pref.get('audioLanguage')
-    const a = (lang && pb.media.audio.find((t) => t.language === lang)) || pb.media.audio.find((t) => t.default)
-    setAudioIndex(a?.index ?? null)
+    setAudioIndex(defaultAudio(pb))
     setSubtitle(defaultSubtitle(pb))
   }, [pb, room])
 
@@ -292,15 +312,20 @@ export function Player({ mediaId, room, editClip, startAt }: { mediaId: number; 
       ...(track && roomSubtitle(track)),
       mediaId: pb.id,
       audio,
-      audioLanguage: pb.media.audio.find((a) => a.index === audio)?.language ?? null,
+      ...roomAudio(pb.media.audio.find((a) => a.index === audio)),
       subtitle: sub,
     })
   }
   const chooseAudio = (index: number) => {
     resumeAt.current = videoRef.current?.currentTime ?? null
     setAudioIndex(index)
-    const lang = pb?.media.audio.find((a) => a.index === index)?.language
-    if (lang) pref.set('audioLanguage', lang)
+    const track = pb?.media.audio.find((a) => a.index === index)
+    if (track?.language) pref.set('audioLanguage', track.language)
+    if (pb && track) {
+      const choice = JSON.stringify(audioChoice(track))
+      pref.set(`audio.${pb.title.id}`, choice)
+      pref.set('audioTrack', choice)
+    }
     if (room) {
       setOwnAudio(scope === 'me')
       if (scope === 'everyone') shareTracks({ audio: index })
@@ -561,7 +586,7 @@ export function Player({ mediaId, room, editClip, startAt }: { mediaId: number; 
             paused: v.paused,
             tracks: {
               audio: audioIndex ?? null,
-              audioLanguage: pb.media.audio.find((a) => a.index === audioIndex)?.language ?? null,
+              ...roomAudio(pb.media.audio.find((a) => a.index === audioIndex)),
               subtitle,
               ...roomSubtitle(pb.media.subtitles.find((s) => s.id === subtitle)),
             },

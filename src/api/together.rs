@@ -81,6 +81,9 @@ async fn room_media(state: &AppState, room: &Room, id: i64) -> ApiResult<(PathBu
 pub struct TracksInput {
     audio: Option<i64>,
     audio_language: Option<String>,
+    audio_title: Option<String>,
+    audio_channels: Option<i64>,
+    audio_codec: Option<String>,
 
     subtitle: Option<String>,
     subtitle_language: Option<String>,
@@ -210,6 +213,9 @@ impl RoomMutation {
                         media_id: input.video_id,
                         audio: t.audio,
                         audio_language: t.audio_language,
+                        audio_title: t.audio_title,
+                        audio_channels: t.audio_channels,
+                        audio_codec: t.audio_codec,
                         subtitle: t.subtitle,
                         subtitle_language: t.subtitle_language,
                         subtitle_title: t.subtitle_title,

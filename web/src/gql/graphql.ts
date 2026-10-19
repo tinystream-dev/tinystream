@@ -527,7 +527,10 @@ export type TorrentStage =
 
 export type TracksInput = {
   audio?: number | null | undefined;
+  audioChannels?: number | null | undefined;
+  audioCodec?: string | null | undefined;
   audioLanguage?: string | null | undefined;
+  audioTitle?: string | null | undefined;
   subtitle?: string | null | undefined;
   subtitleCodec?: string | null | undefined;
   subtitleForced?: boolean;

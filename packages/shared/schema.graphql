@@ -1150,7 +1150,7 @@ input NewRoom {
 	videoId: Int!
 	position: Float! = 0.0
 	paused: Boolean! = false
-	tracks: TracksInput! = {audio: null, audioLanguage: null, subtitle: null, subtitleLanguage: null, subtitleTitle: null, subtitleForced: false, subtitleCodec: null}
+	tracks: TracksInput! = {audio: null, audioLanguage: null, audioTitle: null, audioChannels: null, audioCodec: null, subtitle: null, subtitleLanguage: null, subtitleTitle: null, subtitleForced: false, subtitleCodec: null}
 	public: Boolean! = false
 }
 
@@ -2123,6 +2123,9 @@ type Track {
 input TracksInput {
 	audio: Int
 	audioLanguage: String
+	audioTitle: String
+	audioChannels: Int
+	audioCodec: String
 	subtitle: String
 	subtitleLanguage: String
 	subtitleTitle: String

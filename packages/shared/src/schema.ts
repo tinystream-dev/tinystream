@@ -2662,7 +2662,10 @@ export type Track = {
 
 export type TracksInput = {
   audio?: InputMaybe<Scalars['Int']['input']>;
+  audioChannels?: InputMaybe<Scalars['Int']['input']>;
+  audioCodec?: InputMaybe<Scalars['String']['input']>;
   audioLanguage?: InputMaybe<Scalars['String']['input']>;
+  audioTitle?: InputMaybe<Scalars['String']['input']>;
   subtitle?: InputMaybe<Scalars['String']['input']>;
   subtitleCodec?: InputMaybe<Scalars['String']['input']>;
   subtitleForced?: Scalars['Boolean']['input'];
