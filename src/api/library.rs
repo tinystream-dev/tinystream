@@ -530,8 +530,11 @@ pub(super) async fn episodes(state: &AppState, user: &User, item_id: i64) -> Api
 pub(super) fn next_up(eps: &[Episode]) -> Option<(&Episode, bool)> {
     let last = eps.iter().filter(|e| e.updated_at.is_some()).max_by_key(|e| e.updated_at)?;
 
-    if last.finished != Some(true) && last.position.unwrap_or(0.0) > 5.0 {
-        return Some((last, true));
+    if last.finished != Some(true) {
+        let started = last.position.unwrap_or(0.0) > 5.0;
+        if started || (last.season != Some(0) && last.episode.is_some()) {
+            return Some((last, started));
+        }
     }
 
     let idx = eps.iter().position(|e| e.id == last.id)?;
@@ -1251,5 +1254,17 @@ mod tests {
         eps[2].finished = Some(true);
         eps[2].updated_at = Some(30);
         assert!(next_up(&eps).is_none());
+    }
+
+    #[test]
+    fn next_up_keeps_a_barely_started_episode() {
+        let mut eps = vec![
+            episode(1, 1, Some(1), true, Some(10)),
+            episode(2, 1, Some(2), false, Some(20)),
+            episode(3, 1, Some(3), false, None),
+        ];
+
+        eps[1].position = Some(3.0);
+        assert_eq!(next_up(&eps).map(|(e, resume)| (e.id, resume)), Some((2, false)));
     }
 }
