@@ -13,6 +13,7 @@ use super::books::{BookMutation, BookQuery};
 use super::clips::{ClipMutation, ClipQuery};
 use super::discovery::DiscoveryQuery;
 use super::events::EventSubscription;
+use super::invites::{InviteMutation, InviteQuery};
 use super::library::{LibraryMutation, LibraryQuery};
 use super::listen::{ListenMutation, ListenQuery};
 use super::music::{MusicMutation, MusicQuery};
@@ -29,6 +30,7 @@ use crate::state::AppState;
 #[derive(MergedObject, Default)]
 pub struct Query(
     AuthQuery,
+    InviteQuery,
     UserQuery,
     LibraryQuery,
     MusicQuery,
@@ -47,6 +49,7 @@ pub struct Query(
 #[derive(MergedObject, Default)]
 pub struct Query(
     AuthQuery,
+    InviteQuery,
     UserQuery,
     LibraryQuery,
     MusicQuery,
@@ -64,6 +67,7 @@ pub struct Query(
 #[derive(MergedObject, Default)]
 pub struct Mutation(
     AuthMutation,
+    InviteMutation,
     UserMutation,
     LibraryMutation,
     MusicMutation,
@@ -81,6 +85,7 @@ pub struct Mutation(
 #[derive(MergedObject, Default)]
 pub struct Mutation(
     AuthMutation,
+    InviteMutation,
     UserMutation,
     LibraryMutation,
     MusicMutation,

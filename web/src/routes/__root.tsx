@@ -170,7 +170,7 @@ function useLiveUpdates(enabled: boolean) {
                 break
               case 'USERS':
                 // Permissions decide what's on screen, so everything that depends on them goes.
-                invalidate(['auth'], ['users'], ['people'], ['permission-defaults'], ['libraries'], ['requests'])
+                invalidate(['auth'], ['users'], ['people'], ['permission-defaults'], ['libraries'], ['requests'], ['invites'])
                 break
               case 'NOTIFICATIONS':
                 refreshNotifications(qc)
@@ -238,7 +238,7 @@ function Gate() {
 
   if (isPending) return null
   // Rooms decide for themselves who gets in; public ones need no account.
-  if (path.startsWith('/together/') || path.startsWith('/listen/'))
+  if (path === '/invite' || path.startsWith('/together/') || path.startsWith('/listen/'))
     return (
       <>
         <Outlet />

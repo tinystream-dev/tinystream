@@ -14,6 +14,7 @@ import { Route as CalendarRouteImport } from './routes/calendar'
 import { Route as ClipsRouteImport } from './routes/clips'
 import { Route as DiscoverRouteImport } from './routes/discover'
 import { Route as DownloadsRouteImport } from './routes/downloads'
+import { Route as InviteRouteImport } from './routes/invite'
 import { Route as RequestsRouteImport } from './routes/requests'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as WantedRouteImport } from './routes/wanted'
@@ -52,6 +53,11 @@ const DiscoverRoute = DiscoverRouteImport.update({
 const DownloadsRoute = DownloadsRouteImport.update({
   id: '/downloads',
   path: '/downloads',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const InviteRoute = InviteRouteImport.update({
+  id: '/invite',
+  path: '/invite',
   getParentRoute: () => rootRouteImport,
 } as any)
 const RequestsRoute = RequestsRouteImport.update({
@@ -131,6 +137,7 @@ export interface FileRoutesByFullPath {
   '/clips': typeof ClipsRoute
   '/discover': typeof DiscoverRoute
   '/downloads': typeof DownloadsRoute
+  '/invite': typeof InviteRoute
   '/requests': typeof RequestsRoute
   '/settings': typeof SettingsRoute
   '/wanted': typeof WantedRoute
@@ -152,6 +159,7 @@ export interface FileRoutesByTo {
   '/clips': typeof ClipsRoute
   '/discover': typeof DiscoverRoute
   '/downloads': typeof DownloadsRoute
+  '/invite': typeof InviteRoute
   '/requests': typeof RequestsRoute
   '/settings': typeof SettingsRoute
   '/wanted': typeof WantedRoute
@@ -174,6 +182,7 @@ export interface FileRoutesById {
   '/clips': typeof ClipsRoute
   '/discover': typeof DiscoverRoute
   '/downloads': typeof DownloadsRoute
+  '/invite': typeof InviteRoute
   '/requests': typeof RequestsRoute
   '/settings': typeof SettingsRoute
   '/wanted': typeof WantedRoute
@@ -197,6 +206,7 @@ export interface FileRouteTypes {
     | '/clips'
     | '/discover'
     | '/downloads'
+    | '/invite'
     | '/requests'
     | '/settings'
     | '/wanted'
@@ -218,6 +228,7 @@ export interface FileRouteTypes {
     | '/clips'
     | '/discover'
     | '/downloads'
+    | '/invite'
     | '/requests'
     | '/settings'
     | '/wanted'
@@ -239,6 +250,7 @@ export interface FileRouteTypes {
     | '/clips'
     | '/discover'
     | '/downloads'
+    | '/invite'
     | '/requests'
     | '/settings'
     | '/wanted'
@@ -261,6 +273,7 @@ export interface RootRouteChildren {
   ClipsRoute: typeof ClipsRoute
   DiscoverRoute: typeof DiscoverRoute
   DownloadsRoute: typeof DownloadsRoute
+  InviteRoute: typeof InviteRoute
   RequestsRoute: typeof RequestsRoute
   SettingsRoute: typeof SettingsRoute
   WantedRoute: typeof WantedRoute
@@ -312,6 +325,13 @@ declare module '@tanstack/react-router' {
       path: '/downloads'
       fullPath: '/downloads'
       preLoaderRoute: typeof DownloadsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/invite': {
+      id: '/invite'
+      path: '/invite'
+      fullPath: '/invite'
+      preLoaderRoute: typeof InviteRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/requests': {
@@ -421,6 +441,7 @@ const rootRouteChildren: RootRouteChildren = {
   ClipsRoute: ClipsRoute,
   DiscoverRoute: DiscoverRoute,
   DownloadsRoute: DownloadsRoute,
+  InviteRoute: InviteRoute,
   RequestsRoute: RequestsRoute,
   SettingsRoute: SettingsRoute,
   WantedRoute: WantedRoute,
@@ -441,10 +462,13 @@ export const routeTree = rootRouteImport
   ._addFileTypes<FileRouteTypes>()
 
 import type { getRouter } from './router.tsx'
+
 import type { createStart } from '@tanstack/react-start'
+
 declare module '@tanstack/react-start' {
   interface Register {
     ssr: true
+
     router: Awaited<ReturnType<typeof getRouter>>
   }
 }

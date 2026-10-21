@@ -949,6 +949,27 @@ export type UndoFileChangesMutationVariables = Exact<{
 
 export type UndoFileChangesMutation = { undoFileChanges: { undone: number, problems: Array<string> } };
 
+export type InvitesQueryVariables = Exact<{ [key: string]: never; }>;
+
+
+export type InvitesQuery = { invites: Array<{ id: number, label: string, expiresAt: number, maxUses: number, uses: number, revoked: boolean }> };
+
+export type CreateInviteMutationVariables = Exact<{
+  label: string;
+  maxUses: number;
+  expiresInHours: number;
+}>;
+
+
+export type CreateInviteMutation = { createInvite: { link: string } };
+
+export type RevokeInviteMutationVariables = Exact<{
+  id: number;
+}>;
+
+
+export type RevokeInviteMutation = { revokeInvite: boolean };
+
 export type SignInProfilesQueryVariables = Exact<{ [key: string]: never; }>;
 
 
@@ -1638,6 +1659,22 @@ export type MusicHomeQueryVariables = Exact<{ [key: string]: never; }>;
 
 
 export type MusicHomeQuery = { musicHome: { recentlyPlayed: Array<{ id: number, name: string, artist: string, year: number | null, cover: string | null, trackCount: number, duration: number, compilation: boolean, starred: boolean, playCount: number, addedAt: number, artists: Array<{ id: number, name: string }> }>, recentlyAdded: Array<{ id: number, name: string, artist: string, year: number | null, cover: string | null, trackCount: number, duration: number, compilation: boolean, starred: boolean, playCount: number, addedAt: number, artists: Array<{ id: number, name: string }> }> } };
+
+export type InviteQueryVariables = Exact<{
+  token: string;
+}>;
+
+
+export type InviteQuery = { invite: { expiresAt: number } | null };
+
+export type AcceptInviteMutationVariables = Exact<{
+  token: string;
+  username: string;
+  password: string;
+}>;
+
+
+export type AcceptInviteMutation = { acceptInvite: { user: { id: number } } };
 
 export type LibraryQueryVariables = Exact<{
   name: string;
@@ -3581,6 +3618,30 @@ export const UndoFileChangesDocument = new TypedDocumentString(`
   }
 }
     `) as unknown as TypedDocumentString<UndoFileChangesMutation, UndoFileChangesMutationVariables>;
+export const InvitesDocument = new TypedDocumentString(`
+    query Invites {
+  invites {
+    id
+    label
+    expiresAt
+    maxUses
+    uses
+    revoked
+  }
+}
+    `) as unknown as TypedDocumentString<InvitesQuery, InvitesQueryVariables>;
+export const CreateInviteDocument = new TypedDocumentString(`
+    mutation CreateInvite($label: String!, $maxUses: Int!, $expiresInHours: Int!) {
+  createInvite(label: $label, maxUses: $maxUses, expiresInHours: $expiresInHours) {
+    link
+  }
+}
+    `) as unknown as TypedDocumentString<CreateInviteMutation, CreateInviteMutationVariables>;
+export const RevokeInviteDocument = new TypedDocumentString(`
+    mutation RevokeInvite($id: Int!) {
+  revokeInvite(id: $id)
+}
+    `) as unknown as TypedDocumentString<RevokeInviteMutation, RevokeInviteMutationVariables>;
 export const SignInProfilesDocument = new TypedDocumentString(`
     query SignInProfiles {
   signInProfiles {
@@ -6633,6 +6694,22 @@ export const MusicHomeDocument = new TypedDocumentString(`
   playCount
   addedAt
 }`) as unknown as TypedDocumentString<MusicHomeQuery, MusicHomeQueryVariables>;
+export const InviteDocument = new TypedDocumentString(`
+    query Invite($token: String!) {
+  invite(token: $token) {
+    expiresAt
+  }
+}
+    `) as unknown as TypedDocumentString<InviteQuery, InviteQueryVariables>;
+export const AcceptInviteDocument = new TypedDocumentString(`
+    mutation AcceptInvite($token: String!, $username: String!, $password: String!) {
+  acceptInvite(token: $token, username: $username, password: $password) {
+    user {
+      id
+    }
+  }
+}
+    `) as unknown as TypedDocumentString<AcceptInviteMutation, AcceptInviteMutationVariables>;
 export const LibraryDocument = new TypedDocumentString(`
     query Library($name: String!) {
   library(name: $name) {

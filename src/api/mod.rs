@@ -10,6 +10,7 @@ mod discovery;
 mod events;
 pub(crate) mod image_cache;
 mod images;
+mod invites;
 mod library;
 mod listen;
 mod media;
