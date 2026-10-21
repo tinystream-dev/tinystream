@@ -377,7 +377,12 @@ fn write_library(table: &mut Table, input: &LibraryInput) -> Result<(), String> 
     set_value(table, "download-path", text(&input.download_path))
 }
 
-fn sync_section<T: Serialize>(doc: &mut DocumentMut, name: &str, new: &T, default: &T) -> Result<(), String> {
+fn sync_section<T: Serialize + serde::de::DeserializeOwned>(
+    doc: &mut DocumentMut,
+    name: &str,
+    new: &T,
+    default: &T,
+) -> Result<(), String> {
     let new = to_table(new)?;
     let default = to_table(default)?;
 
@@ -393,7 +398,20 @@ fn sync_section<T: Serialize>(doc: &mut DocumentMut, name: &str, new: &T, defaul
     }
 
     let table = doc[name].as_table_mut().ok_or_else(|| format!("`{name}` in config.toml must be a [{name}] table"))?;
-    sync_table(table, &new, &default, false)
+
+    // What's written now and still would be, but isn't in the new settings, was cleared (an emptied
+    // Option). Keys that are read but never written back, kept for old configs, don't come through.
+    let written = toml::from_str::<T>(&table.to_string()).ok().map(|t| to_table(&t)).transpose()?.unwrap_or_default();
+    let cleared: Vec<String> =
+        written.keys().filter(|k| !new.contains_key(*k) && !default.contains_key(*k)).cloned().collect();
+
+    sync_table(table, &new, &default, false)?;
+
+    for key in cleared {
+        table.remove(&key);
+    }
+
+    Ok(())
 }
 
 fn sync_table(table: &mut Table, new: &toml::Table, default: &toml::Table, exact: bool) -> Result<(), String> {
@@ -531,6 +549,22 @@ mod tests {
         sync_section(&mut doc, "scan", &scan, &Scan::default()).unwrap();
         let out = doc.to_string();
         assert!(out.find("[scan]").unwrap() < out.find("[[library]]").unwrap(), "{out}");
+    }
+
+    #[test]
+    fn cleared_settings_leave_the_file() {
+        let mut doc: DocumentMut = "[metadata]\ntmdb-api-key = \"abc\"\nlanguage = \"de-DE\"\n".parse().unwrap();
+        let metadata = Metadata { language: "de-DE".into(), ..Metadata::default() };
+        sync_section(&mut doc, "metadata", &metadata, &Metadata::default()).unwrap();
+        let out = doc.to_string();
+        assert!(!out.contains("tmdb-api-key") && out.contains("language = \"de-DE\""), "{out}");
+    }
+
+    #[test]
+    fn unwritten_keys_stay() {
+        let mut doc: DocumentMut = "[requests]\nmax-open = 3\n".parse().unwrap();
+        sync_section(&mut doc, "requests", &Requests::default(), &Requests::default()).unwrap();
+        assert!(doc.to_string().contains("max-open = 3"), "{doc}");
     }
 
     #[test]
