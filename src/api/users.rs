@@ -80,6 +80,14 @@ impl User {
         }
         passkeys(ctx.state(), self.id).await
     }
+
+    async fn email(&self, ctx: &Context<'_>) -> ApiResult<Option<String>> {
+        if ctx.user()?.id != self.id {
+            return Err(ApiError::forbidden());
+        }
+
+        Ok(sqlx::query_scalar("SELECT email FROM users WHERE id = ?").bind(self.id).fetch_one(&ctx.state().db).await?)
+    }
 }
 
 async fn load(state: &AppState, id: i64) -> ApiResult<User> {

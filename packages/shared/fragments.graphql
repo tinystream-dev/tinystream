@@ -550,6 +550,15 @@ fragment SettingsFields on Settings {
   signIn {
     style
   }
+  smtp {
+    host
+    port
+    security
+    username
+    password
+    from
+    publicUrl
+  }
   sources {
     name
     kind

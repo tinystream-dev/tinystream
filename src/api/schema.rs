@@ -12,6 +12,7 @@ use super::automation::{AutomationMutation, AutomationQuery};
 use super::books::{BookMutation, BookQuery};
 use super::clips::{ClipMutation, ClipQuery};
 use super::discovery::DiscoveryQuery;
+use super::email::{EmailMutation, EmailQuery};
 use super::events::EventSubscription;
 use super::invites::{InviteMutation, InviteQuery};
 use super::library::{LibraryMutation, LibraryQuery};
@@ -31,6 +32,7 @@ use crate::state::AppState;
 pub struct Query(
     AuthQuery,
     InviteQuery,
+    EmailQuery,
     UserQuery,
     LibraryQuery,
     MusicQuery,
@@ -50,6 +52,7 @@ pub struct Query(
 pub struct Query(
     AuthQuery,
     InviteQuery,
+    EmailQuery,
     UserQuery,
     LibraryQuery,
     MusicQuery,
@@ -68,6 +71,7 @@ pub struct Query(
 pub struct Mutation(
     AuthMutation,
     InviteMutation,
+    EmailMutation,
     UserMutation,
     LibraryMutation,
     MusicMutation,
@@ -86,6 +90,7 @@ pub struct Mutation(
 pub struct Mutation(
     AuthMutation,
     InviteMutation,
+    EmailMutation,
     UserMutation,
     LibraryMutation,
     MusicMutation,

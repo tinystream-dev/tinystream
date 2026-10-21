@@ -16,6 +16,7 @@ import { Route as DiscoverRouteImport } from './routes/discover'
 import { Route as DownloadsRouteImport } from './routes/downloads'
 import { Route as InviteRouteImport } from './routes/invite'
 import { Route as RequestsRouteImport } from './routes/requests'
+import { Route as ResetRouteImport } from './routes/reset'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as WantedRouteImport } from './routes/wanted'
 import { Route as AlbumIdRouteImport } from './routes/album.$id'
@@ -63,6 +64,11 @@ const InviteRoute = InviteRouteImport.update({
 const RequestsRoute = RequestsRouteImport.update({
   id: '/requests',
   path: '/requests',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ResetRoute = ResetRouteImport.update({
+  id: '/reset',
+  path: '/reset',
   getParentRoute: () => rootRouteImport,
 } as any)
 const SettingsRoute = SettingsRouteImport.update({
@@ -139,6 +145,7 @@ export interface FileRoutesByFullPath {
   '/downloads': typeof DownloadsRoute
   '/invite': typeof InviteRoute
   '/requests': typeof RequestsRoute
+  '/reset': typeof ResetRoute
   '/settings': typeof SettingsRoute
   '/wanted': typeof WantedRoute
   '/album/$id': typeof AlbumIdRoute
@@ -161,6 +168,7 @@ export interface FileRoutesByTo {
   '/downloads': typeof DownloadsRoute
   '/invite': typeof InviteRoute
   '/requests': typeof RequestsRoute
+  '/reset': typeof ResetRoute
   '/settings': typeof SettingsRoute
   '/wanted': typeof WantedRoute
   '/album/$id': typeof AlbumIdRoute
@@ -184,6 +192,7 @@ export interface FileRoutesById {
   '/downloads': typeof DownloadsRoute
   '/invite': typeof InviteRoute
   '/requests': typeof RequestsRoute
+  '/reset': typeof ResetRoute
   '/settings': typeof SettingsRoute
   '/wanted': typeof WantedRoute
   '/album/$id': typeof AlbumIdRoute
@@ -208,6 +217,7 @@ export interface FileRouteTypes {
     | '/downloads'
     | '/invite'
     | '/requests'
+    | '/reset'
     | '/settings'
     | '/wanted'
     | '/album/$id'
@@ -230,6 +240,7 @@ export interface FileRouteTypes {
     | '/downloads'
     | '/invite'
     | '/requests'
+    | '/reset'
     | '/settings'
     | '/wanted'
     | '/album/$id'
@@ -252,6 +263,7 @@ export interface FileRouteTypes {
     | '/downloads'
     | '/invite'
     | '/requests'
+    | '/reset'
     | '/settings'
     | '/wanted'
     | '/album/$id'
@@ -275,6 +287,7 @@ export interface RootRouteChildren {
   DownloadsRoute: typeof DownloadsRoute
   InviteRoute: typeof InviteRoute
   RequestsRoute: typeof RequestsRoute
+  ResetRoute: typeof ResetRoute
   SettingsRoute: typeof SettingsRoute
   WantedRoute: typeof WantedRoute
   AlbumIdRoute: typeof AlbumIdRoute
@@ -339,6 +352,13 @@ declare module '@tanstack/react-router' {
       path: '/requests'
       fullPath: '/requests'
       preLoaderRoute: typeof RequestsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/reset': {
+      id: '/reset'
+      path: '/reset'
+      fullPath: '/reset'
+      preLoaderRoute: typeof ResetRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/settings': {
@@ -443,6 +463,7 @@ const rootRouteChildren: RootRouteChildren = {
   DownloadsRoute: DownloadsRoute,
   InviteRoute: InviteRoute,
   RequestsRoute: RequestsRoute,
+  ResetRoute: ResetRoute,
   SettingsRoute: SettingsRoute,
   WantedRoute: WantedRoute,
   AlbumIdRoute: AlbumIdRoute,
@@ -462,13 +483,10 @@ export const routeTree = rootRouteImport
   ._addFileTypes<FileRouteTypes>()
 
 import type { getRouter } from './router.tsx'
-
 import type { createStart } from '@tanstack/react-start'
-
 declare module '@tanstack/react-start' {
   interface Register {
     ssr: true
-
     router: Awaited<ReturnType<typeof getRouter>>
   }
 }

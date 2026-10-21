@@ -6,6 +6,7 @@ import { useState } from 'react'
 import { graphql } from '../gql'
 import { request } from '../lib/api'
 import { relative } from '../lib/downloads'
+import { useEmailOn } from '../lib/hooks'
 import { ask, toastError } from './feedback'
 import { Copyable } from './MusicSettings'
 import { Card } from './SettingsKit'
@@ -26,8 +27,8 @@ const InvitesQuery = graphql(`
 `)
 
 const CreateInvite = graphql(`
-  mutation CreateInvite($label: String!, $maxUses: Int!, $expiresInHours: Int!) {
-    createInvite(label: $label, maxUses: $maxUses, expiresInHours: $expiresInHours) {
+  mutation CreateInvite($label: String!, $maxUses: Int!, $expiresInHours: Int!, $email: String) {
+    createInvite(label: $label, maxUses: $maxUses, expiresInHours: $expiresInHours, email: $email) {
       link
     }
   }
@@ -103,11 +104,14 @@ function NewInvite({ onClose }: { onClose: () => void }) {
   const [label, setLabel] = useState('')
   const [uses, setUses] = useState('5')
   const [lifetime, setLifetime] = useState('168')
+  const [email, setEmail] = useState('')
   const [link, setLink] = useState<string | null>(null)
+  const emailOn = useEmailOn()
   const maxUses = Number(uses)
   const valid = !!label.trim() && Number.isInteger(maxUses) && maxUses >= 1 && maxUses <= 1000
   const create = useMutation({
-    mutationFn: async () => (await request(CreateInvite, { label: label.trim(), maxUses, expiresInHours: Number(lifetime) })).createInvite,
+    mutationFn: async () =>
+      (await request(CreateInvite, { label: label.trim(), maxUses, expiresInHours: Number(lifetime), email: email.trim() || null })).createInvite,
     onSuccess: (r) => {
       setLink(new URL(r.link, location.origin).href)
       void qc.invalidateQueries({ queryKey: ['invites'] })
@@ -120,7 +124,9 @@ function NewInvite({ onClose }: { onClose: () => void }) {
         <>
           <Squircle radius={12} edge className="mt-5 space-y-1.5 bg-panel p-4">
             <Copyable label="Link" value={link} />
-            <p className="pt-2 text-xs text-ink-3">This is the only time the link is shown.</p>
+            <p className="pt-2 text-xs text-ink-3">
+              {email.trim() ? `It’s on its way to ${email.trim()}. ` : ''}This is the only time the link is shown.
+            </p>
           </Squircle>
           <div className="flex justify-end pt-6">
             <Button variant="primary" onClick={onClose}>
@@ -147,13 +153,18 @@ function NewInvite({ onClose }: { onClose: () => void }) {
               <Select value={lifetime} onChange={setLifetime} options={LIFETIMES} />
             </Field>
           </div>
+          {emailOn && (
+            <Field label="Email it to" hint="Optional; the address isn’t kept">
+              <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="someone@example.com" />
+            </Field>
+          )}
           {create.error && <p className="text-sm text-danger">{(create.error as Error).message}</p>}
           <div className="flex justify-end gap-2 pt-2">
             <Button type="button" variant="plain" onClick={onClose}>
               Cancel
             </Button>
             <Button type="submit" variant="primary" disabled={!valid || create.isPending}>
-              Create
+              {email.trim() ? 'Create and send' : 'Create'}
             </Button>
           </div>
         </form>

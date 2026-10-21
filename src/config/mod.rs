@@ -76,6 +76,8 @@ pub struct Config {
     pub requests: Requests,
     #[serde(default)]
     pub sign_in: SignIn,
+    #[serde(default)]
+    pub smtp: Smtp,
     #[serde(default, rename = "source")]
     pub sources: Vec<Source>,
     #[serde(default, rename = "profile")]
@@ -505,6 +507,57 @@ pub struct SignIn {
     pub style: SignInStyle,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, Default, async_graphql::Enum)]
+#[serde(rename_all = "kebab-case")]
+pub enum SmtpSecurity {
+    #[default]
+    Starttls,
+    Tls,
+    None,
+}
+
+#[derive(
+    Debug, Clone, PartialEq, Default, Deserialize, Serialize, async_graphql::SimpleObject, async_graphql::InputObject,
+)]
+#[graphql(name = "SmtpConfig", input_name = "SmtpConfigInput")]
+#[serde(rename_all = "kebab-case", deny_unknown_fields, default)]
+pub struct Smtp {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub host: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub port: Option<u16>,
+    pub security: SmtpSecurity,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub username: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub password: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub from: Option<String>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub public_url: Option<String>,
+}
+
+impl Smtp {
+    pub fn relay_host(&self) -> Option<&str> {
+        self.host.as_deref().map(str::trim).filter(|h| !h.is_empty())
+    }
+
+    #[cfg_attr(not(feature = "smtp"), allow(dead_code))]
+    pub fn relay_port(&self) -> u16 {
+        self.port.unwrap_or(match self.security {
+            SmtpSecurity::Starttls => 587,
+            SmtpSecurity::Tls => 465,
+            SmtpSecurity::None => 25,
+        })
+    }
+
+    pub fn link(&self, path: &str) -> Option<String> {
+        let base = self.public_url.as_deref()?.trim().trim_end_matches('/');
+        Some(format!("{base}/{}", path.trim_start_matches('/')))
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, async_graphql::Enum)]
 #[serde(rename_all = "kebab-case")]
 pub enum SourceKind {
@@ -708,6 +761,20 @@ impl Config {
             return Err("every [automation] retry step needs a non-zero `every`".into());
         }
 
+        if self.smtp.relay_host().is_some() {
+            if !self.smtp.from.as_deref().is_some_and(|f| f.contains('@')) {
+                return Err("[smtp] needs a `from` address, like \"tinystream <tinystream@example.com>\"".into());
+            }
+
+            let url = self.smtp.public_url.as_deref().map(str::trim).unwrap_or_default();
+
+            if !url::Url::parse(url).is_ok_and(|u| matches!(u.scheme(), "http" | "https")) {
+                return Err(format!(
+                    "`[smtp] public-url = {url:?}` isn't the address people open tinystream at, like https://tv.example.com"
+                ));
+            }
+        }
+
         if self.log.level.parse::<tracing::Level>().is_err() {
             return Err(format!(
                 "`[log] level = {:?}` isn't a level; use one of trace, debug, info, warn, error",
@@ -788,4 +855,15 @@ port = 3000
 # [downloads]
 # path = "~/Downloads/tinystream"
 # bind-interface = "wg0"   # pause every torrent whenever your VPN is down
+
+# Email, for sending invite links and password resets (only in builds with the
+# `smtp` feature). tinystream sends through your mail provider's SMTP server:
+#
+# [smtp]
+# host = "smtp.example.com"
+# security = "starttls"   # or "tls" (port 465), or "none"
+# username = "me@example.com"
+# password = "…"
+# from = "tinystream <me@example.com>"
+# public-url = "https://tv.example.com"   # where links in emails point
 "#;

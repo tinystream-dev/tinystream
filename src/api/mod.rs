@@ -7,6 +7,7 @@ mod automation;
 mod books;
 mod clips;
 mod discovery;
+mod email;
 mod events;
 pub(crate) mod image_cache;
 mod images;

@@ -29,7 +29,7 @@ import {
   Zap,
 } from 'lucide-react'
 import { type ReactNode, useEffect, useState } from 'react'
-import { ask } from '../components/feedback'
+import { ask, toast, toastError } from '../components/feedback'
 import { Page, PageTitle } from '../components/Page'
 import { People, Profile } from '../components/People'
 import { AutomationSettings, DownloadsSettings, ProfilesSettings, RenamesSettings, SourcesSettings } from '../components/DownloadSettings'
@@ -139,6 +139,26 @@ const ChangePassword = graphql(`
   }
 `)
 
+const EmailQuery = graphql(`
+  query MyEmail {
+    viewer {
+      email
+    }
+  }
+`)
+
+const SetEmail = graphql(`
+  mutation SetEmail($email: String, $password: String!) {
+    setEmail(email: $email, password: $password)
+  }
+`)
+
+const SendTestEmail = graphql(`
+  mutation SendTestEmail($to: String!) {
+    sendTestEmail(to: $to)
+  }
+`)
+
 const ReplaceConfig = graphql(`
   mutation ReplaceConfig($text: String!) {
     replaceConfig(text: $text) {
@@ -158,9 +178,10 @@ const SkippedQuery = graphql(`
 `)
 
 /** The parts of config.toml the Server tab edits. */
-type ServerConfig = Pick<Settings, 'network' | 'log' | 'scan' | 'metadata' | 'transcode' | 'signIn'>
-const serverPart = ({ network, log, scan, metadata, transcode, signIn }: Settings): ServerConfig => ({ network, log, scan, metadata, transcode, signIn })
-import { useMe } from '../lib/hooks'
+type ServerConfig = Pick<Settings, 'network' | 'log' | 'scan' | 'metadata' | 'transcode' | 'signIn' | 'smtp'>
+const serverPart = ({ network, log, scan, metadata, transcode, signIn, smtp }: Settings): ServerConfig => ({ network, log, scan, metadata, transcode, signIn, smtp })
+const SMTP_PORTS = { STARTTLS: 587, TLS: 465, NONE: 25 }
+import { useEmailOn, useMe, useStatus } from '../lib/hooks'
 import { notifyEnabled, setNotify } from '../lib/notify'
 import { useTitle } from '../lib/title'
 import { createCredential } from '../lib/webauthn'
@@ -540,6 +561,7 @@ function Dialog({ children, onClose, wide }: { children: ReactNode; onClose: () 
 }
 function Server() {
   const { data } = useSettings()
+  const smtp = !!useStatus().data?.server.smtp
   const [draft, setDraft] = useState<ServerConfig | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [saved, setSaved] = useState(false)
@@ -608,6 +630,73 @@ function Server() {
           </Field>
         </div>
       </Card>
+
+      {smtp && (
+        <Card title="Email" description="Sends invite links, and password resets to people who gave an address.">
+          <div className="grid gap-4 sm:grid-cols-[1fr_8rem]">
+            <Field label="SMTP server">
+              <Input
+                value={draft.smtp.host ?? ''}
+                placeholder="smtp.example.com"
+                onChange={(e) => set((c) => void (c.smtp.host = e.target.value.trim() || null))}
+              />
+            </Field>
+            <Field label="Port">
+              <Input
+                inputMode="numeric"
+                value={draft.smtp.port ?? ''}
+                placeholder={String(SMTP_PORTS[draft.smtp.security])}
+                onChange={(e) => set((c) => void (c.smtp.port = Number(e.target.value.replace(/\D/g, '')) || null))}
+              />
+            </Field>
+          </div>
+          <div className="mt-4 grid gap-4 sm:grid-cols-2">
+            <Field label="Encryption">
+              <Select
+                value={draft.smtp.security}
+                options={[
+                  { value: 'STARTTLS', label: 'STARTTLS' },
+                  { value: 'TLS', label: 'TLS' },
+                  { value: 'NONE', label: 'None' },
+                ]}
+                onChange={(v) => set((c) => void (c.smtp.security = v))}
+              />
+            </Field>
+            <Field label="From">
+              <Input
+                value={draft.smtp.from ?? ''}
+                placeholder="tinystream <me@example.com>"
+                onChange={(e) => set((c) => void (c.smtp.from = e.target.value.trim() || null))}
+              />
+            </Field>
+            <Field label="Username">
+              <Input
+                autoComplete="off"
+                value={draft.smtp.username ?? ''}
+                onChange={(e) => set((c) => void (c.smtp.username = e.target.value.trim() || null))}
+              />
+            </Field>
+            <Field label="Password">
+              <Input
+                type="password"
+                autoComplete="new-password"
+                value={draft.smtp.password ?? ''}
+                onChange={(e) => set((c) => void (c.smtp.password = e.target.value || null))}
+              />
+            </Field>
+          </div>
+          <div className="mt-4">
+            <Field label="Public address" hint="Where links in emails go">
+              <Input
+                value={draft.smtp.publicUrl ?? ''}
+                placeholder="https://tv.example.com"
+                onChange={(e) => set((c) => void (c.smtp.publicUrl = e.target.value.trim() || null))}
+              />
+            </Field>
+          </div>
+          {data.smtp.host && <TestEmail unsaved={JSON.stringify(draft.smtp) !== JSON.stringify(data.smtp)} />}
+        </Card>
+      )}
 
       <Card title="Library scanning">
         <Row label="Watch folders for changes">
@@ -689,6 +778,25 @@ function Server() {
         </Button>
       </div>
     </>
+  )
+}
+
+function TestEmail({ unsaved }: { unsaved: boolean }) {
+  const [to, setTo] = useState('')
+  const send = useMutation({
+    mutationFn: () => request(SendTestEmail, { to: to.trim() }),
+    onSuccess: () => toast({ title: `Sent to ${to.trim()}`, tone: 'ok' }),
+    onError: toastError,
+  })
+  return (
+    <div className="mt-4 flex gap-2">
+      <div className="flex-1">
+        <Input type="email" value={to} onChange={(e) => setTo(e.target.value)} placeholder={unsaved ? 'Save first, then send a test' : 'Where to send a test email'} />
+      </div>
+      <Button disabled={unsaved || !to.trim() || send.isPending} onClick={() => send.mutate()}>
+        Send test
+      </Button>
+    </div>
   )
 }
 
@@ -778,7 +886,56 @@ function Account() {
           </Button>
         </div>
       </Card>
+
+      <Email />
     </>
+  )
+}
+
+function Email() {
+  const qc = useQueryClient()
+  const on = useEmailOn()
+  const { data: saved } = useQuery({ queryKey: ['email'], queryFn: async () => (await request(EmailQuery)).viewer?.email ?? null, enabled: on })
+  const [draft, setDraft] = useState<string | null>(null)
+  const [password, setPassword] = useState('')
+  const save = useMutation({
+    mutationFn: async (email: string | null) => (await request(SetEmail, { email, password })).setEmail,
+    onSuccess: (email) => {
+      qc.setQueryData(['email'], email ?? null)
+      setDraft(null)
+      setPassword('')
+    },
+  })
+  if (!on || saved === undefined) return null
+  const value = draft ?? saved ?? ''
+
+  return (
+    <Card title="Email" description="Only used to send you a link if you forget your password.">
+      <div className="grid gap-4 sm:grid-cols-2">
+        <Field label="Address">
+          <Input type="email" autoComplete="email" value={value} placeholder="None" onChange={(e) => setDraft(e.target.value)} />
+        </Field>
+        <Field label="Your password">
+          <Input type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} />
+        </Field>
+      </div>
+      <div className="mt-4 flex items-center justify-end gap-3">
+        {save.isSuccess && <p className="text-sm text-ink-2">Saved</p>}
+        {save.error && <p className="text-sm text-danger">{(save.error as Error).message}</p>}
+        {saved && (
+          <Button variant="plain" disabled={!password || save.isPending} onClick={() => save.mutate(null)}>
+            Remove
+          </Button>
+        )}
+        <Button
+          variant="primary"
+          disabled={!value.trim() || value.trim() === saved || !password || save.isPending}
+          onClick={() => save.mutate(value.trim())}
+        >
+          Save
+        </Button>
+      </div>
+    </Card>
   )
 }
 

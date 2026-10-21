@@ -11,6 +11,8 @@ const StatusQuery = graphql(`
       clips
       downloads
       sources
+      smtp
+      email
     }
     viewer {
       ...Viewer
@@ -34,6 +36,11 @@ export function useCanClip(): boolean {
 /** Whether clipping is on here at all (clips sent to you still show if you can't make them). */
 export function useClipsOn(): boolean {
   return !!useStatus().data?.server.clips
+}
+
+/** Whether this server can send email: invite links, and password resets for people who gave an address. */
+export function useEmailOn(): boolean {
+  return !!useStatus().data?.server.email
 }
 
 const PeopleQuery = graphql(`

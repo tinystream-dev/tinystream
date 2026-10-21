@@ -3,6 +3,7 @@
 pub mod invites;
 pub mod passkeys;
 pub mod permissions;
+pub mod resets;
 
 use std::sync::Arc;
 

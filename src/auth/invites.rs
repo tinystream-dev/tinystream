@@ -78,6 +78,11 @@ pub async fn revoke(db: &SqlitePool, id: i64) -> ApiResult<bool> {
     Ok(sqlx::query("UPDATE invites SET revoked = 1 WHERE id = ?").bind(id).execute(db).await?.rows_affected() > 0)
 }
 
+pub async fn delete(db: &SqlitePool, id: i64) -> ApiResult<()> {
+    sqlx::query("DELETE FROM invites WHERE id = ?").bind(id).execute(db).await?;
+    Ok(())
+}
+
 pub async fn redeem(db: &SqlitePool, token: &str, username: &str, hash: &str, handle: &str) -> ApiResult<i64> {
     let mut tx = db.begin().await?;
     let claimed = sqlx::query(

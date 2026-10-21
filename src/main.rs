@@ -32,6 +32,7 @@ mod error;
 mod events;
 mod library;
 mod logging;
+mod mail;
 mod media;
 mod metadata;
 mod music;

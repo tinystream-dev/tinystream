@@ -472,6 +472,7 @@ input ConfigPatch {
 	automation: AutomationConfigInput
 	requests: RequestsConfigInput
 	signIn: SignInConfigInput
+	smtp: SmtpConfigInput
 }
 
 type ConfiguredLibrary {
@@ -970,9 +971,23 @@ type Mutation {
 	startPasskeyRegistration(name: String): PasskeyChallenge!
 	finishPasskeyRegistration(challenge: String!, credential: JSON!): [Passkey!]!
 	deletePasskey(id: Int!): [Passkey!]!
-	createInvite(label: String!, maxUses: Int!, expiresInHours: Int!): CreatedInvite!
+	"""
+	With `email`, the link is also sent there; the address isn't kept.
+	"""
+	createInvite(label: String!, maxUses: Int!, expiresInHours: Int!, email: String): CreatedInvite!
 	revokeInvite(id: Int!): Boolean!
 	acceptInvite(token: String!, username: String!, password: String!): SignedIn!
+	"""
+	Emails a reset link to the account `who` (a username or an email address) names. Says the same
+	whether or not there's such an account, and sends in the background so the wait doesn't tell either.
+	"""
+	requestPasswordReset(who: String!): Boolean!
+	resetPassword(token: String!, password: String!): SignedIn!
+	"""
+	The address password resets go to; `None` takes it away.
+	"""
+	setEmail(email: String, password: String!): String
+	sendTestEmail(to: String!): Boolean!
 	createUser(input: NewUser!): User!
 	updateUser(id: Int!, input: UserPatch!): User!
 	deleteUser(id: Int!): Int!
@@ -1449,6 +1464,10 @@ type Query {
 	signInProfiles: [SignInProfile!]!
 	invites: [Invite!]!
 	invite(token: String!): InvitePreview
+	"""
+	Whose password a reset link is for, while it still works.
+	"""
+	passwordReset(token: String!): String
 	users: [User!]!
 	user(id: Int!): User
 	permissionDefaults: Permissions!
@@ -1870,6 +1889,8 @@ type Server {
 	signInStyle: SignInStyle!
 	clips: Boolean!
 	downloads: Boolean!
+	smtp: Boolean!
+	email: Boolean!
 	sources: Int!
 	transcoding: Transcoding!
 }
@@ -1902,6 +1923,7 @@ type Settings {
 	automation: AutomationConfig!
 	requests: RequestsConfig!
 	signIn: SignInConfig!
+	smtp: SmtpConfig!
 	sources: [Source!]!
 	profiles: [Profile!]!
 	libraries: [ConfiguredLibrary!]!
@@ -1948,6 +1970,32 @@ type SkippedFile {
 	library: String!
 	path: String!
 	reason: String!
+}
+
+type SmtpConfig {
+	host: String
+	port: Int
+	security: SmtpSecurity!
+	username: String
+	password: String
+	from: String
+	publicUrl: String
+}
+
+input SmtpConfigInput {
+	host: String
+	port: Int
+	security: SmtpSecurity!
+	username: String
+	password: String
+	from: String
+	publicUrl: String
+}
+
+enum SmtpSecurity {
+	STARTTLS
+	TLS
+	NONE
 }
 
 type Source {
@@ -2194,6 +2242,7 @@ type User {
 	createdAt: Int!
 	lastSeen: Int
 	passkeys: [Passkey!]!
+	email: String
 }
 
 input UserPatch {

@@ -424,6 +424,7 @@ export type ConfigPatch = {
   requests?: InputMaybe<RequestsConfigInput>;
   scan?: InputMaybe<ScanConfigInput>;
   signIn?: InputMaybe<SignInConfigInput>;
+  smtp?: InputMaybe<SmtpConfigInput>;
   transcode?: InputMaybe<TranscodeConfigInput>;
 };
 
@@ -455,6 +456,11 @@ export type ContrastWarning = {
   foreground: Scalars['String']['output'];
   minimum: Scalars['Float']['output'];
   ratio: Scalars['Float']['output'];
+};
+
+export type CreatedInvite = {
+  invite: Invite;
+  link: Scalars['String']['output'];
 };
 
 export type DecodedScheme = {
@@ -712,6 +718,21 @@ export type Inbox = {
   unread: Scalars['Int']['output'];
 };
 
+export type Invite = {
+  createdAt: Scalars['Int']['output'];
+  expiresAt: Scalars['Int']['output'];
+  id: Scalars['Int']['output'];
+  label: Scalars['String']['output'];
+  maxUses: Scalars['Int']['output'];
+  revoked: Scalars['Boolean']['output'];
+  uses: Scalars['Int']['output'];
+};
+
+export type InvitePreview = {
+  expiresAt: Scalars['Int']['output'];
+  remainingUses: Scalars['Int']['output'];
+};
+
 export type Library = {
   albumCount: Scalars['Int']['output'];
   /** A series counting as one, as its books are shown. */
@@ -865,6 +886,7 @@ export type MusicSearch = {
 };
 
 export type Mutation = {
+  acceptInvite: SignedIn;
   addLibrary: Settings;
   addProfile: Settings;
   addSeries: Series;
@@ -876,6 +898,8 @@ export type Mutation = {
   changePassword: Scalars['Boolean']['output'];
   createAppPassword: NewAppPassword;
   createClip: Clip;
+  /** With `email`, the link is also sent there; the address isn't kept. */
+  createInvite: CreatedInvite;
   createPlaylist: Playlist;
   createQuote: Clip;
   createRequest: Request;
@@ -932,7 +956,14 @@ export type Mutation = {
   removeSource: Settings;
   renderClip: Clip;
   replaceConfig: Settings;
+  /**
+   * Emails a reset link to the account `who` (a username or an email address) names. Says the same
+   * whether or not there's such an account, and sends in the background so the wait doesn't tell either.
+   */
+  requestPasswordReset: Scalars['Boolean']['output'];
+  resetPassword: SignedIn;
   resumeDownloads: Array<Download>;
+  revokeInvite: Scalars['Boolean']['output'];
   /** Saves the queue of tinystream's own player: the web's, or `client`, the app's. */
   savePlayQueue: PlayQueue;
   saveProgress: Video;
@@ -941,10 +972,13 @@ export type Mutation = {
   /** Creates a scheme, or changes one you may edit. */
   saveScheme: ColorScheme;
   scan: Scalars['Boolean']['output'];
+  sendTestEmail: Scalars['Boolean']['output'];
   setAppearance: Appearance;
   setAvatar: User;
   /** Marks a book read, or not started (which forgets where it was left). */
   setBookFinished: Book;
+  /** The address password resets go to; `None` takes it away. */
+  setEmail?: Maybe<Scalars['String']['output']>;
   setPermissionDefaults: Permissions;
   /** What everyone sees unless they pick something else, signed-out pages included. */
   setServerAppearance: ServerAppearance;
@@ -972,6 +1006,13 @@ export type Mutation = {
   updateSettings: Settings;
   updateSource: Settings;
   updateUser: User;
+};
+
+
+export type MutationAcceptInviteArgs = {
+  password: Scalars['String']['input'];
+  token: Scalars['String']['input'];
+  username: Scalars['String']['input'];
 };
 
 
@@ -1030,6 +1071,14 @@ export type MutationCreateAppPasswordArgs = {
 
 export type MutationCreateClipArgs = {
   input: NewClip;
+};
+
+
+export type MutationCreateInviteArgs = {
+  email?: InputMaybe<Scalars['String']['input']>;
+  expiresInHours: Scalars['Int']['input'];
+  label: Scalars['String']['input'];
+  maxUses: Scalars['Int']['input'];
 };
 
 
@@ -1272,8 +1321,24 @@ export type MutationReplaceConfigArgs = {
 };
 
 
+export type MutationRequestPasswordResetArgs = {
+  who: Scalars['String']['input'];
+};
+
+
+export type MutationResetPasswordArgs = {
+  password: Scalars['String']['input'];
+  token: Scalars['String']['input'];
+};
+
+
 export type MutationResumeDownloadsArgs = {
   ids: Array<Scalars['Int']['input']>;
+};
+
+
+export type MutationRevokeInviteArgs = {
+  id: Scalars['Int']['input'];
 };
 
 
@@ -1307,6 +1372,11 @@ export type MutationScanArgs = {
 };
 
 
+export type MutationSendTestEmailArgs = {
+  to: Scalars['String']['input'];
+};
+
+
 export type MutationSetAppearanceArgs = {
   input: AppearanceSettingsInput;
 };
@@ -1321,6 +1391,12 @@ export type MutationSetAvatarArgs = {
 export type MutationSetBookFinishedArgs = {
   finished: Scalars['Boolean']['input'];
   id: Scalars['Int']['input'];
+};
+
+
+export type MutationSetEmailArgs = {
+  email?: InputMaybe<Scalars['String']['input']>;
+  password: Scalars['String']['input'];
 };
 
 
@@ -1835,6 +1911,8 @@ export type Query = {
   forYou: ForYou;
   genres: Array<Genre>;
   home: Home;
+  invite?: Maybe<InvitePreview>;
+  invites: Array<Invite>;
   libraries: Array<Library>;
   library?: Maybe<Library>;
   listenRoom: ListenRoom;
@@ -1844,6 +1922,8 @@ export type Query = {
   /** The books added last to each book library. */
   newBooks: Array<BookShelf>;
   notifications: Inbox;
+  /** Whose password a reset link is for, while it still works. */
+  passwordReset?: Maybe<Scalars['String']['output']>;
   permissionDefaults: Permissions;
   playQueue: PlayQueue;
   playlist?: Maybe<Playlist>;
@@ -1977,6 +2057,11 @@ export type QueryGenresArgs = {
 };
 
 
+export type QueryInviteArgs = {
+  token: Scalars['String']['input'];
+};
+
+
 export type QueryLibraryArgs = {
   name: Scalars['String']['input'];
 };
@@ -2005,6 +2090,11 @@ export type QueryNewBooksArgs = {
 
 export type QueryNotificationsArgs = {
   limit?: Scalars['Int']['input'];
+};
+
+
+export type QueryPasswordResetArgs = {
+  token: Scalars['String']['input'];
 };
 
 
@@ -2400,8 +2490,10 @@ export type SeriesPatch = {
 export type Server = {
   clips: Scalars['Boolean']['output'];
   downloads: Scalars['Boolean']['output'];
+  email: Scalars['Boolean']['output'];
   setupRequired: Scalars['Boolean']['output'];
   signInStyle: SignInStyle;
+  smtp: Scalars['Boolean']['output'];
   sources: Scalars['Int']['output'];
   transcoding: Transcoding;
   version: Scalars['String']['output'];
@@ -2439,6 +2531,7 @@ export type Settings = {
   requests: RequestsConfig;
   scan: ScanConfig;
   signIn: SignInConfig;
+  smtp: SmtpConfig;
   sources: Array<Source>;
   transcode: TranscodeConfig;
 };
@@ -2481,6 +2574,31 @@ export type SkippedFile = {
   path: Scalars['String']['output'];
   reason: Scalars['String']['output'];
 };
+
+export type SmtpConfig = {
+  from?: Maybe<Scalars['String']['output']>;
+  host?: Maybe<Scalars['String']['output']>;
+  password?: Maybe<Scalars['String']['output']>;
+  port?: Maybe<Scalars['Int']['output']>;
+  publicUrl?: Maybe<Scalars['String']['output']>;
+  security: SmtpSecurity;
+  username?: Maybe<Scalars['String']['output']>;
+};
+
+export type SmtpConfigInput = {
+  from?: InputMaybe<Scalars['String']['input']>;
+  host?: InputMaybe<Scalars['String']['input']>;
+  password?: InputMaybe<Scalars['String']['input']>;
+  port?: InputMaybe<Scalars['Int']['input']>;
+  publicUrl?: InputMaybe<Scalars['String']['input']>;
+  security: SmtpSecurity;
+  username?: InputMaybe<Scalars['String']['input']>;
+};
+
+export type SmtpSecurity =
+  | 'NONE'
+  | 'STARTTLS'
+  | 'TLS';
 
 export type Source = {
   apiKey?: Maybe<Scalars['String']['output']>;
@@ -2697,6 +2815,7 @@ export type UndoReport = {
 export type User = {
   avatar?: Maybe<Scalars['String']['output']>;
   createdAt: Scalars['Int']['output'];
+  email?: Maybe<Scalars['String']['output']>;
   id: Scalars['Int']['output'];
   isAdmin: Scalars['Boolean']['output'];
   lastSeen?: Maybe<Scalars['Int']['output']>;

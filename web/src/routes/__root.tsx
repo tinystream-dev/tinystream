@@ -237,8 +237,8 @@ function Gate() {
   }, [video])
 
   if (isPending) return null
-  // Rooms decide for themselves who gets in; public ones need no account.
-  if (path === '/invite' || path.startsWith('/together/') || path.startsWith('/listen/'))
+  // Rooms decide for themselves who gets in; public ones need no account. Invites and resets are for the signed out.
+  if (path === '/invite' || path === '/reset' || path.startsWith('/together/') || path.startsWith('/listen/'))
     return (
       <>
         <Outlet />

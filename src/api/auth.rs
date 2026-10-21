@@ -121,6 +121,14 @@ impl Server {
         cfg!(feature = "torrent")
     }
 
+    async fn smtp(&self) -> bool {
+        cfg!(feature = "smtp")
+    }
+
+    async fn email(&self, ctx: &Context<'_>) -> bool {
+        crate::mail::available(&ctx.state().config.current().smtp)
+    }
+
     async fn sources(&self, ctx: &Context<'_>) -> usize {
         ctx.state().config.current().sources.iter().filter(|s| s.enabled).count()
     }
