@@ -89,7 +89,7 @@ const DeleteAppPassword = graphql(`
   }
 `)
 
-function Copyable({ label, value }: { label: string; value: string }) {
+export function Copyable({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex items-center gap-3 text-sm">
       <span className="w-24 shrink-0 text-ink-3">{label}</span>

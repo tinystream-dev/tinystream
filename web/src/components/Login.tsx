@@ -143,7 +143,7 @@ export function Login({ setup }: { setup: boolean }) {
   )
 }
 
-function Frame({ title, subtitle, wide, children }: { title?: string; subtitle?: string; wide?: boolean; children: React.ReactNode }) {
+export function Frame({ title, subtitle, wide, children }: { title?: string; subtitle?: string; wide?: boolean; children: React.ReactNode }) {
   return (
     <div className="grid min-h-dvh place-items-center overflow-x-clip px-5">
       <div className={`w-full ${wide ? 'max-w-3xl' : 'max-w-sm'}`}>

@@ -105,6 +105,7 @@ import { relative } from '../lib/downloads'
 import { useMe, useStatus } from '../lib/hooks'
 import { Avatar, AvatarPicker } from './Avatar'
 import { ask, toast, toastError } from './feedback'
+import { Invites } from './Invites'
 import { Card, useSettings } from './SettingsKit'
 import { Squircle } from './Squircle'
 import { Badge, Button, Dialog, Field, Input, Segmented, Tip, Toggle } from './ui'
@@ -218,6 +219,8 @@ export function People() {
           })}
         </div>
       </Card>
+
+      <Invites />
 
       {defaults && users && (
         <Card title="Default permissions">

@@ -99,6 +99,12 @@ mixed downloads stay in Other / Mixed instead of being assumed to be movies.
 
 Released under the [AGPL-3.0-or-later](./LICENSE) open-source license.
 
+### Invite links
+
+Admins make invite links in **Settings → Users → Invite links**. Each has a name, a number of accounts it can make (1–1000), and a lifetime (a day, a week, 30 days, or a year). It stops working when either runs out, or when an admin revokes it.
+
+Whoever opens it picks a username and password and is signed in. New accounts are members with the server's default permissions; a failed sign-up doesn't use the link up. The link is shown once, when it's made: only its hash is stored.
+
 ### Custom artwork
 
 In a show's or movie's folder, `thumbnail.jpg` (also `.jpeg`, `.png`, `.webp`, or `.gif`) supplies its thumbnail, and `banner.*` supplies its banner. Existing `poster.*`, `folder.*`, `cover.*`, `backdrop.*`, `fanart.*`, and `background.*` names continue to work; `poster.*` and `backdrop.*` take precedence over the new aliases.
