@@ -6,7 +6,7 @@
 // from the server's (NTP-style, keeping the quickest round trip), so we can
 // work out exactly where the room is at any moment without asking. A small
 // control loop then steers the video there: small drift is absorbed by
-// nudging the playback rate, which nobody notices; big drift is a seek.
+// briefly nudging the playback rate, which nobody notices; big drift is a seek.
 
 import type { Playback } from '../lib/api'
 
@@ -103,11 +103,13 @@ const DEADBAND = 0.015
 /** Beyond this, seek instead of speeding up or slowing down. */
 const HARD_DRIFT = 0.25
 /**
- * How hard small drift is corrected: rate change per second of drift. Higher
- * leaves less lag on machines that play a little slow; 3 closes most drift
- * within a second and stays steady with a 100 ms loop.
+ * How many loop readings small drift is judged over. Firefox moves
+ * `currentTime` a frame at a time, so one reading can be ±20 ms off; a
+ * second of them averages that out.
  */
-const GAIN = 3
+const WINDOW = 10
+/** How long a nudge takes to close the drift, in seconds. */
+const CATCH_UP = 1
 /** The most we'll bend the playback rate to catch up (±). */
 const MAX_NUDGE = 0.08
 /** Starving for this long (ms) while playing counts as buffering. */
@@ -181,6 +183,12 @@ export class SyncClient {
   private loop: ReturnType<typeof setInterval> | undefined
   private starvingSince: number | null = null
   private lastSeek = 0
+  /** Recent drift readings at the room's own rate, for judging small drift. */
+  private drifts: number[] = []
+  /** When the nudge under way ends (server time, ms). */
+  private nudgeUntil: number | null = null
+  /** The clock the readings were taken against; a new one starts them over. */
+  private steered = ''
   private startTimer: ReturnType<typeof setTimeout> | undefined
   private sentStatus: { status: Status; at: number } | null = null
 
@@ -364,6 +372,7 @@ export class SyncClient {
     this.duration = duration
     this.starvingSince = null
     this.sentStatus = null
+    this.restartSteering()
     this.loop = setInterval(() => this.tick(), 100)
     this.tick()
   }
@@ -397,6 +406,11 @@ export class SyncClient {
     const target = Math.min(positionAt(c, now), end)
     const starving = v.readyState < 3 || v.seeking
     this.starvingSince = starving ? (this.starvingSince ?? now) : null
+    const clock = `${c.running} ${c.position} ${c.at} ${c.rate}`
+    if (clock !== this.steered) {
+      this.steered = clock
+      this.restartSteering()
+    }
 
     if (!c.running || now < c.at) {
       // Hold still where the room is, ready to go.
@@ -425,18 +439,46 @@ export class SyncClient {
         this.lastSeek = now
         v.currentTime = target
       }
+      this.restartSteering()
       if (v.playbackRate !== c.rate) v.playbackRate = c.rate
-    } else if (Math.abs(drift) > DEADBAND) {
-      // Ahead: a touch slower. Behind: a touch faster.
-      const nudge = Math.max(-MAX_NUDGE, Math.min(MAX_NUDGE, -drift * GAIN))
-      const r = Math.round(c.rate * (1 + nudge) * 200) / 200
-      if (v.playbackRate !== r) v.playbackRate = r
-    } else if (v.playbackRate !== c.rate) {
-      v.playbackRate = c.rate
-    }
+    } else if (starving) {
+      // Where a seek or a stall leaves currentTime says nothing about drift.
+      this.restartSteering()
+    } else this.steer(v, c, drift, now)
     if (v.paused) this.playOwn(v)
     const buffering = this.starvingSince !== null && now - this.starvingSince > STARVE_MS
     this.report(buffering ? 'buffering' : 'ready')
+  }
+
+  private restartSteering() {
+    this.drifts = []
+    this.nudgeUntil = null
+  }
+
+  /**
+   * Absorbs small drift. It's judged over a second of readings, then closed
+   * with one nudge held for just long enough. Bending the rate on every
+   * reading chases noise, and Firefox stutters and slips its audio out of
+   * step with the picture when the rate keeps changing.
+   */
+  private steer(v: HTMLVideoElement, c: Clock, drift: number, now: number) {
+    if (this.nudgeUntil !== null) {
+      if (now < this.nudgeUntil) return
+      this.restartSteering()
+    }
+    if (v.playbackRate !== c.rate) v.playbackRate = c.rate
+    this.drifts.push(drift)
+    if (this.drifts.length < WINDOW) return
+    const average = this.drifts.reduce((a, b) => a + b) / this.drifts.length
+    this.drifts.shift()
+    if (Math.abs(average) <= DEADBAND) return
+    // Ahead: a touch slower. Behind: a touch faster.
+    const nudge = Math.max(-MAX_NUDGE, Math.min(MAX_NUDGE, -average / CATCH_UP))
+    const r = Math.round(c.rate * (1 + nudge) * 200) / 200
+    if (r === c.rate) return
+    v.playbackRate = r
+    this.drifts = []
+    this.nudgeUntil = now + (-average / (r - c.rate)) * 1000
   }
 
   /** Tells the room how we're doing, when the room thinks otherwise. */
