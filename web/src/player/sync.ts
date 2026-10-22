@@ -114,9 +114,24 @@ const CATCH_UP = 1
 const MAX_NUDGE = 0.08
 /** Starving for this long (ms) while playing counts as buffering. */
 const STARVE_MS = 400
+/**
+ * Seconds buffered ahead before someone who ran dry is ready again. Saying so
+ * at the first frame back has a slow connection stop the room every few
+ * seconds; this makes it fewer, longer waits.
+ */
+const REFILL = 5
 
 export function positionAt(c: Clock, t: number) {
   return c.running ? c.position + (Math.max(0, t - c.at) / 1000) * c.rate : c.position
+}
+
+/** Seconds buffered past the playhead. */
+function bufferedAhead(v: HTMLVideoElement) {
+  const b = v.buffered
+  for (let i = 0; i < b.length; i++) {
+    if (b.start(i) <= v.currentTime + 0.1 && b.end(i) > v.currentTime) return b.end(i) - v.currentTime
+  }
+  return 0
 }
 
 export function canControl(room: RoomState, you: number | null) {
@@ -183,6 +198,8 @@ export class SyncClient {
   private loop: ReturnType<typeof setInterval> | undefined
   private starvingSince: number | null = null
   private lastSeek = 0
+  /** Whether we ran out while playing and are still refilling. */
+  private ranDry = false
   /** Recent drift readings at the room's own rate, for judging small drift. */
   private drifts: number[] = []
   /** When the nudge under way ends (server time, ms). */
@@ -372,6 +389,7 @@ export class SyncClient {
     this.duration = duration
     this.starvingSince = null
     this.sentStatus = null
+    this.ranDry = false
     this.restartSteering()
     this.loop = setInterval(() => this.tick(), 100)
     this.tick()
@@ -424,7 +442,9 @@ export class SyncClient {
           this.tick()
         }, c.at - now)
       }
-      return this.report(starving ? 'buffering' : 'ready')
+      const ahead = bufferedAhead(v)
+      if (ahead >= REFILL || v.currentTime + ahead >= end - 0.5) this.ranDry = false
+      return this.report(starving || this.ranDry ? 'buffering' : 'ready')
     }
     clearTimeout(this.startTimer)
     this.startTimer = undefined
@@ -447,6 +467,7 @@ export class SyncClient {
     } else this.steer(v, c, drift, now)
     if (v.paused) this.playOwn(v)
     const buffering = this.starvingSince !== null && now - this.starvingSince > STARVE_MS
+    if (buffering) this.ranDry = true
     this.report(buffering ? 'buffering' : 'ready')
   }
 
