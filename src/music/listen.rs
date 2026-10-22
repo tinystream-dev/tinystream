@@ -114,9 +114,11 @@ impl State {
     fn settle(&mut self, t: f64) {
         let waiting = self.settings.wait_for_all && self.members.iter().any(Member::holds_up);
         let running = !self.clock.paused && !waiting && !self.info.queue.is_empty();
+
         if running != self.clock.running {
             self.clock.rebase(t);
             self.clock.running = running;
+
             if running {
                 self.clock.at = t + START_LEAD_MS;
             }
@@ -127,26 +129,34 @@ impl State {
     /// on its own; the room only keeps count.
     fn advance(&mut self, t: f64) -> bool {
         let mut moved = false;
+
         while self.clock.running {
             let d = self.duration();
+
             if d <= 0.0 {
                 break;
             }
+
             let pos = self.clock.position_at(t);
+
             if pos < d {
                 break;
             }
+
             let over = pos - d;
+
             if self.info.current + 1 >= self.info.queue.len() {
                 self.clock = Clock { paused: true, running: false, position: d, at: t, rate: 1.0 };
                 moved = true;
                 break;
             }
+
             self.info.current += 1;
             self.clock.position = over;
             self.clock.at = t;
             moved = true;
         }
+
         moved
     }
 
@@ -241,10 +251,12 @@ impl Room {
 
     pub fn join(&self, name: String, user_id: Option<i64>, avatar: Option<i64>) -> u64 {
         let id = self.next_member.fetch_add(1, Ordering::Relaxed);
+
         self.change(|st, _| {
             st.members.push(Member { id, name, user_id, avatar, status: Status::Joining, since: Instant::now() });
             st.act(id, "join");
         });
+
         id
     }
 
@@ -283,13 +295,17 @@ impl Room {
                 | Command::Invite { .. }
                 | Command::End
         );
+
         if controlled && !self.can_control(member) {
             return Err("only the host can control playback in this room");
         }
+
         let valid = |p: f64| if p.is_finite() { Ok(p.max(0.0)) } else { Err("bad position") };
+
         match cmd {
             Command::Play { position } => {
                 let position = valid(position)?;
+
                 self.change(|st, t| {
                     st.clock = Clock { paused: false, running: false, position, at: t, rate: 1.0 };
                     st.act(member, "play");
@@ -297,6 +313,7 @@ impl Room {
             },
             Command::Pause { position } => {
                 let position = valid(position)?;
+
                 self.change(|st, t| {
                     st.clock = Clock { paused: true, running: false, position, at: t, rate: 1.0 };
                     st.act(member, "pause");
@@ -304,14 +321,17 @@ impl Room {
             },
             Command::Seek { position } => {
                 let position = valid(position)?;
+
                 self.change(|st, t| {
                     st.clock.position = position;
                     st.clock.at = t;
                     st.clock.running = false;
+
                     for m in st.members.iter_mut().filter(|m| m.status == Status::Ready) {
                         m.status = Status::Buffering;
                         m.since = Instant::now();
                     }
+
                     st.act(member, "seek");
                 });
             },
@@ -319,6 +339,7 @@ impl Room {
                 if st.info.current != from || index >= st.info.queue.len() {
                     return;
                 }
+
                 st.info.current = index;
                 st.clock = Clock { paused: st.clock.paused, running: false, position: 0.0, at: t, rate: 1.0 };
                 st.reload_everyone();
@@ -331,6 +352,7 @@ impl Room {
                     } else {
                         status
                     };
+
                     if m.status != status {
                         m.status = status;
                         m.since = Instant::now();
@@ -341,7 +363,9 @@ impl Room {
                 if index >= st.info.queue.len() {
                     return;
                 }
+
                 st.info.queue.remove(index);
+
                 if index < st.info.current {
                     st.info.current -= 1;
                 } else if index == st.info.current {
@@ -349,16 +373,20 @@ impl Room {
                     st.clock = Clock { paused: st.clock.paused, running: false, position: 0.0, at: t, rate: 1.0 };
                     st.reload_everyone();
                 }
+
                 st.act(member, "queue");
             }),
             Command::Move { from, to } => self.change(|st, _| {
                 let n = st.info.queue.len();
+
                 if from >= n || to >= n || from == to {
                     return;
                 }
+
                 let id = st.info.queue.remove(from);
                 st.info.queue.insert(to, id);
                 let c = st.info.current;
+
                 st.info.current = if c == from {
                     to
                 } else if from < c && to >= c {
@@ -368,13 +396,16 @@ impl Room {
                 } else {
                     c
                 };
+
                 st.act(member, "queue");
             }),
             Command::Name { name } => {
                 let name = name.trim();
+
                 if name.is_empty() || name.chars().count() > 40 || name.chars().any(char::is_control) {
                     return Err("pick a name up to 40 characters");
                 }
+
                 self.change(|st, _| {
                     if let Some(m) = st.members.iter_mut().find(|m| m.id == member && m.user_id.is_none()) {
                         m.name = name.to_string();
@@ -388,6 +419,7 @@ impl Room {
             | Command::Invite { .. }
             | Command::End => unreachable!("handled by the socket"),
         }
+
         Ok(())
     }
 
@@ -409,9 +441,11 @@ impl Room {
             let at = if next { (st.info.current + 1).min(st.info.queue.len()) } else { st.info.queue.len() };
             let was_empty = st.info.queue.is_empty();
             st.info.queue.splice(at..at, tracks.into_iter().map(|(id, _)| id));
+
             if was_empty {
                 st.reload_everyone();
             }
+
             st.act(member, "queue");
         });
     }
@@ -427,12 +461,15 @@ impl Room {
             if let Some(c) = control {
                 st.settings.control = c;
             }
+
             if let Some(w) = wait_for_all {
                 st.settings.wait_for_all = w;
             }
+
             if let Some(p) = public {
                 st.info.public = p;
             }
+
             st.act(member, "settings");
         });
     }
@@ -451,6 +488,7 @@ impl Room {
         let before = (st.clock.running, st.info.current);
         let moved = st.advance(t);
         st.settle(t);
+
         if moved || (st.clock.running, st.info.current) != before {
             let _ = self.tx.send(st.snapshot(&self.code).into());
         }
@@ -476,6 +514,7 @@ type Row = (i64, String, String, i64, bool, String, String, f64, bool);
 
 async fn durations(db: &SqlitePool, ids: &[i64]) -> sqlx::Result<HashMap<i64, f64>> {
     let mut out = HashMap::new();
+
     for id in ids {
         if out.contains_key(id) {
             continue;
@@ -486,6 +525,7 @@ async fn durations(db: &SqlitePool, ids: &[i64]) -> sqlx::Result<HashMap<i64, f6
             out.insert(*id, d);
         }
     }
+
     Ok(out)
 }
 
@@ -523,6 +563,7 @@ impl Rooms {
         if let Some(room) = self.map().get(code) {
             return Ok(Some(room.clone()));
         }
+
         let row: Option<Row> = sqlx::query_as(
             "SELECT r.host_id, u.username, r.queue, r.current, r.public, r.invited, r.settings, r.position, r.paused
              FROM listen_rooms r JOIN users u ON u.id = r.host_id WHERE r.code = ? AND r.last_active > ?",
@@ -531,12 +572,15 @@ impl Rooms {
         .bind(now() - EXPIRY_SECS)
         .fetch_optional(db)
         .await?;
+
         let Some((host_id, host_name, queue, current, public, invited, settings, position, paused)) = row else {
             return Ok(None);
         };
+
         let queue: Vec<i64> = serde_json::from_str(&queue).unwrap_or_default();
         let lengths = durations(db, &queue).await?;
         let queue: Vec<i64> = queue.into_iter().filter(|id| lengths.contains_key(id)).collect();
+
         let info = Info {
             host_id,
             public,
@@ -544,7 +588,9 @@ impl Rooms {
             current: (current.max(0) as usize).min(queue.len().saturating_sub(1)),
             queue,
         };
+
         let clock = Clock { paused, running: false, position, at: now_ms(), rate: 1.0 };
+
         let room = Self::room(
             code.to_string(),
             info,
@@ -553,6 +599,7 @@ impl Rooms {
             serde_json::from_str(&settings).unwrap_or_default(),
             clock,
         );
+
         Ok(Some(self.map().entry(code.to_string()).or_insert_with(|| Arc::new(room)).clone()))
     }
 
@@ -560,6 +607,7 @@ impl Rooms {
         let mut bytes = [0u8; 16];
         rand::rng().fill_bytes(&mut bytes);
         let code = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes);
+
         let info = Info {
             host_id: new.host_id,
             public: new.public,
@@ -567,8 +615,10 @@ impl Rooms {
             current: new.current.min(new.tracks.len().saturating_sub(1)),
             queue: new.tracks.iter().map(|(id, _)| *id).collect(),
         };
+
         let clock =
             Clock { paused: new.paused, running: false, position: new.position.max(0.0), at: now_ms(), rate: 1.0 };
+
         let room = Arc::new(Self::room(
             code.clone(),
             info,
@@ -577,6 +627,7 @@ impl Rooms {
             Settings::default(),
             clock,
         ));
+
         sqlx::query("INSERT INTO listen_rooms (code, host_id, created_at, last_active) VALUES (?, ?, ?, ?)")
             .bind(&code)
             .bind(new.host_id)
@@ -584,6 +635,7 @@ impl Rooms {
             .bind(now())
             .execute(db)
             .await?;
+
         self.save(db, &room).await?;
         self.map().insert(code, room.clone());
         Ok(room)
@@ -594,6 +646,7 @@ impl Rooms {
             let st = room.lock();
             (st.info.clone(), st.settings.clone(), st.clock)
         };
+
         sqlx::query(
             "UPDATE listen_rooms SET queue = ?, current = ?, public = ?, invited = ?, settings = ?, position = ?,
                 paused = ?, last_active = ? WHERE code = ?",
@@ -609,6 +662,7 @@ impl Rooms {
         .bind(&room.code)
         .execute(db)
         .await?;
+
         Ok(())
     }
 
@@ -616,6 +670,7 @@ impl Rooms {
         if let Some(room) = self.map().remove(code) {
             room.close();
         }
+
         sqlx::query("DELETE FROM listen_rooms WHERE code = ?").bind(code).execute(db).await?;
         Ok(())
     }
@@ -624,15 +679,20 @@ impl Rooms {
         tokio::spawn(async move {
             let mut ticks = 0u64;
             let mut interval = tokio::time::interval(Duration::from_millis(250));
+
             loop {
                 interval.tick().await;
                 let rooms: Vec<Arc<Room>> = self.map().values().cloned().collect();
+
                 for r in rooms.iter().filter(|r| !r.is_empty()) {
                     r.tick();
                 }
+
                 ticks += 1;
+
                 if ticks % 14400 == 1 {
                     self.map().retain(|_, r| !r.is_empty());
+
                     if let Err(e) = sqlx::query("DELETE FROM listen_rooms WHERE last_active < ?")
                         .bind(now() - EXPIRY_SECS)
                         .execute(&db)

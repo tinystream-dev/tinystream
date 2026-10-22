@@ -13,7 +13,7 @@ use toml_edit::{ArrayOfTables, DocumentMut, Item, Table};
 
 use super::{
     Automation, Clips, Config, Downloads, LibraryKind, Log, Metadata, Music, Network, Provider, Requests, Scan, SignIn,
-    TEMPLATE, Transcode,
+    Smtp, TEMPLATE, Transcode,
 };
 use crate::events::{Event, Events};
 
@@ -41,6 +41,7 @@ pub struct SettingsPatch {
     pub automation: Option<Automation>,
     pub requests: Option<Requests>,
     pub sign_in: Option<SignIn>,
+    pub smtp: Option<Smtp>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, async_graphql::InputObject)]
@@ -87,12 +88,15 @@ impl ConfigStore {
             if let Some(dir) = path.parent() {
                 std::fs::create_dir_all(dir).with_context(|| format!("can't create {}", dir.display()))?;
             }
+
             std::fs::write(path, TEMPLATE).with_context(|| format!("can't write {}", path.display()))?;
             tracing::info!("created a fresh config at {}", path.display());
         }
+
         let text = std::fs::read_to_string(path).with_context(|| format!("can't read {}", path.display()))?;
         let config = Config::parse(&text).map_err(|e| anyhow::anyhow!("{} is invalid:\n{e}", path.display()))?;
         let (tx, _) = watch::channel(Arc::new(config));
+
         Ok(Arc::new(Self {
             path: path.to_path_buf(),
             tx,
@@ -130,8 +134,10 @@ impl ConfigStore {
     async fn edit(&self, f: impl FnOnce(&mut DocumentMut) -> Result<(), String>) -> Result<Arc<Config>, String> {
         let _guard = self.write_lock.lock().await;
         let text = self.raw().map_err(|e| format!("can't read config.toml: {e}"))?;
+
         let mut doc: DocumentMut =
             text.parse().map_err(|e| format!("config.toml has a syntax error, fix it first:\n{e}"))?;
+
         f(&mut doc)?;
         self.write(doc.to_string())
     }
@@ -141,9 +147,11 @@ impl ConfigStore {
 
         *self.applied_hash.lock().unwrap() = hash(&text);
         let tmp = self.path.with_extension("toml.tmp");
+
         std::fs::write(&tmp, &text)
             .and_then(|_| std::fs::rename(&tmp, &self.path))
             .map_err(|e| format!("can't write config.toml: {e}"))?;
+
         *self.last_error.lock().unwrap() = None;
         self.tx.send_replace(config.clone());
         self.events.send(Event::ConfigChanged);
@@ -192,6 +200,9 @@ impl ConfigStore {
             if let Some(v) = patch.sign_in {
                 sync_section(doc, "sign-in", &v, &SignIn::default())?;
             }
+            if let Some(v) = patch.smtp {
+                sync_section(doc, "smtp", &v, &Smtp::default())?;
+            }
             Ok(())
         })
         .await
@@ -219,9 +230,11 @@ impl ConfigStore {
     pub async fn remove_library(&self, index: usize) -> Result<Arc<Config>, String> {
         self.edit(|doc| {
             let libs = libraries_mut(doc)?;
+
             if index >= libs.len() {
                 return Err(format!("there is no library #{index}"));
             }
+
             libs.remove(index);
             Ok(())
         })
@@ -235,8 +248,10 @@ impl ConfigStore {
         value: &T,
     ) -> Result<Arc<Config>, String> {
         let new = to_table(value)?;
+
         self.edit(|doc| {
             let tables = array_mut(doc, list.key())?;
+
             match index {
                 None => {
                     let mut table = Table::new();
@@ -248,6 +263,7 @@ impl ConfigStore {
                     sync_table(table, &new, &toml::Table::new(), true)?;
                 },
             }
+
             Ok(())
         })
         .await
@@ -256,9 +272,11 @@ impl ConfigStore {
     pub async fn remove_entry(&self, list: List, index: usize) -> Result<Arc<Config>, String> {
         self.edit(|doc| {
             let tables = array_mut(doc, list.key())?;
+
             if index >= tables.len() {
                 return Err(format!("there is no {} #{index}", list.key()));
             }
+
             tables.remove(index);
             Ok(())
         })
@@ -268,6 +286,7 @@ impl ConfigStore {
     pub fn watch(self: &Arc<Self>) -> anyhow::Result<()> {
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
         let file_name = self.path.file_name().map(|n| n.to_owned());
+
         let mut watcher = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
             if let Ok(event) = res
                 && event.paths.iter().any(|p| p.file_name() == file_name.as_deref())
@@ -275,17 +294,21 @@ impl ConfigStore {
                 let _ = tx.send(());
             }
         })?;
+
         watcher.watch(self.config_dir(), RecursiveMode::NonRecursive)?;
 
         let this = self.clone();
+
         tokio::spawn(async move {
             let _watcher = watcher;
+
             while rx.recv().await.is_some() {
                 tokio::time::sleep(Duration::from_millis(150)).await;
                 while rx.try_recv().is_ok() {}
                 this.reload_from_disk();
             }
         });
+
         Ok(())
     }
 
@@ -298,21 +321,28 @@ impl ConfigStore {
             },
             Err(e) => return tracing::warn!("can't read config.toml: {e}"),
         };
+
         let h = hash(&text);
+
         {
             let mut applied = self.applied_hash.lock().unwrap();
+
             if *applied == h {
                 return;
             }
+
             *applied = h;
         }
+
         match Config::parse(&text) {
             Ok(config) => {
                 *self.last_error.lock().unwrap() = None;
+
                 if *self.current() != config {
                     tracing::info!("config.toml changed on disk; applied");
                     self.tx.send_replace(Arc::new(config));
                 }
+
                 self.events.send(Event::ConfigChanged);
             },
             Err(e) => {
@@ -341,6 +371,7 @@ fn write_library(table: &mut Table, input: &LibraryInput) -> Result<(), String> 
     let text = |s: &Option<String>| {
         s.as_deref().map(str::trim).filter(|s| !s.is_empty()).map(|s| toml::Value::String(s.to_string()))
     };
+
     set_value(table, "name", Some(toml::Value::String(input.name.trim().to_string())))?;
     set_value(table, "path", Some(toml::Value::String(input.path.trim().to_string())))?;
     set_value(table, "kind", (!input.kind.is_video()).then(|| toml::Value::String(input.kind.as_str().into())))?;
@@ -350,30 +381,55 @@ fn write_library(table: &mut Table, input: &LibraryInput) -> Result<(), String> 
     set_value(table, "download-path", text(&input.download_path))
 }
 
-fn sync_section<T: Serialize>(doc: &mut DocumentMut, name: &str, new: &T, default: &T) -> Result<(), String> {
+fn sync_section<T: Serialize + serde::de::DeserializeOwned>(
+    doc: &mut DocumentMut,
+    name: &str,
+    new: &T,
+    default: &T,
+) -> Result<(), String> {
     let new = to_table(new)?;
     let default = to_table(default)?;
+
     if !doc.contains_key(name) {
         let differs =
             new.iter().any(|(k, v)| default.get(k) != Some(v)) || default.keys().any(|k| !new.contains_key(k));
+
         if !differs {
             return Ok(());
         }
+
         insert_before_libraries(doc, name);
     }
+
     let table = doc[name].as_table_mut().ok_or_else(|| format!("`{name}` in config.toml must be a [{name}] table"))?;
-    sync_table(table, &new, &default, false)
+
+    // What's written now and still would be, but isn't in the new settings, was cleared (an emptied
+    // Option). Keys that are read but never written back, kept for old configs, don't come through.
+    let written = toml::from_str::<T>(&table.to_string()).ok().map(|t| to_table(&t)).transpose()?.unwrap_or_default();
+    let cleared: Vec<String> =
+        written.keys().filter(|k| !new.contains_key(*k) && !default.contains_key(*k)).cloned().collect();
+
+    sync_table(table, &new, &default, false)?;
+
+    for key in cleared {
+        table.remove(&key);
+    }
+
+    Ok(())
 }
 
 fn sync_table(table: &mut Table, new: &toml::Table, default: &toml::Table, exact: bool) -> Result<(), String> {
     let mut keys: Vec<String> = new.keys().chain(default.keys().filter(|k| !new.contains_key(*k))).cloned().collect();
+
     if exact {
         keys.extend(
             table.iter().map(|(k, _)| k.to_string()).filter(|k| !new.contains_key(k) && !default.contains_key(k)),
         );
     }
+
     for key in &keys {
         let value = new.get(key).cloned();
+
         if !table.contains_key(key) && value.as_ref() == default.get(key) {
             continue;
         }
@@ -383,32 +439,41 @@ fn sync_table(table: &mut Table, new: &toml::Table, default: &toml::Table, exact
                 Some(toml::Value::Table(t)) => t.clone(),
                 _ => toml::Table::new(),
             };
+
             sync_table(existing, sub, &sub_default, true)?;
             continue;
         }
+
         let current = table.get(key).and_then(|i| i.as_value()).map(|v| v.to_string());
         let wanted = value.as_ref().map(|v| edit_value(v).to_string());
+
         if current.as_deref().map(str::trim) == wanted.as_deref().map(str::trim) {
             continue;
         }
+
         set_value(table, key, value)?;
     }
+
     Ok(())
 }
 
 fn insert_before_libraries(doc: &mut DocumentMut, name: &str) {
     let mut table = Table::new();
+
     if let Some(libs) = doc.get_mut("library").and_then(Item::as_array_of_tables_mut) {
         let first = libs.iter().filter_map(Table::position).min();
+
         if let Some(pos) = first {
             for t in libs.iter_mut() {
                 if let Some(p) = t.position() {
                     t.set_position(Some(p + 1));
                 }
             }
+
             table.set_position(Some(pos));
         }
     }
+
     doc.insert(name, Item::Table(table));
 }
 
@@ -421,10 +486,13 @@ fn set_value(table: &mut Table, key: &str, value: Option<toml::Value>) -> Result
         table.remove(key);
         return Ok(());
     };
+
     let mut new = edit_value(&value);
+
     if let Some(old) = table.get(key).and_then(|i| i.as_value()) {
         *new.decor_mut() = old.decor().clone();
     }
+
     table.insert(key, Item::Value(new));
     Ok(())
 }
@@ -433,16 +501,20 @@ fn edit_value(value: &toml::Value) -> toml_edit::Value {
     match value {
         toml::Value::Table(t) => {
             let mut inline = toml_edit::InlineTable::new();
+
             for (k, v) in t {
                 inline.insert(k, edit_value(v));
             }
+
             toml_edit::Value::InlineTable(inline)
         },
         toml::Value::Array(a) => {
             let mut array = toml_edit::Array::new();
+
             for v in a {
                 array.push(edit_value(v));
             }
+
             toml_edit::Value::Array(array)
         },
         toml::Value::String(s) => s.as_str().into(),
@@ -461,6 +533,7 @@ mod tests {
     fn sync_keeps_comments_and_untouched_keys() {
         let mut doc: DocumentMut =
             "# hello\n[network]\nhost = \"0.0.0.0\" # everywhere\nport = 3000\n".parse().unwrap();
+
         let net = Network { port: 4000, ..Network::default() };
         sync_section(&mut doc, "network", &net, &Network::default()).unwrap();
         let out = doc.to_string();
@@ -473,11 +546,29 @@ mod tests {
     #[test]
     fn new_sections_go_above_libraries() {
         let mut doc: DocumentMut = "[network]\nport = 1\n\n[[library]]\nname = \"A\"\npath = \"/a\"\n".parse().unwrap();
+
         let scan =
             Scan { interval: Some(crate::config::Span(std::time::Duration::from_secs(3600))), ..Scan::default() };
+
         sync_section(&mut doc, "scan", &scan, &Scan::default()).unwrap();
         let out = doc.to_string();
         assert!(out.find("[scan]").unwrap() < out.find("[[library]]").unwrap(), "{out}");
+    }
+
+    #[test]
+    fn cleared_settings_leave_the_file() {
+        let mut doc: DocumentMut = "[metadata]\ntmdb-api-key = \"abc\"\nlanguage = \"de-DE\"\n".parse().unwrap();
+        let metadata = Metadata { language: "de-DE".into(), ..Metadata::default() };
+        sync_section(&mut doc, "metadata", &metadata, &Metadata::default()).unwrap();
+        let out = doc.to_string();
+        assert!(!out.contains("tmdb-api-key") && out.contains("language = \"de-DE\""), "{out}");
+    }
+
+    #[test]
+    fn unwritten_keys_stay() {
+        let mut doc: DocumentMut = "[requests]\nmax-open = 3\n".parse().unwrap();
+        sync_section(&mut doc, "requests", &Requests::default(), &Requests::default()).unwrap();
+        assert!(doc.to_string().contains("max-open = 3"), "{doc}");
     }
 
     #[test]
@@ -492,6 +583,7 @@ mod tests {
         let mut doc: DocumentMut = TEMPLATE.parse().unwrap();
         let libs = libraries_mut(&mut doc).unwrap();
         let mut t = Table::new();
+
         write_library(
             &mut t,
             &LibraryInput {
@@ -505,6 +597,7 @@ mod tests {
             },
         )
         .unwrap();
+
         libs.push(t);
         let config = Config::parse(&doc.to_string()).unwrap();
         assert_eq!(config.libraries.len(), 1);
@@ -530,6 +623,7 @@ mod tests {
     #[test]
     fn entries_roundtrip() {
         let mut doc: DocumentMut = "".parse().unwrap();
+
         let source = super::super::Source {
             name: "Nyaa".into(),
             kind: super::super::SourceKind::Rss,
@@ -541,6 +635,7 @@ mod tests {
             download_path: None,
             seeding: None,
         };
+
         let mut t = Table::new();
         sync_table(&mut t, &to_table(&source).unwrap(), &toml::Table::new(), true).unwrap();
         array_mut(&mut doc, "source").unwrap().push(t);

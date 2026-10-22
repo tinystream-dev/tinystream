@@ -21,6 +21,8 @@ targets = [
     "x86_64-unknown-linux-musl",
     "aarch64-unknown-linux-musl",
     "wasm32-unknown-unknown",
+    "aarch64-linux-android",
+    "x86_64-linux-android",
 ]
 ignore-build-dependencies = true
 ignore-dev-dependencies = true

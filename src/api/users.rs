@@ -47,15 +47,18 @@ impl User {
 
     async fn overrides(&self, ctx: &Context<'_>) -> ApiResult<Overrides> {
         ctx.admin()?;
+
         let json: String = sqlx::query_scalar("SELECT permissions FROM users WHERE id = ?")
             .bind(self.id)
             .fetch_one(&ctx.state().db)
             .await?;
+
         Ok(Overrides::parse(&json))
     }
 
     async fn created_at(&self, ctx: &Context<'_>) -> ApiResult<i64> {
         own_or_admin(ctx, self)?;
+
         Ok(sqlx::query_scalar("SELECT created_at FROM users WHERE id = ?")
             .bind(self.id)
             .fetch_one(&ctx.state().db)
@@ -64,6 +67,7 @@ impl User {
 
     async fn last_seen(&self, ctx: &Context<'_>) -> ApiResult<Option<i64>> {
         ctx.admin()?;
+
         Ok(sqlx::query_scalar("SELECT MAX(last_seen) FROM sessions WHERE user_id = ?")
             .bind(self.id)
             .fetch_one(&ctx.state().db)
@@ -75,6 +79,14 @@ impl User {
             return Err(ApiError::forbidden());
         }
         passkeys(ctx.state(), self.id).await
+    }
+
+    async fn email(&self, ctx: &Context<'_>) -> ApiResult<Option<String>> {
+        if ctx.user()?.id != self.id {
+            return Err(ApiError::forbidden());
+        }
+
+        Ok(sqlx::query_scalar("SELECT email FROM users WHERE id = ?").bind(self.id).fetch_one(&ctx.state().db).await?)
     }
 }
 
@@ -92,9 +104,11 @@ impl UserQuery {
         ctx.user()?;
         let ids: Vec<i64> = sqlx::query_scalar("SELECT id FROM users ORDER BY created_at").fetch_all(&state.db).await?;
         let mut out = Vec::with_capacity(ids.len());
+
         for id in ids {
             out.extend(auth::load_user(state, id).await?);
         }
+
         Ok(out)
     }
 
@@ -150,6 +164,7 @@ fn image_type(data: &[u8]) -> ApiResult<&'static str> {
 
 fn avatar_owner(ctx: &Context<'_>, user_id: Option<i64>) -> ApiResult<i64> {
     let me = ctx.user()?;
+
     match user_id {
         Some(id) if id != me.id => ctx.admin().map(|_| id),
         _ => Ok(me.id),
@@ -165,6 +180,7 @@ impl UserMutation {
         let (state, admin) = (ctx.state(), ctx.admin()?);
         auth::validate_credentials(&input.username, &input.password)?;
         let hash = auth::hash_password(input.password).await?;
+
         let id: i64 = sqlx::query_scalar(
             "INSERT INTO users (handle, username, password_hash, is_admin, permissions, created_at) VALUES (?, ?, ?, ?, ?, ?)
              ON CONFLICT(username) DO NOTHING RETURNING id",
@@ -178,6 +194,7 @@ impl UserMutation {
         .fetch_optional(&state.db)
         .await?
         .ok_or_else(|| ApiError::conflict(format!("{:?} is taken", input.username.trim())))?;
+
         tracing::info!("{} created the account {:?}", admin.username, input.username.trim());
         state.events.send(Event::UsersChanged);
         load(state, id).await
@@ -185,14 +202,17 @@ impl UserMutation {
 
     async fn update_user(&self, ctx: &Context<'_>, id: i64, input: UserPatch) -> ApiResult<User> {
         let (state, admin) = (ctx.state(), ctx.admin()?);
+
         let (mut username, was_admin): (String, bool) =
             sqlx::query_as("SELECT username, is_admin FROM users WHERE id = ?")
                 .bind(id)
                 .fetch_optional(&state.db)
                 .await?
                 .ok_or_else(|| ApiError::not_found("account"))?;
+
         if let Some(new) = input.username.as_deref().map(str::trim).filter(|n| *n != username) {
             auth::validate_username(new)?;
+
             sqlx::query("UPDATE users SET username = ? WHERE id = ?")
                 .bind(new)
                 .bind(id)
@@ -202,22 +222,27 @@ impl UserMutation {
                     Some(db) if db.is_unique_violation() => ApiError::conflict(format!("{new:?} is taken")),
                     _ => e.into(),
                 })?;
+
             tracing::info!("{} renamed {username:?} to {new:?}", admin.username);
             username = new.to_string();
         }
+
         if let Some(is_admin) = input.is_admin {
             if was_admin && !is_admin && admin_count(state).await? <= 1 {
                 return Err(ApiError::bad_request("there has to be at least one admin"));
             }
+
             if id == admin.id && !is_admin {
                 return Err(ApiError::bad_request("ask another admin to take away your admin rights"));
             }
+
             sqlx::query("UPDATE users SET is_admin = ? WHERE id = ?")
                 .bind(is_admin)
                 .bind(id)
                 .execute(&state.db)
                 .await?;
         }
+
         if let Some(overrides) = input.permissions {
             sqlx::query("UPDATE users SET permissions = ? WHERE id = ?")
                 .bind(overrides.to_json())
@@ -225,27 +250,33 @@ impl UserMutation {
                 .execute(&state.db)
                 .await?;
         }
+
         if let Some(password) = input.password {
             auth::validate_credentials(&username, &password)?;
             let hash = auth::hash_password(password).await?;
+
             sqlx::query("UPDATE users SET password_hash = ? WHERE id = ?")
                 .bind(hash)
                 .bind(id)
                 .execute(&state.db)
                 .await?;
+
             if id != admin.id {
                 sqlx::query("DELETE FROM sessions WHERE user_id = ?").bind(id).execute(&state.db).await?;
             }
         }
+
         state.events.send(Event::UsersChanged);
         load(state, id).await
     }
 
     async fn delete_user(&self, ctx: &Context<'_>, id: i64) -> ApiResult<i64> {
         let (state, admin) = (ctx.state(), ctx.admin()?);
+
         if id == admin.id {
             return Err(ApiError::bad_request("you can't delete your own account"));
         }
+
         sqlx::query("DELETE FROM schemes WHERE owner_id = ? AND published = 0").bind(id).execute(&state.db).await?;
         sqlx::query("DELETE FROM users WHERE id = ?").bind(id).execute(&state.db).await?;
         state.together.forget_host(id);
@@ -266,6 +297,7 @@ impl UserMutation {
         let id = avatar_owner(ctx, user_id)?;
         let data = image.value(ctx).map_err(|e| ApiError::bad_request(e.to_string()))?.content.to_vec();
         let mime = image_type(&data)?;
+
         sqlx::query(
             "INSERT INTO avatars (user_id, mime, data, updated_at) VALUES (?, ?, ?, ?)
              ON CONFLICT(user_id) DO UPDATE SET mime = excluded.mime, data = excluded.data, updated_at = excluded.updated_at",
@@ -276,6 +308,7 @@ impl UserMutation {
         .bind(now())
         .execute(&state.db)
         .await?;
+
         state.events.send(Event::UsersChanged);
         load(state, id).await
     }
@@ -299,5 +332,6 @@ pub(super) async fn avatar_image(state: &AppState, id: i64) -> ApiResult<impl In
         .fetch_optional(&state.db)
         .await?
         .ok_or_else(|| ApiError::not_found("picture"))?;
+
     Ok(([(header::CONTENT_TYPE, mime), (header::CACHE_CONTROL, "private, max-age=31536000, immutable".into())], data))
 }

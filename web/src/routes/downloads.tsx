@@ -96,7 +96,7 @@ function run(action: Action, ids: number[]): Promise<unknown> {
 }
 import { bytes, clockTime, duration, episodeCode, relative, speed } from '../lib/downloads'
 import { useMe } from '../lib/hooks'
-import { mediaLabels, mediaOptions, ofMediaType } from '../lib/media'
+import { mediaLabels, mediaOptions, ofMediaType } from '@tinystream/shared/media'
 import { useTitle } from '../lib/title'
 
 export const Route = createFileRoute('/downloads')({ component: DownloadsPage })

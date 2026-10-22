@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import { useEffect, useId, useState } from 'react'
-import { CUT, GLYPH, PLATE, lensMap } from '../lib/logo'
+import { CUT, GLYPH, PLATE } from '@tinystream/shared/logo'
+import { lensMap } from '../lib/logo'
 import { useStyle } from '../lib/theme'
 
 type Props = { size: number; className?: string }

@@ -22,23 +22,63 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
-  RUSTUP_TOOLCHAIN: stable
+  # Nothing debugs CI's builds; without debug info they link faster and cache smaller.
+  CARGO_PROFILE_DEV_DEBUG: "0"
 
 jobs:
-  fmt:
-    name: Format
-    runs-on: blacksmith-4vcpu-ubuntu-2404
-    env:
-      RUSTUP_TOOLCHAIN: nightly
+  # The server (Rust), web UI and app build independently: each only when its own files change. The
+  # server embeds the web UI, so its jobs take the UI from the web job, but a UI change alone doesn't
+  # rebuild the server.
+  changes:
+    name: Changes
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    outputs:
+      server: ${{ steps.filter.outputs.server }}
+      web: ${{ steps.filter.outputs.web }}
+      mobile: ${{ steps.filter.outputs.mobile }}
     steps:
       - uses: useblacksmith/checkout@v1
-      - uses: dtolnay/rust-toolchain@nightly
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          predicate-quantifier: every
+          filters: |
+            server:
+              - '**'
+              - '!mobile/**'
+              - '!web/**'
+              - '!packages/**/!(schema.graphql)'
+              - '!package.json'
+              - '!bun.lock'
+              - '!bunfig.toml'
+              - '!.github/actions/android/**'
+            web:
+              - '{web,packages}/**'
+              - '{package.json,bun.lock,bunfig.toml}'
+              - '.github/workflows/ci.yml'
+            mobile:
+              - '{mobile,packages}/**'
+              - '{package.json,bun.lock,bunfig.toml}'
+              - '.github/actions/android/**'
+              - '.github/workflows/ci.yml'
+
+  fmt:
+    name: Format
+    needs: changes
+    if: needs.changes.outputs.server == 'true' || needs.changes.outputs.mobile == 'true'
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    steps:
+      - uses: useblacksmith/checkout@v1
+      - uses: ./.github/actions/rust
         with:
           components: rustfmt
       - run: cargo fmt --check
+      - run: cargo fmt --check --manifest-path mobile/Cargo.toml
 
   web:
     name: Web UI
+    needs: changes
+    if: needs.changes.outputs.server == 'true' || needs.changes.outputs.web == 'true'
     runs-on: blacksmith-4vcpu-ubuntu-2404
     defaults:
       run:
@@ -46,14 +86,18 @@ jobs:
     steps:
       - uses: useblacksmith/checkout@v1
       - uses: oven-sh/setup-bun@v2
-      # The music player's decoder is Rust, built for the browser.
-      - uses: dtolnay/rust-toolchain@stable
+      # The music player's decoder and the video player's subtitles (rustyass, on nightly) are Rust, built for the browser.
+      - uses: ./.github/actions/rust
         with:
           targets: wasm32-unknown-unknown
       - uses: taiki-e/install-action@v2
         with:
-          tool: wasm-bindgen@0.2.126
-      - run: bun install --frozen-lockfile
+          tool: wasm-bindgen@0.2.126,cargo-about
+      # The workspace is installed from the root; web only needs its own packages.
+      - run: bun install --frozen-lockfile --filter tinystream-web --filter @tinystream/shared
+        working-directory: .
+      - run: cargo test -p tinystream-subtitles --locked
+        working-directory: .
       - run: bun run typecheck
       - run: bun run build
       - uses: actions/upload-artifact@v4
@@ -62,72 +106,70 @@ jobs:
           path: web/dist
           retention-days: 1
 
+  mobile:
+    name: Mobile app
+    needs: changes
+    if: needs.changes.outputs.mobile == 'true'
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    steps:
+      - uses: useblacksmith/checkout@v1
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile --ignore-scripts
+      - name: Shared code
+        working-directory: packages/shared
+        run: |
+          bun run codegen
+          bun run typecheck
+          bun run test
+      - name: App
+        working-directory: mobile
+        run: |
+          bun run codegen
+          bun run typecheck
+          bun run test
+      - name: Generated code is current
+        run: git diff --exit-code -- packages/shared/src/schema.ts mobile/src/gql
+
+  android:
+    name: Android build
+    needs: changes
+    if: needs.changes.outputs.mobile == 'true'
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    steps:
+      - uses: useblacksmith/checkout@v1
+      - uses: ./.github/actions/android
+      - name: Build
+        working-directory: mobile
+        run: |
+          bunx expo prebuild --platform android --no-install
+          cd android && ./gradlew assembleDebug -PreactNativeArchitectures=arm64-v8a
+      - name: Check 16 KB alignment
+        run: "$ANDROID_HOME/build-tools/36.0.0/zipalign -c -P 16 -v 4 mobile/android/app/build/outputs/apk/debug/app-debug.apk > /dev/null"
+
+  # One job for the server: the feature sets share the build's dependencies, native libraries and
+  # cache, so checking each alone after it costs little more than the server itself.
   rust:
     name: Build and test
-    needs: web
+    needs: [changes, web]
+    if: needs.changes.outputs.server == 'true'
     runs-on: blacksmith-4vcpu-ubuntu-2404
     env:
       TINYSTREAM_SKIP_WEB_BUILD: "1"
     steps:
       - uses: useblacksmith/checkout@v1
       - uses: ./.github/actions/native-deps
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: ./.github/actions/rust
+      # Only main saves: pull requests restore its cache, and their own copies would push it out.
       - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - uses: actions/download-artifact@v4
         with:
           name: web-dist
           path: web/dist
       - run: cargo build --locked
       - run: cargo test --locked
-
-  features:
-    name: Features (${{ matrix.features.name }})
-    needs: web
-    runs-on: blacksmith-4vcpu-ubuntu-2404
-    strategy:
-      fail-fast: false
-      matrix:
-        features:
-          - { name: none, flags: --no-default-features }
-          - { name: web-ui, flags: --no-default-features --features web-ui }
-          - { name: metadata, flags: --no-default-features --features metadata }
-          - { name: web-ui + metadata, flags: --no-default-features --features web-ui,metadata }
-    env:
-      TINYSTREAM_SKIP_WEB_BUILD: "1"
-    steps:
-      - uses: useblacksmith/checkout@v1
-      - uses: ./.github/actions/native-deps
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with:
-          key: ${{ matrix.features.name }}
-      - uses: actions/download-artifact@v4
-        with:
-          name: web-dist
-          path: web/dist
-      - run: cargo check --locked ${{ matrix.features.flags }}
-
-  msrv:
-    name: MSRV
-    needs: web
-    runs-on: blacksmith-4vcpu-ubuntu-2404
-    env:
-      TINYSTREAM_SKIP_WEB_BUILD: "1"
-    steps:
-      - uses: useblacksmith/checkout@v1
-      - uses: ./.github/actions/native-deps
-      - name: Read rust-version from Cargo.toml
-        id: msrv
-        run: |
-          version="$(sed -n 's/^rust-version = "\(.*\)"/\1/p' Cargo.toml)"
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "RUSTUP_TOOLCHAIN=$version" >> "$GITHUB_ENV"
-      - uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: ${{ steps.msrv.outputs.version }}
-      - uses: Swatinem/rust-cache@v2
-      - uses: actions/download-artifact@v4
-        with:
-          name: web-dist
-          path: web/dist
-      - run: cargo check --locked
+      - run: cargo check --locked --no-default-features
+      - run: cargo check --locked --no-default-features --features web-ui
+      - run: cargo check --locked --no-default-features --features metadata
+      - run: cargo check --locked --no-default-features --features web-ui,metadata

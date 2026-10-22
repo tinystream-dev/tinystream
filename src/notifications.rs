@@ -95,10 +95,12 @@ pub async fn list(state: &AppState, user_id: i64, limit: i64) -> sqlx::Result<(V
             .bind(limit)
             .fetch_all(&state.db)
             .await?;
+
     let unread: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM notifications WHERE user_id = ? AND read_at IS NULL")
         .bind(user_id)
         .fetch_one(&state.db)
         .await?;
+
     Ok((rows.into_iter().map(from_row).collect(), unread))
 }
 
@@ -112,6 +114,7 @@ pub async fn send(state: &AppState, users: &[i64], n: New) {
 
 async fn send_one(state: &AppState, user_id: i64, n: &New) -> sqlx::Result<()> {
     let t = now();
+
     if n.replace && n.link.is_some() {
         sqlx::query("DELETE FROM notifications WHERE user_id = ? AND kind = ? AND link = ? AND read_at IS NULL")
             .bind(user_id)
@@ -120,6 +123,7 @@ async fn send_one(state: &AppState, user_id: i64, n: &New) -> sqlx::Result<()> {
             .execute(&state.db)
             .await?;
     }
+
     let id: i64 = sqlx::query_scalar(
         "INSERT INTO notifications (user_id, kind, priority, title, body, image, link, actor_id, created_at, expires_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
@@ -136,14 +140,17 @@ async fn send_one(state: &AppState, user_id: i64, n: &New) -> sqlx::Result<()> {
     .bind(n.expires_at)
     .fetch_one(&state.db)
     .await?;
+
     sqlx::query("DELETE FROM notifications WHERE user_id = ? AND id NOT IN (SELECT id FROM notifications WHERE user_id = ? ORDER BY id DESC LIMIT ?)")
         .bind(user_id)
         .bind(user_id)
         .bind(KEEP)
         .execute(&state.db)
         .await?;
+
     let row: Row =
         sqlx::query_as(sqlx::AssertSqlSafe(format!("{SELECT} WHERE n.id = ?"))).bind(id).fetch_one(&state.db).await?;
+
     state.events.send(Event::Notified { user_id, notification: from_row(row) });
     Ok(())
 }
@@ -155,8 +162,10 @@ pub async fn withdraw(state: &AppState, link: &str) {
             .fetch_all(&state.db)
             .await
             .unwrap_or_default();
+
     let mut users = users;
     users.dedup();
+
     for user_id in users {
         state.events.send(Event::NotificationsChanged { user_id });
     }
@@ -167,8 +176,10 @@ pub async fn everyone_who(state: &AppState, keep: impl Fn(&Permissions) -> bool)
     let Ok(defaults) = permissions::defaults(state).await else {
         return Vec::new();
     };
+
     let rows: Vec<(i64, bool, String)> =
         sqlx::query_as("SELECT id, is_admin, permissions FROM users").fetch_all(&state.db).await.unwrap_or_default();
+
     rows.into_iter()
         .filter(|(_, admin, overrides)| keep(&permissions::effective(*admin, &Overrides::parse(overrides), &defaults)))
         .map(|(id, ..)| id)
@@ -185,6 +196,7 @@ pub fn episodes_label(episodes: &[(u32, u32)]) -> String {
     let mut eps = episodes.to_vec();
     eps.sort();
     eps.dedup();
+
     match eps.as_slice() {
         [] => String::new(),
         [(s, e)] => format!("S{s:02}E{e:02}"),

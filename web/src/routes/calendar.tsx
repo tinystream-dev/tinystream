@@ -21,7 +21,6 @@ const CalendarQuery = graphql(`
 `)
 
 const calendar = async (from: number, to: number) => (await request(CalendarQuery, { from: Math.floor(from), to: Math.floor(to) })).calendar
-import { useAmbient } from '../lib/ambient'
 import { airs, clockTime, countdown, duration, episodeCode, speed, startOfDay, useNow } from '../lib/downloads'
 import { useTitle } from '../lib/title'
 import { Img } from '../components/Img'
@@ -241,7 +240,7 @@ const stageLabels: Record<Stage, string> = {
 function UpNext({ entry: e, now, later }: { entry: CalendarEntry; now: number; later: CalendarEntry[] }) {
   const [broken, setBroken] = useState(false)
   const image = e.backdrop ?? e.poster
-  const ambient = useAmbient(e.backdrop)
+  const ambient = e.backdropTint
   const stage = stageOf(e, now)
   const dl = e.download
   const pct = dl ? dl.progress : null

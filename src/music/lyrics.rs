@@ -47,20 +47,26 @@ pub fn parse(text: &str) -> (bool, Vec<Line>) {
     let mut offset = 0i64;
     let mut timed: Vec<Line> = Vec::new();
     let mut plain = Vec::new();
+
     for raw in text.lines() {
         let mut rest = raw.trim();
         let mut starts = Vec::new();
+
         while let Some(body) = rest.strip_prefix('[') {
             let Some(end) = body.find(']') else { break };
             let tag = &body[..end];
+
             if let Some(ms) = timestamp(tag) {
                 starts.push(ms);
             } else if let Some(v) = tag.strip_prefix("offset:") {
                 offset = v.trim().parse().unwrap_or(0);
             }
+
             rest = body[end + 1..].trim_start();
         }
+
         let words = strip_word_times(rest);
+
         if starts.is_empty() {
             if !raw.trim_start().starts_with('[') {
                 plain.push(Line { start: None, text: words });
@@ -71,15 +77,19 @@ pub fn parse(text: &str) -> (bool, Vec<Line>) {
             }
         }
     }
+
     if timed.is_empty() {
         while plain.last().is_some_and(|l| l.text.is_empty()) {
             plain.pop();
         }
+
         return (false, plain);
     }
+
     for l in &mut timed {
         l.start = l.start.map(|s| (s - offset).max(0));
     }
+
     timed.sort_by_key(|l| l.start);
     (true, timed)
 }
@@ -88,6 +98,7 @@ pub fn parse(text: &str) -> (bool, Vec<Line>) {
 fn strip_word_times(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     let mut rest = s;
+
     while let Some(i) = rest.find('<') {
         match rest[i..].find('>') {
             Some(j) if timestamp(&rest[i + 1..i + j]).is_some() => {
@@ -100,6 +111,7 @@ fn strip_word_times(s: &str) -> String {
             },
         }
     }
+
     out.push_str(rest);
     out.split_whitespace().collect::<Vec<_>>().join(" ")
 }
@@ -118,8 +130,10 @@ struct Found {
 
 async fn look_up(state: &AppState, track: &Track) -> anyhow::Result<(Option<String>, Option<String>)> {
     let base = state.config.current().music.lyrics_url.trim().trim_end_matches('/').to_string();
+
     let artist =
         track.album_artist.as_deref().filter(|a| !a.is_empty() && *a != crate::library::music::VARIOUS_ARTISTS);
+
     let res = state
         .http
         .get(format!("{base}/api/get"))
@@ -131,9 +145,11 @@ async fn look_up(state: &AppState, track: &Track) -> anyhow::Result<(Option<Stri
         ])
         .send()
         .await?;
+
     if res.status() == reqwest::StatusCode::NOT_FOUND {
         return Ok((None, None));
     }
+
     let found: Found = res.error_for_status()?.json().await?;
     Ok((found.synced_lyrics.filter(|s| !s.trim().is_empty()), found.plain_lyrics.filter(|s| !s.trim().is_empty())))
 }
@@ -143,36 +159,44 @@ async fn look_up(state: &AppState, track: &Track) -> anyhow::Result<(Option<Stri
 pub async fn get(state: &AppState, track: &Track) -> anyhow::Result<Option<Lyrics>> {
     let sidecar = Path::new(&track.path).with_extension("lrc");
     let file = tokio::fs::read_to_string(&sidecar).await.ok().and_then(|t| usable(&t, Source::File));
+
     if file.as_ref().is_some_and(|l| l.synced) {
         return Ok(file);
     }
+
     let embedded = if track.has_lyrics {
         let text: Option<String> =
             sqlx::query_scalar("SELECT lyrics FROM tracks WHERE id = ?").bind(track.id).fetch_one(&state.db).await?;
+
         text.and_then(|t| usable(&t, Source::Embedded))
     } else {
         None
     };
+
     if embedded.as_ref().is_some_and(|l| l.synced) {
         return Ok(embedded);
     }
+
     let local = file.or(embedded);
     let config = state.config.current();
+
     if !config.music.online_lyrics {
         return Ok(local);
     }
 
     let cell = state.music.lyrics.0.lock().unwrap().entry(track.path.clone()).or_default().clone();
+
     cell.get_or_init(|| async {
         let cached: Option<i64> = sqlx::query_scalar("SELECT fetched_at FROM lyrics WHERE track_path = ?")
             .bind(&track.path)
             .fetch_optional(&state.db)
             .await
             .unwrap_or(None);
-        // Nothing found is asked about again after a month, as lyrics get added all the time.
+
         if cached.is_some_and(|at| at > now() - 30 * 86400) {
             return;
         }
+
         match look_up(state, track).await {
             Ok((synced, plain)) => {
                 let _ = sqlx::query(
@@ -191,6 +215,7 @@ pub async fn get(state: &AppState, track: &Track) -> anyhow::Result<Option<Lyric
         }
     })
     .await;
+
     state.music.lyrics.0.lock().unwrap().remove(&track.path);
 
     let online: Option<(Option<String>, Option<String>)> =
@@ -198,10 +223,13 @@ pub async fn get(state: &AppState, track: &Track) -> anyhow::Result<Option<Lyric
             .bind(&track.path)
             .fetch_optional(&state.db)
             .await?;
+
     let (synced, plain) = online.unwrap_or_default();
+
     if let Some(l) = synced.as_deref().and_then(|t| usable(t, Source::Online)) {
         return Ok(Some(l));
     }
+
     Ok(local.or_else(|| plain.as_deref().and_then(|t| usable(t, Source::Online))))
 }
 

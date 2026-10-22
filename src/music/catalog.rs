@@ -83,6 +83,7 @@ impl Track {
     /// What the tags say, or what was measured here when they don't.
     pub fn gains(&self) -> Gains {
         let track_gain = self.rg_track_gain.or_else(|| gain_for(self.loudness));
+
         Gains {
             track_gain,
             track_peak: self.rg_track_peak.or(self.peak),
@@ -230,13 +231,17 @@ where
     T: Clone + for<'t> sqlx::Encode<'t, Sqlite> + sqlx::Type<Sqlite>,
 {
     q.push("(");
+
     if values.is_empty() {
         q.push("NULL");
     }
+
     let mut sep = q.separated(", ");
+
     for v in values {
         sep.push_bind(v.clone());
     }
+
     q.push(")");
 }
 
@@ -248,24 +253,30 @@ pub async fn user_data(
     targets: &[String],
 ) -> sqlx::Result<HashMap<String, UserData>> {
     let mut out: HashMap<String, UserData> = HashMap::new();
+
     for chunk in targets.chunks(500) {
         let mut q = QueryBuilder::new("SELECT target, starred_at FROM stars WHERE user_id = ");
         q.push_bind(user_id).push(" AND kind = ").push_bind(kind.as_str()).push(" AND target IN ");
         push_list(&mut q, chunk);
+
         for (t, at) in q.build_query_as::<(String, i64)>().fetch_all(db).await? {
             out.entry(t).or_default().starred = Some(at);
         }
+
         let mut q = QueryBuilder::new("SELECT target, rating FROM ratings WHERE user_id = ");
         q.push_bind(user_id).push(" AND kind = ").push_bind(kind.as_str()).push(" AND target IN ");
         push_list(&mut q, chunk);
+
         for (t, r) in q.build_query_as::<(String, i64)>().fetch_all(db).await? {
             out.entry(t).or_default().rating = Some(r);
         }
+
         if kind == Kind::Track {
             let mut q = QueryBuilder::new("SELECT track_path, COUNT(*), MAX(played_at) FROM plays WHERE user_id = ");
             q.push_bind(user_id).push(" AND track_path IN ");
             push_list(&mut q, chunk);
             q.push(" GROUP BY track_path");
+
             for (t, n, at) in q.build_query_as::<(String, i64, i64)>().fetch_all(db).await? {
                 let d = out.entry(t).or_default();
                 d.play_count = n;
@@ -273,23 +284,28 @@ pub async fn user_data(
             }
         }
     }
+
     Ok(out)
 }
 
 /// Plays of whole albums: how many times any of their tracks were played, and when last.
 pub async fn album_plays(db: &SqlitePool, user_id: i64, ids: &[i64]) -> sqlx::Result<HashMap<i64, (i64, i64)>> {
     let mut out = HashMap::new();
+
     for chunk in ids.chunks(500) {
         let mut q = QueryBuilder::new(
             "SELECT t.album_id, COUNT(*), MAX(p.played_at) FROM plays p JOIN tracks t ON t.path = p.track_path WHERE p.user_id = ",
         );
+
         q.push_bind(user_id).push(" AND t.album_id IN ");
         push_list(&mut q, chunk);
         q.push(" GROUP BY t.album_id");
+
         for (id, n, at) in q.build_query_as::<(i64, i64, i64)>().fetch_all(db).await? {
             out.insert(id, (n, at));
         }
     }
+
     Ok(out)
 }
 
@@ -308,29 +324,35 @@ pub async fn track(db: &SqlitePool, id: i64) -> sqlx::Result<Option<Track>> {
 /// These tracks, in this order, leaving out what's gone or hidden.
 pub async fn tracks(db: &SqlitePool, libraries: &[String], ids: &[i64]) -> sqlx::Result<Vec<Track>> {
     let mut found: HashMap<i64, Track> = HashMap::new();
+
     for chunk in ids.chunks(500) {
         let mut q = QueryBuilder::new(format!("SELECT {TRACK_COLUMNS} {TRACKS_FROM} WHERE "));
         in_libraries(&mut q, "t.library", libraries);
         q.push(" AND t.id IN ");
         push_list(&mut q, chunk);
+
         for t in q.build_query_as::<Track>().fetch_all(db).await? {
             found.insert(t.id, t);
         }
     }
+
     Ok(ids.iter().filter_map(|id| found.get(id).cloned()).collect())
 }
 
 pub async fn tracks_by_path(db: &SqlitePool, libraries: &[String], paths: &[String]) -> sqlx::Result<Vec<Track>> {
     let mut found: HashMap<String, Track> = HashMap::new();
+
     for chunk in paths.chunks(500) {
         let mut q = QueryBuilder::new(format!("SELECT {TRACK_COLUMNS} {TRACKS_FROM} WHERE "));
         in_libraries(&mut q, "t.library", libraries);
         q.push(" AND t.path IN ");
         push_list(&mut q, chunk);
+
         for t in q.build_query_as::<Track>().fetch_all(db).await? {
             found.insert(t.path.clone(), t);
         }
     }
+
     Ok(paths.iter().filter_map(|p| found.get(p).cloned()).collect())
 }
 
@@ -366,6 +388,7 @@ pub async fn artist_albums(db: &SqlitePool, artist_id: i64) -> sqlx::Result<(Vec
     .bind(artist_id)
     .fetch_all(db)
     .await?;
+
     let on: Vec<Album> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "SELECT {ALBUM_COLUMNS} FROM albums a
          WHERE a.id IN (SELECT t.album_id FROM track_artists ta JOIN tracks t ON t.id = ta.track_id WHERE ta.artist_id = ?1)
@@ -375,37 +398,46 @@ pub async fn artist_albums(db: &SqlitePool, artist_id: i64) -> sqlx::Result<(Vec
     .bind(artist_id)
     .fetch_all(db)
     .await?;
+
     Ok((own, on))
 }
 
 /// Each track's artists, with their ids, in credit order.
 pub async fn track_artists(db: &SqlitePool, ids: &[i64]) -> sqlx::Result<HashMap<i64, Vec<(i64, String, String)>>> {
     let mut out: HashMap<i64, Vec<(i64, String, String)>> = HashMap::new();
+
     for chunk in ids.chunks(500) {
         let mut q = QueryBuilder::new(
             "SELECT ta.track_id, r.id, r.name, ta.role FROM track_artists ta JOIN artists r ON r.id = ta.artist_id WHERE ta.track_id IN ",
         );
+
         push_list(&mut q, chunk);
         q.push(" ORDER BY ta.track_id, ta.role, ta.position");
+
         for (track, id, name, role) in q.build_query_as::<(i64, i64, String, String)>().fetch_all(db).await? {
             out.entry(track).or_default().push((id, name, role));
         }
     }
+
     Ok(out)
 }
 
 pub async fn album_artists(db: &SqlitePool, ids: &[i64]) -> sqlx::Result<HashMap<i64, Vec<(i64, String)>>> {
     let mut out: HashMap<i64, Vec<(i64, String)>> = HashMap::new();
+
     for chunk in ids.chunks(500) {
         let mut q = QueryBuilder::new(
             "SELECT aa.album_id, r.id, r.name FROM album_artists aa JOIN artists r ON r.id = aa.artist_id WHERE aa.album_id IN ",
         );
+
         push_list(&mut q, chunk);
         q.push(" ORDER BY aa.album_id, aa.position");
+
         for (album, id, name) in q.build_query_as::<(i64, i64, String)>().fetch_all(db).await? {
             out.entry(album).or_default().push((id, name));
         }
     }
+
     Ok(out)
 }
 
@@ -440,16 +472,21 @@ pub async fn albums(
 ) -> sqlx::Result<Vec<Album>> {
     let mut q = QueryBuilder::new(format!("SELECT {ALBUM_COLUMNS} FROM albums a WHERE "));
     in_libraries(&mut q, "a.library", libraries);
+
     if let Some(g) = &filter.genre {
         q.push(" AND EXISTS (SELECT 1 FROM json_each(a.genres) WHERE lower(value) = lower(").push_bind(g).push("))");
     }
+
     if let Some((from, to)) = filter.years {
         q.push(" AND a.year BETWEEN ").push_bind(from.min(to)).push(" AND ").push_bind(from.max(to));
     }
+
     if let Some(id) = filter.artist_id {
         q.push(" AND a.id IN (SELECT album_id FROM album_artists WHERE artist_id = ").push_bind(id).push(")");
     }
+
     let played = "(SELECT MAX(p.played_at) FROM plays p JOIN tracks t ON t.path = p.track_path WHERE t.album_id = a.id AND p.user_id = ";
+
     match order {
         AlbumOrder::Newest => {
             q.push(" ORDER BY a.added_at DESC, a.id DESC");
@@ -488,6 +525,7 @@ pub async fn albums(
             q.push(" AND s.kind = 'album' AND s.target = a.library || '/' || a.key) DESC");
         },
     }
+
     q.push(" LIMIT ").push_bind(limit).push(" OFFSET ").push_bind(offset);
     q.build_query_as().fetch_all(db).await
 }
@@ -553,11 +591,13 @@ pub async fn search_tracks(
     let mut q = QueryBuilder::new(format!("SELECT {TRACK_COLUMNS} {TRACKS_FROM} WHERE "));
     in_libraries(&mut q, "t.library", libraries);
     push_words(&mut q, "t.title || ' ' || t.artist || ' ' || t.album", &w);
+
     if w.is_empty() {
         q.push(" ORDER BY t.id");
     } else {
         q.push(" ORDER BY (lower(t.title) = ").push_bind(query.trim().to_lowercase()).push(") DESC, t.title");
     }
+
     q.push(" LIMIT ").push_bind(limit).push(" OFFSET ").push_bind(offset);
     q.build_query_as().fetch_all(db).await
 }
@@ -566,6 +606,7 @@ pub async fn genres(db: &SqlitePool, libraries: &[String]) -> sqlx::Result<Vec<(
     let mut q = QueryBuilder::new(
         "SELECT g.value, COUNT(DISTINCT t.id), COUNT(DISTINCT t.album_id) FROM tracks t, json_each(t.genres) g WHERE ",
     );
+
     in_libraries(&mut q, "t.library", libraries);
     q.push(" GROUP BY lower(g.value) ORDER BY lower(g.value)");
     q.build_query_as().fetch_all(db).await
@@ -580,15 +621,19 @@ pub async fn random_tracks(
 ) -> sqlx::Result<Vec<Track>> {
     let mut q = QueryBuilder::new(format!("SELECT {TRACK_COLUMNS} {TRACKS_FROM} WHERE "));
     in_libraries(&mut q, "t.library", libraries);
+
     if let Some(g) = genre {
         q.push(" AND EXISTS (SELECT 1 FROM json_each(t.genres) WHERE lower(value) = lower(").push_bind(g).push("))");
     }
+
     if let Some(from) = years.0 {
         q.push(" AND t.year >= ").push_bind(from);
     }
+
     if let Some(to) = years.1 {
         q.push(" AND t.year <= ").push_bind(to);
     }
+
     q.push(" ORDER BY random() LIMIT ").push_bind(count);
     q.build_query_as().fetch_all(db).await
 }
@@ -615,20 +660,25 @@ pub async fn starred(
     let mut q = QueryBuilder::new(format!(
         "SELECT {ARTIST_COLUMNS} FROM artists r JOIN stars s ON s.kind = 'artist' AND s.target = r.library || '/' || r.key WHERE s.user_id = "
     ));
+
     q.push_bind(user_id).push(" AND ");
     in_libraries(&mut q, "r.library", libraries);
     q.push(" ORDER BY s.starred_at DESC");
     let artists = q.build_query_as().fetch_all(db).await?;
+
     let mut q = QueryBuilder::new(format!(
         "SELECT {ALBUM_COLUMNS} FROM albums a JOIN stars s ON s.kind = 'album' AND s.target = a.library || '/' || a.key WHERE s.user_id = "
     ));
+
     q.push_bind(user_id).push(" AND ");
     in_libraries(&mut q, "a.library", libraries);
     q.push(" ORDER BY s.starred_at DESC");
     let albums = q.build_query_as().fetch_all(db).await?;
+
     let mut q = QueryBuilder::new(format!(
         "SELECT {TRACK_COLUMNS} {TRACKS_FROM} JOIN stars s ON s.kind = 'track' AND s.target = t.path WHERE s.user_id = "
     ));
+
     q.push_bind(user_id).push(" AND ");
     in_libraries(&mut q, "t.library", libraries);
     q.push(" ORDER BY s.starred_at DESC");
@@ -643,6 +693,7 @@ pub async fn top_tracks(db: &SqlitePool, libraries: &[String], artist_id: i64, c
         "SELECT {TRACK_COLUMNS} {TRACKS_FROM} JOIN track_artists ta ON ta.track_id = t.id AND ta.role = 'artist'
          WHERE ta.artist_id = "
     ));
+
     q.push_bind(artist_id).push(" AND ");
     in_libraries(&mut q, "t.library", libraries);
     q.push(" ORDER BY (SELECT COUNT(*) FROM plays p WHERE p.track_path = t.path) DESC, a.year DESC, t.disc, t.number LIMIT ");
@@ -675,16 +726,20 @@ pub async fn similar_tracks(
     q.push(" AND (t.id IN (SELECT track_id FROM track_artists WHERE artist_id IN ");
     push_list(&mut q, artist_ids);
     q.push(")");
+
     if !genres.is_empty() {
         q.push(" OR EXISTS (SELECT 1 FROM json_each(t.genres) g WHERE lower(g.value) IN ");
         let lower: Vec<String> = genres.iter().map(|g| g.to_lowercase()).collect();
         q.push("(");
         let mut sep = q.separated(", ");
+
         for g in lower {
             sep.push_bind(g);
         }
+
         q.push("))");
     }
+
     q.push(") ORDER BY random() LIMIT ").push_bind(count);
     q.build_query_as().fetch_all(db).await
 }
@@ -741,6 +796,7 @@ pub async fn record_play(db: &SqlitePool, user_id: i64, path: &str, at: i64) -> 
             .bind(at + 30)
             .fetch_optional(db)
             .await?;
+
     if recent.is_none() {
         sqlx::query("INSERT INTO plays (user_id, track_path, played_at) VALUES (?, ?, ?)")
             .bind(user_id)
@@ -749,6 +805,7 @@ pub async fn record_play(db: &SqlitePool, user_id: i64, path: &str, at: i64) -> 
             .execute(db)
             .await?;
     }
+
     Ok(())
 }
 
@@ -811,6 +868,7 @@ pub async fn playlist_paths(db: &SqlitePool, id: i64) -> sqlx::Result<Vec<String
 
 pub async fn set_playlist_paths(tx: &mut sqlx::SqliteConnection, id: i64, paths: &[String]) -> sqlx::Result<()> {
     sqlx::query("DELETE FROM playlist_tracks WHERE playlist_id = ?").bind(id).execute(&mut *tx).await?;
+
     for (i, p) in paths.iter().enumerate() {
         sqlx::query("INSERT INTO playlist_tracks (playlist_id, position, track_path) VALUES (?, ?, ?)")
             .bind(id)
@@ -819,12 +877,14 @@ pub async fn set_playlist_paths(tx: &mut sqlx::SqliteConnection, id: i64, paths:
             .execute(&mut *tx)
             .await?;
     }
+
     sqlx::query("UPDATE playlists SET updated_at = ? WHERE id = ?").bind(now()).bind(id).execute(&mut *tx).await?;
     Ok(())
 }
 
 pub async fn create_playlist(db: &SqlitePool, owner: i64, name: &str, paths: &[String]) -> sqlx::Result<i64> {
     let mut tx = db.begin().await?;
+
     let id: i64 = sqlx::query_scalar(
         "INSERT INTO playlists (owner_id, name, created_at, updated_at) VALUES (?, ?, ?, ?) RETURNING id",
     )
@@ -834,6 +894,7 @@ pub async fn create_playlist(db: &SqlitePool, owner: i64, name: &str, paths: &[S
     .bind(now())
     .fetch_one(&mut *tx)
     .await?;
+
     set_playlist_paths(&mut tx, id, paths).await?;
     tx.commit().await?;
     Ok(id)

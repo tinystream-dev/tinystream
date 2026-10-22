@@ -5,6 +5,7 @@ import { Link, useNavigate, useRouterState } from '@tanstack/react-router'
 import {
   ArrowDownToLine,
   Bell,
+  BookOpen,
   CalendarDays,
   Clapperboard,
   CornerDownLeft,
@@ -26,11 +27,11 @@ import {
 } from 'lucide-react'
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { createPortal } from 'react-dom'
+import { shortcut } from '@tinystream/shared/format'
 import { graphql } from '../gql'
 import { type Library, type User, librariesQuery, request } from '../lib/api'
 import { disconnect } from '../lib/graphql'
 import { speed, useFeatures } from '../lib/downloads'
-import { shortcut } from '../lib/format'
 import { useClipsOn } from '../lib/hooks'
 import { prune, recents } from '../lib/recents'
 import { Avatar } from './Avatar'
@@ -40,6 +41,7 @@ import { NotificationsMenu, PriorityPill, setInboxOpen } from './Notifications'
 import { Squircle } from './Squircle'
 import { Ticker } from './Ticker'
 import { MusicPill } from '../music/Pill'
+import { useFocus } from '../books/focus'
 import { albumTracks } from '../music/components'
 import { music, usePlayer } from '../music/player'
 import type { MusicTrack } from '../music/api'
@@ -72,6 +74,18 @@ function NavLink({ to, params, icon, children, count }: {
       )}
     </Link>
   )
+}
+
+function libraryIcon(l: Library) {
+  if (l.kind === 'MUSIC') return <Music />
+  if (l.kind === 'BOOKS') return <BookOpen />
+  return l.showCount >= l.movieCount ? <Tv /> : <Film />
+}
+
+function libraryCount(l: Library) {
+  if (l.kind === 'MUSIC') return l.albumCount
+  if (l.kind === 'BOOKS') return l.bookCount
+  return l.showCount + l.movieCount
 }
 
 export function Ring({ value, size = 14, className = '' }: { value: number; size?: number; className?: string }) {
@@ -257,7 +271,8 @@ export function Shell({ user, children }: { user: User; children: ReactNode }) {
   const wide = useWide()
   const clipsOn = useClipsOn()
   // Room at the bottom for the music player, so it never covers the end of a page.
-  const pill = usePlayer((p) => p.queue.length > 0 && !p.dismissed && !p.suspended)
+  const focus = useFocus()
+  const pill = usePlayer((p) => p.queue.length > 0 && !p.dismissed && !p.suspended) && !focus
   useTabProgress(transfers.progress, transfers.engine?.downloadRate ?? 0)
 
   const signOut = useCallback(async () => {
@@ -304,72 +319,76 @@ export function Shell({ user, children }: { user: User; children: ReactNode }) {
 
   return (
     <div className="flex min-h-dvh">
-      <aside className="sticky top-0 hidden h-dvh w-60 shrink-0 flex-col border-r border-line bg-raised/60 px-2.5 py-3 [view-transition-name:chrome] md:flex">
-        <div className="flex items-center gap-2.5 pb-3 pl-2.5">
-          <Logo size={20} />
-          <span className="flex-1 text-[15px] font-semibold tracking-tight">tinystream</span>
-          {wide && <NotificationsMenu align="start" />}
-        </div>
-        <button onClick={() => setSearching(true)} className="mb-3 block w-full outline-none">
-          <Squircle
-            radius={9}
-            edge
-            className="flex h-8 items-center gap-2.5 bg-panel px-2.5 text-sm text-ink-3 transition-colors hover:text-ink-2"
-          >
-            <Search className="size-4" />
-            <span className="flex-1 text-left">Search</span>
-            <kbd className="font-sans text-2xs text-ink-3">{shortcut('Ctrl+K')}</kbd>
-          </Squircle>
-        </button>
-        <nav className="space-y-0.5">
-          <NavLink to="/" icon={<House />}>
-            Home
-          </NavLink>
-          {clipsOn && (
-            <NavLink to="/clips" icon={<Scissors />}>
-              Clips
-            </NavLink>
-          )}
-        </nav>
-        <DownloadsNav user={user} transfers={transfers} />
-        {libraries && libraries.length > 0 && (
-          <>
-            <p className="mt-5 mb-1 px-2.5 text-xs text-ink-3">Libraries</p>
-            <nav className="space-y-0.5">
-              {libraries.map((l) => (
-                <NavLink
-                  key={l.name}
-                  to="/library/$name"
-                  params={{ name: l.name }}
-                  icon={l.kind === 'MUSIC' ? <Music /> : l.showCount >= l.movieCount ? <Tv /> : <Film />}
-                  count={l.kind === 'MUSIC' ? l.albumCount : l.showCount + l.movieCount}
-                >
-                  {l.name}
-                </NavLink>
-              ))}
-            </nav>
-          </>
-        )}
-        <div className="flex-1" />
-        <AccountMenu user={user} onShortcuts={() => setShortcuts(true)} onSignOut={signOut} />
-      </aside>
-
-      <div className={`min-w-0 flex-1 ${pill ? 'pb-[calc(8.5rem+env(safe-area-inset-bottom))] md:pb-24' : 'pb-[calc(4.25rem+env(safe-area-inset-bottom))] md:pb-0'}`}>
-        {/* Small screens: a slim top bar, and tabs along the bottom. */}
-        <header className="sticky top-0 z-30 flex h-12 items-center gap-1 material-bar border-b border-line bg-canvas/85 px-3 backdrop-blur-xl [view-transition-name:chrome-top] md:hidden">
-          <Link to="/" className="flex items-center gap-2 px-1.5 text-sm font-semibold">
-            <Logo size={20} /> tinystream
-          </Link>
-          <div className="flex-1" />
-          {!wide && <NotificationsMenu />}
-          <button aria-label="Search" onClick={() => setSearching(true)} className="grid size-9 place-items-center text-ink-2">
-            <Search className="size-4.5" />
+      {!focus && (
+        <aside className="sticky top-0 hidden h-dvh w-60 shrink-0 flex-col border-r border-line bg-raised/60 px-2.5 py-3 [view-transition-name:chrome] md:flex">
+          <div className="flex items-center gap-2.5 pb-3 pl-2.5">
+            <Logo size={20} />
+            <span className="flex-1 text-[15px] font-semibold tracking-tight">tinystream</span>
+            {wide && <NotificationsMenu align="start" />}
+          </div>
+          <button onClick={() => setSearching(true)} className="mb-3 block w-full outline-none">
+            <Squircle
+              radius={9}
+              edge
+              className="flex h-8 items-center gap-2.5 bg-panel px-2.5 text-sm text-ink-3 transition-colors hover:text-ink-2"
+            >
+              <Search className="size-4" />
+              <span className="flex-1 text-left">Search</span>
+              <kbd className="font-sans text-2xs text-ink-3">{shortcut('Ctrl+K')}</kbd>
+            </Squircle>
           </button>
-        </header>
+          <nav className="space-y-0.5">
+            <NavLink to="/" icon={<House />}>
+              Home
+            </NavLink>
+            {clipsOn && (
+              <NavLink to="/clips" icon={<Scissors />}>
+                Clips
+              </NavLink>
+            )}
+          </nav>
+          <DownloadsNav user={user} transfers={transfers} />
+          {libraries && libraries.length > 0 && (
+            <>
+              <p className="mt-5 mb-1 px-2.5 text-xs text-ink-3">Libraries</p>
+              <nav className="space-y-0.5">
+                {libraries.map((l) => (
+                  <NavLink
+                    key={l.name}
+                    to="/library/$name"
+                    params={{ name: l.name }}
+                    icon={libraryIcon(l)}
+                    count={libraryCount(l)}
+                  >
+                    {l.name}
+                  </NavLink>
+                ))}
+              </nav>
+            </>
+          )}
+          <div className="flex-1" />
+          <AccountMenu user={user} onShortcuts={() => setShortcuts(true)} onSignOut={signOut} />
+        </aside>
+      )}
+
+      <div className={`min-w-0 flex-1 ${focus ? '' : pill ? 'pb-[calc(8.5rem+env(safe-area-inset-bottom))] md:pb-24' : 'pb-[calc(4.25rem+env(safe-area-inset-bottom))] md:pb-0'}`}>
+        {/* Small screens: a slim top bar, and tabs along the bottom. */}
+        {!focus && (
+          <header className="sticky top-0 z-30 flex h-12 items-center gap-1 material-bar border-b border-line bg-canvas/85 px-3 backdrop-blur-xl [view-transition-name:chrome-top] md:hidden">
+            <Link to="/" className="flex items-center gap-2 px-1.5 text-sm font-semibold">
+              <Logo size={20} /> tinystream
+            </Link>
+            <div className="flex-1" />
+            {!wide && <NotificationsMenu />}
+            <button aria-label="Search" onClick={() => setSearching(true)} className="grid size-9 place-items-center text-ink-2">
+              <Search className="size-4.5" />
+            </button>
+          </header>
+        )}
         {children}
       </div>
 
-      <TabBar user={user} transfers={transfers} onMore={() => setMore(true)} />
+      {!focus && <TabBar user={user} transfers={transfers} onMore={() => setMore(true)} />}
       {more && (
         <MoreSheet
           user={user}
@@ -380,8 +399,8 @@ export function Shell({ user, children }: { user: User; children: ReactNode }) {
       )}
       {searching && <CommandPalette user={user} onClose={() => setSearching(false)} onShortcuts={() => setShortcuts(true)} />}
       {shortcuts && <Shortcuts onClose={() => setShortcuts(false)} />}
-      <PriorityPill />
-      <MusicPill />
+      {!focus && <PriorityPill />}
+      {!focus && <MusicPill />}
       <Feedback />
     </div>
   )
@@ -574,9 +593,9 @@ function MoreSheet({
         {libraries.length > 0 && <p className="px-3 pt-2 pb-1 text-xs text-ink-3">Libraries</p>}
         {libraries.map((l) => (
           <Link key={l.name} to="/library/$name" params={{ name: l.name }} className={item}>
-            {l.kind === 'MUSIC' ? <Music /> : l.showCount >= l.movieCount ? <Tv /> : <Film />}
+            {libraryIcon(l)}
             <span className="flex-1">{l.name}</span>
-            <span className="text-xs text-ink-3 tabular">{l.kind === 'MUSIC' ? l.albumCount : l.showCount + l.movieCount}</span>
+            <span className="text-xs text-ink-3 tabular">{libraryCount(l)}</span>
           </Link>
         ))}
         {clipsOn && (

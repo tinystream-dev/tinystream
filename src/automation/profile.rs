@@ -45,6 +45,7 @@ fn compile(patterns: &[String]) -> Vec<(String, Regex)> {
             } else {
                 p.clone()
             };
+
             RegexBuilder::new(&source).case_insensitive(true).build().ok().map(|r| (p.clone(), r))
         })
         .collect()
@@ -88,6 +89,7 @@ impl Rules {
 
         if !self.groups.is_empty() {
             let group = a.group.as_deref().unwrap_or("");
+
             if let Some(i) = self.groups.iter().position(|g| g.eq_ignore_ascii_case(group)) {
                 score += (self.groups.len() - i) as i64 * 100;
             }
@@ -106,21 +108,26 @@ impl Rules {
 
         if let Some(size) = release.size {
             let per_episode = (size / episodes.max(1) as i64) as u64 / 1_000_000;
+
             if let Some(min) = self.min_size
                 && per_episode < min
             {
                 rejections.push(format!("{per_episode} MB per episode is under the {min} MB minimum"));
             }
+
             if let Some(max) = self.max_size
                 && per_episode > max
             {
                 rejections.push(format!("{per_episode} MB per episode is over the {max} MB maximum"));
             }
+
             let movie = is_movie(&release.title);
             let limit = if movie { MOVIE_WARNING } else { EPISODE_WARNING };
             let bytes = (size / episodes.max(1) as i64) as u64;
+
             if self.max_size.is_none() && bytes > limit {
                 let gib = bytes as f64 / (1u64 << 30) as f64;
+
                 warnings.push(if movie {
                     format!("{gib:.1} GiB for one movie")
                 } else {

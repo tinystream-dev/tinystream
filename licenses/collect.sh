@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 #
 # Prints the THIRD_PARTY_LICENSES that ship with a release: the native libraries from <native-dir>,
-# the system libraries a musl build links in, the Rust crates and the web UI's packages.
+# rustyass, the system libraries a musl build links in, the Rust crates and the web UI's packages.
 #
 #   licenses/collect.sh <native-dir> <target> > THIRD_PARTY_LICENSES
 #
@@ -28,7 +28,7 @@ tinystream is free software, released under the GNU Affero General Public Licens
 version 3 or later (see LICENSE). It stands on the shoulders of the projects below;
 this file carries their copyright notices and licenses.
 
-FFmpeg, x264, LAME and FriBidi are linked into tinystream under the GNU (L)GPL.
+FFmpeg, x264 and LAME are linked into tinystream under the GNU (L)GPL.
 The exact source of every native library is at the address listed with it, and
 the source of tinystream itself, which you can use to rebuild and relink it, is
 at $repo.
@@ -36,8 +36,19 @@ If any of those addresses stops working, open an issue there and we will send
 you the source.
 EOF
 
+# Only what this build links: <native-dir> can hold licenses of libraries it no longer builds.
 part "Native libraries"
-cat "$native"/licenses/*.txt
+for lib in $(cargo tree --locked -e normal --target "$target" --prefix none --format '{p}' |
+    sed -n 's/^\([a-z0-9]*\)-src v.*/\1/p' | sort -u); do
+    if [ -f "$native/licenses/$lib.txt" ]; then
+        cat "$native/licenses/$lib.txt"
+    fi
+done
+
+part "rustyass, tinystream's subtitle renderer (GNU LGPL version 3 or later)"
+cat rustyass/COPYING.LESSER
+printf '\n\n'
+cat rustyass/COPYING
 
 case $target in
 *-musl)
@@ -49,5 +60,5 @@ esac
 part "Rust crates"
 cargo about generate --workspace --locked --fail -c "$here/about.toml" "$here/about.hbs"
 
-part "Web UI packages"
+part "Web UI packages, and the Rust in its wasm"
 cat web/dist/client/third-party-licenses.txt

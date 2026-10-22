@@ -1,0 +1,762 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Fragments for what shows up in several places, shared by web/ and mobile/.
+
+fragment Person on User {
+  id
+  username
+  avatar
+}
+
+fragment PermissionsFields on Permissions {
+  allLibraries
+  libraries
+  request
+  autoApprove
+  requestLimit
+  manageRequests
+  manageShows
+  downloads
+  editMetadata
+  watchTogether
+  shareLinks
+  clip
+  clipMaxLength
+  clipLimit
+  clipStorage
+  clipLinks
+}
+
+fragment Viewer on User {
+  ...Person
+  isAdmin
+  permissions {
+    ...PermissionsFields
+  }
+}
+
+fragment Card on Title {
+  id
+  kind
+  library
+  name
+  year
+  poster
+  backdrop
+  watchedCount
+  videoCount
+  progress
+  freshCount
+}
+
+fragment VideoRow on Video {
+  id
+  season
+  episode
+  episodeEnd
+  label
+  name
+  overview
+  still
+  customStill
+  airDate
+  duration
+  position
+  finished
+}
+
+fragment TitleDetail on Title {
+  ...Card
+  posterTint
+  backdropTint
+  customPoster
+  customBackdrop
+  overview
+  genres
+  rating
+  path
+  matchState
+  provider
+  providerId
+  libraryProvider
+  seasons {
+    number
+    name
+    title
+    overview
+    poster
+    episodes {
+      ...VideoRow
+    }
+  }
+  movie {
+    ...VideoRow
+  }
+  nextUp {
+    resuming
+    video {
+      ...VideoRow
+    }
+  }
+}
+
+fragment Playback on Video {
+  id
+  still
+  label
+  name
+  position
+  finished
+  title {
+    id
+    kind
+    name
+    backdrop
+  }
+  previous {
+    id
+    label
+    name
+  }
+  next {
+    id
+    still
+    label
+    name
+  }
+  media {
+    duration
+    video {
+      index
+      codec
+      codecString
+      width
+      height
+      fps
+      bitDepth
+      hdr
+    }
+    audio {
+      index
+      codec
+      codecString
+      channels
+      language
+      title
+      default
+    }
+    subtitles {
+      id
+      codec
+      language
+      title
+      default
+      forced
+      supported
+    }
+    fonts {
+      index
+      filename
+    }
+    chapters {
+      start
+      end
+      title
+    }
+  }
+}
+
+fragment TranscodingFields on Transcoding {
+  vaapi
+  vaapiError
+  softwareH264
+}
+
+fragment DiscoverResultFields on DiscoverResult {
+  category
+  provider
+  id
+  name
+  romaji
+  year
+  poster
+  overview
+  library
+  titleId
+  seriesId
+  monitor
+  requestState
+  because
+}
+
+fragment ClipFields on Clip {
+  id
+  kind
+  screenshot
+  name
+  mine
+  canManage
+  owner {
+    ...Person
+  }
+  source {
+    video {
+      id
+    }
+    title {
+      id
+    }
+    book {
+      id
+      title
+      cover
+      coverTint
+    }
+    name
+    kind
+    label
+    year
+    status
+  }
+  quote {
+    text
+    author
+  }
+  start
+  end
+  audio
+  subtitles
+  quality {
+    height
+    halfRate
+  }
+  state
+  progress
+  error
+  bytes
+  width
+  height
+  fps
+  renderedAt
+  createdAt
+  sharedAt
+  public
+  link
+  linkLive
+  recipients {
+    user {
+      ...Person
+    }
+    sharedAt
+    hidden
+  }
+  file
+  poster
+}
+
+fragment ClipAllowanceFields on ClipAllowance {
+  canClip
+  canLink
+  maxLength
+  bytes
+  rendered
+  storage
+  limit
+  customDefaultFont
+}
+
+fragment NotificationFields on Notification {
+  id
+  kind
+  priority
+  title
+  body
+  image
+  link
+  actor {
+    ...Person
+  }
+  createdAt
+  expiresAt
+  readAt
+}
+
+fragment DownloadFields on Download {
+  category
+  id
+  name
+  seriesId
+  seriesName
+  title {
+    id
+  }
+  poster
+  episodes {
+    season
+    episode
+  }
+  source
+  size
+  savePath
+  state
+  importState
+  importError
+  importMode
+  error
+  addedAt
+  finishedAt
+  importedAt
+  requestedBy {
+    username
+  }
+  live {
+    stage
+    paused
+    progress
+    downloadRate
+    uploadRate
+    done
+    uploaded
+    ratio
+    peers
+    seeds
+    seedingSeconds
+    eta
+    pieces
+  }
+  seedGoal {
+    ratio
+    seconds
+  }
+}
+
+fragment EngineFields on DownloadEngine {
+  version
+  downloadRate
+  uploadRate
+  active
+  killSwitch
+  listening
+  listenError
+  slowHours
+  downloadPath
+}
+
+fragment SeriesEpisodeFields on SeriesEpisode {
+  season
+  episode
+  absolute
+  name
+  airAt
+  aired
+  state
+  attempts
+  searchedAt
+  nextSearch
+  downloadId
+  video {
+    id
+  }
+}
+
+fragment SeedingFields on Seeding {
+  ratio
+  time
+  idle
+  then
+}
+
+fragment SeriesFields on Series {
+  id
+  monitor
+  status
+  next {
+    ...SeriesEpisodeFields
+  }
+  title {
+    id
+  }
+  library
+  managed
+  path
+  name
+  year
+  poster
+  overview
+  provider
+  providerId
+  profile
+  effectiveProfile
+  sources
+  groups
+  aliases
+  knownAs
+  numbering
+  naming
+  style {
+    file
+    folder
+    agreement
+    samples
+  }
+  seeding {
+    ...SeedingFields
+  }
+  scheduleAt
+  addedAt
+  counts {
+    have
+    wanted
+    missing
+    grabbed
+    total
+    upcoming
+    skipped
+  }
+  episodes {
+    ...SeriesEpisodeFields
+  }
+}
+
+fragment ReleaseCandidateFields on ReleaseCandidate {
+  release {
+    title
+    source
+    link
+    infoHash
+    size
+    seeders
+    leechers
+    published
+    page
+  }
+  attributes {
+    group
+    resolution
+    codec
+    source
+    dualAudio
+    version
+    proper
+    tenBit
+  }
+  episodes {
+    season
+    episode
+  }
+  batch
+  verdict {
+    accepted
+    score
+    rejections
+    warnings
+    nonstandard
+  }
+}
+
+fragment CalendarEntryFields on CalendarEntry {
+  seriesId
+  title {
+    id
+  }
+  library
+  show
+  poster
+  backdrop
+  backdropTint
+  monitor
+  season
+  episode
+  absolute
+  name
+  airAt
+  state
+  video {
+    id
+  }
+  download {
+    stage
+    progress
+    downloadRate
+    eta
+  }
+}
+
+fragment SettingsFields on Settings {
+  network {
+    host
+    port
+    cors
+  }
+  log {
+    level
+  }
+  scan {
+    watch
+    interval
+  }
+  metadata {
+    tmdbApiKey
+    language
+  }
+  transcode {
+    hardware
+    vaapiDevice
+  }
+  clips {
+    enabled
+    path
+    publicLinks
+    concurrency
+    maxStorage
+    fontsDir
+    defaultFont
+  }
+  music {
+    onlineLyrics
+    lyricsUrl
+    analyzeLoudness
+  }
+  downloads {
+    path
+    import
+    port
+    upnp
+    dht
+    maxActive
+    downloadLimit
+    uploadLimit
+    slowDownloadLimit
+    slowUploadLimit
+    slowFrom
+    slowTo
+    bindInterface
+    proxy
+    seeding {
+      ...SeedingFields
+    }
+  }
+  automation {
+    defaultMonitor
+    rssInterval
+    retry {
+      every
+      until
+    }
+    renameSuggestions
+  }
+  requests {
+    monitor
+  }
+  signIn {
+    style
+  }
+  smtp {
+    host
+    port
+    security
+    username
+    password
+    from
+    publicUrl
+  }
+  sources {
+    name
+    kind
+    url
+    feed
+    apiKey
+    categories
+    enabled
+    downloadPath
+    seeding {
+      ...SeedingFields
+    }
+  }
+  profiles {
+    name
+    resolutions
+    groups
+    require
+    reject
+    minSize
+    maxSize
+    codecs
+    preferDualAudio
+    batches
+    minSeeders
+  }
+  libraries {
+    name
+    path
+    kind
+    metadataProvider
+    managed
+    profile
+    downloadPath
+    resolvedPath
+    exists
+    error
+    titleCount
+    skippedCount
+  }
+  raw
+  error
+  paths {
+    config
+    data
+    log
+  }
+}
+
+fragment MusicTrack on Track {
+  id
+  title
+  artist
+  artists {
+    id
+    name
+  }
+  album
+  albumId
+  albumArtist
+  library
+  disc
+  number
+  year
+  duration
+  codec
+  suffix
+  lossless
+  bitrate
+  sampleRate
+  bitDepth
+  channels
+  size
+  file
+  flac
+  cover
+  coverTint
+  gains {
+    trackGain
+    trackPeak
+    albumGain
+    albumPeak
+    pending
+  }
+  starred
+  rating
+  playCount
+}
+
+fragment AlbumCard on Album {
+  id
+  name
+  artist
+  artists {
+    id
+    name
+  }
+  year
+  cover
+  trackCount
+  duration
+  compilation
+  starred
+  playCount
+  addedAt
+}
+
+fragment ArtistCard on Artist {
+  id
+  name
+  albumCount
+  trackCount
+  cover
+  starred
+}
+
+fragment PlaylistCard on Playlist {
+  id
+  name
+  comment
+  public
+  mine
+  trackCount
+  duration
+  covers
+  owner {
+    id
+    username
+  }
+}
+
+fragment BookCard on Book {
+  id
+  library
+  title
+  authors
+  series
+  seriesIndex
+  year
+  cover
+  length
+  addedAt
+  reading {
+    position
+    progress
+    finished
+    updatedAt
+  }
+}
+
+fragment BookDetail on Book {
+  ...BookCard
+  description
+  publisher
+  published
+  language
+  isbn
+  genres
+  format
+  chapterCount
+  pages
+  rating
+  size
+  provider
+  providerUrl
+  fetched
+  coverTint
+  content
+  files
+  file
+}
+
+fragment QuoteMark on Clip {
+  id
+  name
+  mine
+  canManage
+  public
+  link
+  linkLive
+  createdAt
+  sharedAt
+  owner {
+    ...Person
+  }
+  source {
+    label
+  }
+  quote {
+    text
+    range {
+      start
+      end
+    }
+  }
+  recipients {
+    user {
+      ...Person
+    }
+  }
+}

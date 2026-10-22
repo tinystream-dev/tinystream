@@ -7,7 +7,6 @@ description = "A static dav1d, for fast AV1 decoding"
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
-rust-version.workspace = true
 publish = false
 links = "dav1d"
 

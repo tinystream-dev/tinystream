@@ -9,7 +9,7 @@ import {
   useState,
   useId,
 } from 'react'
-import { squirclePath } from '../lib/squircle'
+import { squirclePath } from '@tinystream/shared/squircle'
 import { useCorners } from '../lib/theme'
 
 const svgUrl = (attrs: string, path: string) =>

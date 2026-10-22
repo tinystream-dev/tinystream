@@ -90,6 +90,7 @@ fn codec_name(id: ffi::AVCodecID) -> String {
 fn is_font(filename: &str, mimetype: Option<&str>) -> bool {
     let m = mimetype.unwrap_or_default().to_ascii_lowercase();
     let f = filename.to_ascii_lowercase();
+
     m.contains("font")
         || m.contains("truetype")
         || m.contains("opentype")
@@ -99,6 +100,7 @@ fn is_font(filename: &str, mimetype: Option<&str>) -> bool {
 pub fn probe(path: &Path) -> anyhow::Result<MediaInfo> {
     let input = Input::open(path, true)?;
     let ctx = unsafe { &*input.0 };
+
     let duration = (ctx.duration != ffi::AV_NOPTS_VALUE && ctx.duration > 0)
         .then(|| ctx.duration as f64 / ffi::AV_TIME_BASE as f64);
 
@@ -110,6 +112,7 @@ pub fn probe(path: &Path) -> anyhow::Result<MediaInfo> {
         fonts: Vec::new(),
         chapters: Vec::new(),
     };
+
     let best_video =
         unsafe { ffi::av_find_best_stream(input.0, ffi::AVMEDIA_TYPE_VIDEO, -1, -1, std::ptr::null_mut(), 0) };
 
@@ -120,11 +123,13 @@ pub fn probe(path: &Path) -> anyhow::Result<MediaInfo> {
         let language = unsafe { ff::dict_get(meta, "language") }.filter(|l| l != "und");
         let title = unsafe { ff::dict_get(meta, "title") };
         let default = st.disposition & ffi::AV_DISPOSITION_DEFAULT as i32 != 0;
+
         match par.codec_type {
             ffi::AVMEDIA_TYPE_VIDEO if index as i32 == best_video => {
                 let desc = unsafe { ffi::av_pix_fmt_desc_get(par.format) };
                 let bit_depth = if desc.is_null() { 8 } else { unsafe { (*desc).comp[0].depth } };
                 let fps = ff::q2d(if st.avg_frame_rate.num > 0 { st.avg_frame_rate } else { st.r_frame_rate });
+
                 info.video = Some(VideoTrack {
                     index,
                     codec: codec_name(par.codec_id),
@@ -157,6 +162,7 @@ pub fn probe(path: &Path) -> anyhow::Result<MediaInfo> {
             ffi::AVMEDIA_TYPE_ATTACHMENT => {
                 let filename = unsafe { ff::dict_get(meta, "filename") }.unwrap_or_default();
                 let mimetype = unsafe { ff::dict_get(meta, "mimetype") };
+
                 if is_font(&filename, mimetype.as_deref()) && par.extradata_size > 0 {
                     info.fonts.push(Font { index, filename });
                 }
@@ -164,6 +170,7 @@ pub fn probe(path: &Path) -> anyhow::Result<MediaInfo> {
             _ => {},
         }
     }
+
     if !info.audio.iter().any(|a| a.default)
         && let Some(first) = info.audio.first_mut()
     {
@@ -173,6 +180,7 @@ pub fn probe(path: &Path) -> anyhow::Result<MediaInfo> {
     for &ch in input.chapters() {
         let ch = unsafe { &*ch };
         let tb = ch.time_base;
+
         info.chapters.push(Chapter {
             start: ch.start as f64 * ff::q2d(tb),
             end: ch.end as f64 * ff::q2d(tb),
@@ -188,9 +196,11 @@ pub fn attachment(path: &Path, index: usize) -> anyhow::Result<(String, Vec<u8>)
     let input = Input::open(path, false)?;
     let st = input.stream(index).ok_or_else(|| anyhow::anyhow!("no stream #{index}"))?;
     let par = unsafe { &*st.codecpar };
+
     if par.codec_type != ffi::AVMEDIA_TYPE_ATTACHMENT || par.extradata.is_null() {
         anyhow::bail!("stream #{index} isn't an attachment");
     }
+
     let data = unsafe { std::slice::from_raw_parts(par.extradata, par.extradata_size as usize) }.to_vec();
     let filename = unsafe { ff::dict_get(st.metadata, "filename") }.unwrap_or_else(|| format!("font-{index}"));
     Ok((filename, data))
@@ -215,18 +225,23 @@ pub fn fill_missing_durations(state: Arc<AppState>, library: String) {
             Ok(r) => r,
             Err(e) => return tracing::warn!("{e}"),
         };
+
         if rows.is_empty() {
             return;
         }
+
         tracing::debug!("reading durations of {} files in {library:?}", rows.len());
         let sem = Arc::new(tokio::sync::Semaphore::new(4));
         let mut tasks = Vec::new();
+
         for (id, path) in rows {
             let permit = sem.clone().acquire_owned().await;
             let state = state.clone();
+
             tasks.push(tokio::spawn(async move {
                 let _permit = permit;
                 let p = path.clone();
+
                 match tokio::task::spawn_blocking(move || duration(Path::new(&p))).await {
                     Ok(Ok(Some(d))) => {
                         let _ = sqlx::query("UPDATE media SET duration = ? WHERE id = ?")
@@ -241,6 +256,7 @@ pub fn fill_missing_durations(state: Arc<AppState>, library: String) {
                 }
             }));
         }
+
         for t in tasks {
             let _ = t.await;
         }

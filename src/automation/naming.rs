@@ -57,17 +57,20 @@ fn replace_ci(hay: &str, needle: &str, with: &str) -> Option<String> {
     if needle.trim().is_empty() {
         return None;
     }
+
     let lower = hay.to_lowercase();
     let at = lower.find(&needle.to_lowercase())?;
 
     if !hay.is_char_boundary(at) || !hay.is_char_boundary(at + needle.len()) {
         return None;
     }
+
     Some(format!("{}{}{}", &hay[..at], with, &hay[at + needle.len()..]))
 }
 
 pub fn template_of(stem: &str, show_titles: &[String], year: Option<i64>, title: Option<&str>) -> Option<String> {
     let caps = SXXEYY.captures(stem)?;
+
     let token = format!(
         "{}{{season{}}}{}{}{{episode{}}}",
         &caps[1],
@@ -76,20 +79,25 @@ pub fn template_of(stem: &str, show_titles: &[String], year: Option<i64>, title:
         &caps[4],
         pad(caps[5].len())
     );
+
     let m = caps.get(0).unwrap();
     let mut t = format!("{}{}{}", &stem[..m.start()], token, &stem[m.end()..]);
     t = CRC.replace_all(&t, "").to_string();
+
     if let Some(c) = LEADING_GROUP.captures(&t) {
         let g = c[1].to_string();
+
         if !QUALITY.is_match(&g) {
             t = format!("[{{group}}]{}", &t[c.get(0).unwrap().end()..]);
         }
     }
+
     if let Some(title) = title.filter(|x| x.len() >= 2)
         && let Some(r) = replace_ci(&t, title, "{title}")
     {
         t = r;
     }
+
     for show in show_titles {
         let variants = [
             show.clone(),
@@ -98,14 +106,17 @@ pub fn template_of(stem: &str, show_titles: &[String], year: Option<i64>, title:
             show.replace(':', ""),
             show.replace(':', " -"),
         ];
+
         if let Some(r) = variants.iter().find_map(|v| replace_ci(&t, v, "{show}")) {
             t = r;
             break;
         }
     }
+
     if let Some(y) = year {
         t = t.replacen(&format!("({y})"), "({year})", 1);
     }
+
     t = QUALITY.replace(&t, "{quality}").to_string();
     t = CODEC.replace(&t, "{codec}").to_string();
     Some(t.trim().to_string())
@@ -115,6 +126,7 @@ pub fn folder_template_of(name: &str) -> Option<String> {
     if name.eq_ignore_ascii_case("specials") {
         return None;
     }
+
     let c = SEASON_WORD.captures(name.trim())?;
     Some(format!("{}{}{{season{}}}", &c[1], &c[2], pad(c[3].len())))
 }
@@ -122,10 +134,12 @@ pub fn folder_template_of(name: &str) -> Option<String> {
 fn majority(templates: impl Iterator<Item = String>) -> Option<(String, usize, usize)> {
     let mut counts: HashMap<String, usize> = HashMap::new();
     let mut total = 0;
+
     for t in templates {
         *counts.entry(t).or_default() += 1;
         total += 1;
     }
+
     let (best, n) = counts.into_iter().max_by(|a, b| a.1.cmp(&b.1).then_with(|| b.0.cmp(&a.0)))?;
     Some((best, n, total))
 }
@@ -144,8 +158,10 @@ async fn rows(db: &SqlitePool, filter: &str, value: &str) -> anyhow::Result<Vec<
         "SELECT i.path, m.path, m.title, i.title, i.folder_title, COALESCE(i.folder_year, i.year)
          FROM media m JOIN items i ON i.id = m.item_id WHERE i.kind = 'show' AND m.season IS NOT NULL AND {filter} = ?"
     );
+
     let rows: Vec<(String, String, Option<String>, String, String, Option<i64>)> =
         sqlx::query_as(sqlx::AssertSqlSafe(sql)).bind(value).fetch_all(db).await?;
+
     Ok(rows
         .into_iter()
         .map(|(item_path, path, title, item_title, folder_title, year)| FileRow {
@@ -164,11 +180,14 @@ fn style_from(rows: &[FileRow]) -> Option<Style> {
         let stem = Path::new(&r.path).file_stem()?.to_string_lossy().to_string();
         template_of(&stem, &[r.folder_title.clone(), r.item_title.clone()], r.year, r.title.as_deref())
     });
+
     let (file, n, total) = majority(files)?;
+
     let folders = rows.iter().filter_map(|r| {
         let season_dir = Path::new(&r.path).parent()?.file_name()?.to_string_lossy().to_string();
         folder_template_of(&season_dir)
     });
+
     let folder = majority(folders).map(|(f, _, _)| f).unwrap_or_else(|| DEFAULT_FOLDER.to_string());
     Some(Style { file, folder, agreement: Some(n as f32 / total as f32), samples: total })
 }
@@ -180,11 +199,14 @@ pub async fn show_style(db: &SqlitePool, show_path: &str) -> anyhow::Result<Opti
 pub async fn library_style(db: &SqlitePool, library: &str) -> anyhow::Result<Style> {
     let all = rows(db, "i.library", library).await?;
     let mut by_show: HashMap<&str, Vec<&FileRow>> = HashMap::new();
+
     for r in &all {
         by_show.entry(r.item_path.as_str()).or_default().push(r);
     }
+
     let mut files = Vec::new();
     let mut folders = Vec::new();
+
     for rows in by_show.values() {
         let owned: Vec<FileRow> = rows
             .iter()
@@ -197,12 +219,15 @@ pub async fn library_style(db: &SqlitePool, library: &str) -> anyhow::Result<Sty
                 year: r.year,
             })
             .collect();
+
         if let Some(s) = style_from(&owned) {
             files.push(s.file);
             folders.push(s.folder);
         }
     }
+
     let shows = files.len();
+
     Ok(match (majority(files.into_iter()), majority(folders.into_iter())) {
         (Some((file, n, total)), folder) => Style {
             file,
@@ -221,6 +246,7 @@ pub async fn library_uses_years(db: &SqlitePool, library: &str) -> anyhow::Resul
     .bind(library)
     .fetch_one(db)
     .await?;
+
     Ok(total > 0 && with * 2 > total)
 }
 
@@ -228,6 +254,7 @@ pub fn render(template: &str, v: &Values) -> String {
     let out = TOKEN.replace_all(template, |c: &regex::Captures| {
         let width = c.get(2).map(|m| m.as_str().len()).unwrap_or(0);
         let num = |n: u32| format!("{n:0width$}");
+
         match &c[1] {
             "show" => v.show.clone(),
             "year" => v.year.map(|y| y.to_string()).unwrap_or_default(),
@@ -241,12 +268,14 @@ pub fn render(template: &str, v: &Values) -> String {
             _ => c[0].to_string(),
         }
     });
+
     tidy(&sanitize(&out))
 }
 
 pub fn sanitize(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     let chars: Vec<char> = s.chars().collect();
+
     for (i, &c) in chars.iter().enumerate() {
         match c {
             ':' => out.push_str(if chars.get(i + 1) == Some(&' ') { " -" } else { "-" }),
@@ -255,13 +284,16 @@ pub fn sanitize(s: &str) -> String {
             _ => out.push(c),
         }
     }
+
     out
 }
 
 fn tidy(s: &str) -> String {
     let mut s = s.to_string();
+
     loop {
         let before = s.clone();
+
         for (from, to) in [
             ("[]", ""),
             ("()", ""),
@@ -276,10 +308,12 @@ fn tidy(s: &str) -> String {
         ] {
             s = s.replace(from, to);
         }
+
         if s == before {
             break;
         }
     }
+
     s.trim_matches(|c: char| c == ' ' || c == '-' || c == '.' || c == '_').trim_end_matches(" -").to_string()
 }
 
@@ -288,6 +322,7 @@ pub fn validate(template: &str) -> Result<(), String> {
         template,
         &Values { show: "Show".into(), season: 3, episode: 7, original: "Show S03E07".into(), ..Values::default() },
     );
+
     match crate::library::parse::episode_number(&sample) {
         Some(e) if e.season == 3 && e.episode == 7 => Ok(()),
         _ => Err(format!(
@@ -309,6 +344,7 @@ mod tests {
             Some("Gun Devil"),
         )
         .unwrap();
+
         assert_eq!(t, "[{group}] {show} - S{season:00}E{episode:00} - {title} [{quality}]");
         let t = template_of("Chainsaw.Man.S01E05.1080p.WEB.x264", &["Chainsaw Man".into()], None, None).unwrap();
         assert_eq!(t, "{show}.S{season:00}E{episode:00}.{quality}.WEB.{codec}");
@@ -326,10 +362,12 @@ mod tests {
             quality: Some("1080p".into()),
             ..Values::default()
         };
+
         assert_eq!(
             render("[{group}] {show} - S{season:00}E{episode:00} - {title} [{quality}]", &v),
             "[SubsPlease] Re-Zero - S04E19 [1080p]"
         );
+
         assert_eq!(render(DEFAULT_FILE, &Values { group: None, ..v.clone() }), "Re-Zero - S04E19");
         assert_eq!(render("Season {season:00}", &v), "Season 04");
     }

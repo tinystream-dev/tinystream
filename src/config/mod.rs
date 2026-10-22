@@ -76,6 +76,8 @@ pub struct Config {
     pub requests: Requests,
     #[serde(default)]
     pub sign_in: SignIn,
+    #[serde(default)]
+    pub smtp: Smtp,
     #[serde(default, rename = "source")]
     pub sources: Vec<Source>,
     #[serde(default, rename = "profile")]
@@ -278,6 +280,7 @@ pub enum LibraryKind {
     #[default]
     Video,
     Music,
+    Books,
 }
 
 impl LibraryKind {
@@ -289,6 +292,7 @@ impl LibraryKind {
         match self {
             LibraryKind::Video => "video",
             LibraryKind::Music => "music",
+            LibraryKind::Books => "books",
         }
     }
 }
@@ -296,6 +300,10 @@ impl LibraryKind {
 impl Library {
     pub fn is_music(&self) -> bool {
         self.kind == LibraryKind::Music
+    }
+
+    pub fn is_books(&self) -> bool {
+        self.kind == LibraryKind::Books
     }
 
     pub fn resolved_path(&self, config_dir: &Path) -> anyhow::Result<PathBuf> {
@@ -440,6 +448,7 @@ impl Default for Automation {
             every: Span(Duration::from_secs(every)),
             until: Span(Duration::from_secs(until)),
         };
+
         Self {
             default_monitor: Monitor::None,
             rss_interval: Span(Duration::from_secs(15 * 60)),
@@ -496,6 +505,57 @@ pub enum SignInStyle {
 #[serde(rename_all = "kebab-case", deny_unknown_fields, default)]
 pub struct SignIn {
     pub style: SignInStyle,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, Default, async_graphql::Enum)]
+#[serde(rename_all = "kebab-case")]
+pub enum SmtpSecurity {
+    #[default]
+    Starttls,
+    Tls,
+    None,
+}
+
+#[derive(
+    Debug, Clone, PartialEq, Default, Deserialize, Serialize, async_graphql::SimpleObject, async_graphql::InputObject,
+)]
+#[graphql(name = "SmtpConfig", input_name = "SmtpConfigInput")]
+#[serde(rename_all = "kebab-case", deny_unknown_fields, default)]
+pub struct Smtp {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub host: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub port: Option<u16>,
+    pub security: SmtpSecurity,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub username: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub password: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub from: Option<String>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub public_url: Option<String>,
+}
+
+impl Smtp {
+    pub fn relay_host(&self) -> Option<&str> {
+        self.host.as_deref().map(str::trim).filter(|h| !h.is_empty())
+    }
+
+    #[cfg_attr(not(feature = "smtp"), allow(dead_code))]
+    pub fn relay_port(&self) -> u16 {
+        self.port.unwrap_or(match self.security {
+            SmtpSecurity::Starttls => 587,
+            SmtpSecurity::Tls => 465,
+            SmtpSecurity::None => 25,
+        })
+    }
+
+    pub fn link(&self, path: &str) -> Option<String> {
+        let base = self.public_url.as_deref()?.trim().trim_end_matches('/');
+        Some(format!("{base}/{}", path.trim_start_matches('/')))
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, async_graphql::Enum)]
@@ -593,56 +653,74 @@ impl Config {
 
     fn validate(&self) -> Result<(), String> {
         let mut seen = std::collections::HashSet::new();
+
         for lib in &self.libraries {
             let name = lib.name.trim();
+
             if name.is_empty() {
                 return Err("every [[library]] needs a non-empty `name`".into());
             }
+
             if !seen.insert(name.to_lowercase()) {
                 return Err(format!("two libraries are called {name:?}; names must be unique"));
             }
+
             if lib.path.trim().is_empty() {
                 return Err(format!("library {name:?} needs a `path`"));
             }
-            if lib.is_music() && (lib.managed || lib.metadata_provider.is_some() || lib.profile.is_some()) {
+
+            if !lib.kind.is_video() && (lib.managed || lib.metadata_provider.is_some() || lib.profile.is_some()) {
                 return Err(format!(
-                    "library {name:?} is a music library; `managed`, `metadata-provider` and `profile` are for video"
+                    "library {name:?} is a {} library; `managed`, `metadata-provider` and `profile` are for video",
+                    lib.kind.as_str()
                 ));
             }
         }
+
         let mut seen = std::collections::HashSet::new();
+
         for source in &self.sources {
             let name = source.name.trim();
+
             if name.is_empty() {
                 return Err("every [[source]] needs a non-empty `name`".into());
             }
+
             if !seen.insert(name.to_lowercase()) {
                 return Err(format!("two sources are called {name:?}; names must be unique"));
             }
+
             if url::Url::parse(source.url.replace("{query}", "x").trim()).is_err() {
                 return Err(format!("source {name:?}: {:?} isn't a URL", source.url));
             }
+
             if source.kind == SourceKind::Rss && !source.url.contains("{query}") && source.feed.is_none() {
                 return Err(format!(
                     "source {name:?}: an RSS source's `url` needs `{{query}}` where the search goes (or set only `feed`)"
                 ));
             }
         }
+
         let mut seen = std::collections::HashSet::new();
+
         for profile in &self.profiles {
             let name = profile.name.trim();
+
             if name.is_empty() {
                 return Err("every [[profile]] needs a non-empty `name`".into());
             }
+
             if !seen.insert(name.to_lowercase()) {
                 return Err(format!("two profiles are called {name:?}; names must be unique"));
             }
+
             for pattern in profile.require.iter().chain(&profile.reject) {
                 if let Err(e) = regex::RegexBuilder::new(pattern).case_insensitive(true).build() {
                     return Err(format!("profile {name:?}: {pattern:?} isn't a valid pattern: {e}"));
                 }
             }
         }
+
         for lib in &self.libraries {
             if let Some(p) = &lib.profile
                 && self.profile(p).is_none()
@@ -653,35 +731,57 @@ impl Config {
                 ));
             }
         }
+
         for t in [&self.downloads.slow_from, &self.downloads.slow_to].into_iter().flatten() {
             if parse_clock(t).is_none() {
                 return Err(format!("{t:?} isn't a time of day; write it like \"08:00\""));
             }
         }
+
         if let Some(proxy) = &self.downloads.proxy
             && !proxy.trim().is_empty()
         {
             let url =
                 url::Url::parse(proxy).map_err(|_| format!("proxy {proxy:?} isn't a URL like socks5://host:1080"))?;
+
             if !matches!(url.scheme(), "socks5" | "http") || url.host_str().is_none() {
                 return Err(format!("proxy {proxy:?} must look like socks5://host:1080 or http://host:8080"));
             }
         }
+
         if self.music.online_lyrics && url::Url::parse(self.music.lyrics_url.trim()).is_err() {
             return Err(format!("`[music] lyrics-url = {:?}` isn't a URL", self.music.lyrics_url));
         }
+
         if self.clips.concurrency == 0 {
             return Err("`[clips] concurrency` has to be at least 1".into());
         }
+
         if self.automation.retry.iter().any(|s| s.every.is_zero()) {
             return Err("every [automation] retry step needs a non-zero `every`".into());
         }
+
+        if self.smtp.relay_host().is_some() {
+            if !self.smtp.from.as_deref().is_some_and(|f| f.contains('@')) {
+                return Err("[smtp] needs a `from` address, like \"tinystream <tinystream@example.com>\"".into());
+            }
+
+            let url = self.smtp.public_url.as_deref().map(str::trim).unwrap_or_default();
+
+            if !url::Url::parse(url).is_ok_and(|u| matches!(u.scheme(), "http" | "https")) {
+                return Err(format!(
+                    "`[smtp] public-url = {url:?}` isn't the address people open tinystream at, like https://tv.example.com"
+                ));
+            }
+        }
+
         if self.log.level.parse::<tracing::Level>().is_err() {
             return Err(format!(
                 "`[log] level = {:?}` isn't a level; use one of trace, debug, info, warn, error",
                 self.log.level
             ));
         }
+
         Ok(())
     }
 
@@ -734,6 +834,14 @@ port = 3000
 # name = "Music"
 # path = "~/Music"
 # kind = "music"
+#
+# Books (EPUB, FB2 and plain text) are read from the files themselves, with
+# what's missing looked up on Google Books and Open Library:
+#
+# [[library]]
+# name = "Novels"
+# path = "~/Books"
+# kind = "books"
 
 # Downloads (Settings → Downloads and Sources in the UI). tinystream ships
 # with no sources; add the ones you use:
@@ -747,4 +855,15 @@ port = 3000
 # [downloads]
 # path = "~/Downloads/tinystream"
 # bind-interface = "wg0"   # pause every torrent whenever your VPN is down
+
+# Email, for sending invite links and password resets (only in builds with the
+# `smtp` feature). tinystream sends through your mail provider's SMTP server:
+#
+# [smtp]
+# host = "smtp.example.com"
+# security = "starttls"   # or "tls" (port 465), or "none"
+# username = "me@example.com"
+# password = "…"
+# from = "tinystream <me@example.com>"
+# public-url = "https://tv.example.com"   # where links in emails point
 "#;

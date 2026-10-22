@@ -7,22 +7,20 @@ description = "A static FFmpeg's libraries, built with everything else in native
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
-rust-version.workspace = true
 publish = false
 links = "ffmpeg"
 
 [dependencies]
 nasm-src = { path = "../nasm" }
-libva-src = { path = "../libva" }
 dav1d-src = { path = "../dav1d" }
 x264-src = { path = "../x264" }
 zimg-src = { path = "../zimg" }
-freetype-src = { path = "../freetype" }
-fribidi-src = { path = "../fribidi" }
-harfbuzz-src = { path = "../harfbuzz" }
-libass-src = { path = "../libass" }
 opus-src = { path = "../opus" }
 lame-src = { path = "../lame" }
+
+# libva (and with it libdrm) is Linux's; macOS gets VideoToolbox from the system instead.
+[target.'cfg(not(target_vendor = "apple"))'.dependencies]
+libva-src = { path = "../libva" }
 
 [build-dependencies]
 native-support = { path = "../support" }

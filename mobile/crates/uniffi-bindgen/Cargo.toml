@@ -1,0 +1,12 @@
+[package]
+name = "uniffi-bindgen"
+description = "Generates the Kotlin bindings of the app's Rust crates"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+uniffi = { version = "0.32", features = ["cli"] }

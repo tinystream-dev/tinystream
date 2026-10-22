@@ -109,6 +109,9 @@ export class Engine {
     if (m.type === 'mark') {
       this.marks.push({ key: m.key, frame: m.frame, offset: m.offset, duration: m.duration })
       this.marks.sort((a, b) => a.frame - b.frame)
+    } else if (m.type === 'rewind') {
+      this.marks = this.marks.filter((k) => k.frame < m.frame)
+      this.end = null
     } else if (m.type === 'end') {
       this.end = m.frame
     } else if (m.type === 'error') {

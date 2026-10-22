@@ -23,14 +23,17 @@ pub fn next_search(air_at: Option<i64>, wanted_at: i64, now: i64, steps: &[Retry
 async fn sync_states(state: &AppState) -> anyhow::Result<()> {
     let db = &state.db;
     let t = now();
+
     let have = "EXISTS (SELECT 1 FROM media m JOIN items i ON i.id = m.item_id JOIN series s ON s.path = i.path
                  WHERE s.id = episodes.series_id AND m.season = episodes.season
                    AND episodes.episode BETWEEN m.episode AND COALESCE(m.episode_end, m.episode))";
+
     sqlx::query(sqlx::AssertSqlSafe(format!(
         "UPDATE episodes SET state = 'done', next_search = NULL WHERE state != 'done' AND {have}"
     )))
     .execute(db)
     .await?;
+
     sqlx::query(sqlx::AssertSqlSafe(format!("UPDATE episodes SET state = 'idle' WHERE state = 'done' AND NOT {have}")))
         .execute(db)
         .await?;
@@ -61,6 +64,7 @@ async fn sync_states(state: &AppState) -> anyhow::Result<()> {
     .bind(t)
     .execute(db)
     .await?;
+
     Ok(())
 }
 
@@ -68,6 +72,7 @@ const ANNOUNCE_WITHIN: i64 = 6 * 3600;
 
 async fn announce_aired(state: &AppState) -> anyhow::Result<()> {
     let t = now();
+
     let fresh: Vec<(i64, i64, i64, Option<String>)> = sqlx::query_as(
         "SELECT e.series_id, e.season, e.episode, e.title FROM episodes e JOIN series s ON s.id = e.series_id
          WHERE e.announced_at IS NULL AND e.season > 0 AND s.monitor != 'none' AND e.air_at BETWEEN ?1 - ?2 AND ?1
@@ -82,23 +87,29 @@ async fn announce_aired(state: &AppState) -> anyhow::Result<()> {
         .bind(t)
         .execute(&state.db)
         .await?;
+
     let mut shows: Vec<(i64, Vec<(u32, u32)>, Option<String>)> = Vec::new();
+
     for (series_id, season, episode, title) in fresh {
         match shows.last_mut() {
             Some((id, eps, _)) if *id == series_id => eps.push((season as u32, episode as u32)),
             _ => shows.push((series_id, vec![(season as u32, episode as u32)], title)),
         }
     }
+
     for (series_id, episodes, title) in shows {
         let show = series::get(state, series_id).await?;
         let item_id = series::item_id(state, &show.path).await?;
         let label = notifications::episodes_label(&episodes);
         let one = episodes.len() == 1;
+
         let body = match (one, title) {
             (true, Some(t)) => format!("{label} · {t}"),
             _ => label,
         };
+
         let users = notifications::who_can_see(state, &show.library).await;
+
         notifications::send(
             state,
             &users,
@@ -114,11 +125,13 @@ async fn announce_aired(state: &AppState) -> anyhow::Result<()> {
         )
         .await;
     }
+
     Ok(())
 }
 
 async fn refresh_schedules(state: &Arc<AppState>) -> anyhow::Result<()> {
     let t = now();
+
     let due: Vec<i64> = sqlx::query_scalar(
         "SELECT id FROM series WHERE provider_id IS NOT NULL AND (schedule_at IS NULL OR (monitor != 'none'
             AND ((COALESCE(status, 'airing') IN ('airing', 'upcoming', 'hiatus') AND schedule_at < ?1 - 12 * 3600)
@@ -128,6 +141,7 @@ async fn refresh_schedules(state: &Arc<AppState>) -> anyhow::Result<()> {
     .bind(t)
     .fetch_all(&state.db)
     .await?;
+
     for id in due {
         if let Err(e) = series::refresh_schedule(state, id).await {
             tracing::warn!("refreshing the schedule of show {id}: {e:#}");
@@ -139,6 +153,7 @@ async fn refresh_schedules(state: &Arc<AppState>) -> anyhow::Result<()> {
                 .await?;
         }
     }
+
     Ok(())
 }
 
@@ -157,11 +172,14 @@ async fn grab_picks(
     picks: Vec<(super::Candidate, Vec<(u32, u32)>)>,
 ) -> HashSet<(u32, u32)> {
     let mut got = HashSet::new();
+
     for (candidate, episodes) in picks {
         let title = candidate.release.title.clone();
+
         if got.iter().any(|e| episodes.contains(e)) {
             continue;
         }
+
         match super::grab(
             state,
             Grab {
@@ -177,11 +195,13 @@ async fn grab_picks(
             Err(e) => tracing::warn!("couldn't download {title}: {e:#}"),
         }
     }
+
     got
 }
 
 async fn run_searches(state: &Arc<AppState>) -> anyhow::Result<()> {
     let t = now();
+
     let due: Vec<Due> = sqlx::query_as(
         "SELECT e.series_id, e.season, e.episode, e.air_at, e.wanted_at FROM episodes e JOIN series s ON s.id = e.series_id
          WHERE e.state = 'wanted' AND e.next_search <= ?1 AND s.monitor != 'none'
@@ -191,17 +211,22 @@ async fn run_searches(state: &Arc<AppState>) -> anyhow::Result<()> {
     .bind(t)
     .fetch_all(&state.db)
     .await?;
+
     if due.is_empty() {
         return Ok(());
     }
+
     let config = state.config.current();
     let mut groups: HashMap<(i64, i64), Vec<Due>> = HashMap::new();
+
     for d in due {
         groups.entry((d.series_id, d.season)).or_default().push(d);
     }
+
     for ((series_id, season), eps) in groups {
         let numbers: Vec<u32> = eps.iter().map(|e| e.episode as u32).collect();
         let wanted: HashSet<(u32, u32)> = numbers.iter().map(|e| (season as u32, *e)).collect();
+
         let got =
             match super::search(state, series_id, season as u32, if numbers.len() == 1 { &numbers } else { &[] }, None)
                 .await
@@ -212,11 +237,14 @@ async fn run_searches(state: &Arc<AppState>) -> anyhow::Result<()> {
                     HashSet::new()
                 },
             };
+
         for e in eps {
             if got.contains(&(season as u32, e.episode as u32)) {
                 continue;
             }
+
             let next = next_search(e.air_at, e.wanted_at.unwrap_or(t), t, &config.automation.retry);
+
             sqlx::query(
                 "UPDATE episodes SET attempts = attempts + 1, searched_at = ?, next_search = ?,
                     state = CASE WHEN ? IS NULL THEN 'missing' ELSE state END
@@ -231,13 +259,16 @@ async fn run_searches(state: &Arc<AppState>) -> anyhow::Result<()> {
             .execute(&state.db)
             .await?;
         }
+
         state.events.send(Event::SeriesChanged { series_id });
     }
+
     Ok(())
 }
 
 async fn rss_sync(state: &Arc<AppState>) -> anyhow::Result<()> {
     let config = state.config.current();
+
     let waiting: Vec<(i64, i64, i64)> = sqlx::query_as(
         "SELECT e.series_id, e.season, e.episode FROM episodes e JOIN series s ON s.id = e.series_id
          WHERE e.state IN ('wanted', 'missing') AND s.monitor != 'none'
@@ -246,20 +277,26 @@ async fn rss_sync(state: &Arc<AppState>) -> anyhow::Result<()> {
     .bind(now() + 3600)
     .fetch_all(&state.db)
     .await?;
+
     if waiting.is_empty() {
         return Ok(());
     }
+
     let mut wanted: HashMap<i64, HashSet<(u32, u32)>> = HashMap::new();
+
     for (s, season, e) in waiting {
         wanted.entry(s).or_default().insert((season as u32, e as u32));
     }
+
     let mut shows: Vec<(i64, ShowSearch)> = Vec::new();
+
     for &id in wanted.keys() {
         match show_search(state, id).await {
             Ok(s) => shows.push((id, s)),
             Err(e) => tracing::debug!("show {id}: {e:#}"),
         }
     }
+
     let feeds = futures::future::join_all(
         config
             .sources
@@ -268,7 +305,9 @@ async fn rss_sync(state: &Arc<AppState>) -> anyhow::Result<()> {
             .map(|s| async move { (s.name.clone(), state.automation.sources.feed(s).await) }),
     )
     .await;
+
     let mut found: HashMap<i64, Vec<super::Candidate>> = HashMap::new();
+
     for (name, result) in feeds {
         let releases = match result {
             Ok(r) => r,
@@ -277,47 +316,60 @@ async fn rss_sync(state: &Arc<AppState>) -> anyhow::Result<()> {
                 continue;
             },
         };
+
         for release in releases {
             for (id, show) in &shows {
                 if !show.sources.iter().any(|s| s.name == name) {
                     continue;
                 }
+
                 let c = show.judge(release.clone());
+
                 if c.episodes.iter().any(|e| wanted[id].contains(e)) {
                     found.entry(*id).or_default().push(c);
                 }
             }
         }
     }
+
     for (id, mut candidates) in found {
         super::sort(&mut candidates);
         let got = grab_picks(state, id, choose(&candidates, &wanted[&id])).await;
+
         if !got.is_empty() {
             tracing::info!("found {} episode(s) of show {id} in feeds", got.len());
         }
     }
+
     Ok(())
 }
 
 pub fn spawn(state: Arc<AppState>) {
     tokio::spawn(async move {
         let mut last_rss: Option<Instant> = None;
+
         loop {
             let config = state.config.current();
+
             if let Err(e) = refresh_schedules(&state).await {
                 tracing::warn!("schedules: {e:#}");
             }
+
             if let Err(e) = sync_states(&state).await {
                 tracing::error!("episode states: {e:#}");
             }
+
             if let Err(e) = announce_aired(&state).await {
                 tracing::warn!("announcing new episodes: {e:#}");
             }
+
             if let Err(e) = run_searches(&state).await {
                 tracing::error!("searches: {e:#}");
             }
+
             if !config.sources.is_empty() && last_rss.is_none_or(|t| t.elapsed() >= *config.automation.rss_interval) {
                 last_rss = Some(Instant::now());
+
                 if let Err(e) = rss_sync(&state).await {
                     tracing::error!("feeds: {e:#}");
                 }
@@ -328,7 +380,9 @@ pub fn spawn(state: Arc<AppState>) {
                 .await
                 .ok()
                 .flatten();
+
             let wait = next.map(|n| (n - now()).clamp(1, 30) as u64).unwrap_or(30);
+
             tokio::select! {
                 _ = state.automation.wake.notified() => {}
                 _ = tokio::time::sleep(Duration::from_secs(wait)) => {}

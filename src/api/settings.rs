@@ -9,7 +9,7 @@ use super::schema::Ctx;
 use crate::auth::permissions;
 use crate::config::{
     Automation, Clips, Config, Downloads, LibraryInput, LibraryKind, Log, Metadata, Music, Network, Profile, Provider,
-    Requests, Scan, SettingsPatch, SignIn, Source, Transcode,
+    Requests, Scan, SettingsPatch, SignIn, Smtp, Source, Transcode,
 };
 use crate::error::{ApiError, ApiResult};
 use crate::paths::resolve_config_path;
@@ -97,6 +97,10 @@ impl Settings {
         &self.0.sign_in
     }
 
+    async fn smtp(&self) -> &Smtp {
+        &self.0.smtp
+    }
+
     async fn sources(&self) -> &[Source] {
         &self.0.sources
     }
@@ -109,15 +113,19 @@ impl Settings {
         let state = ctx.state();
         let config_dir = state.config.config_dir();
         let mut out = Vec::new();
+
         for lib in &self.0.libraries {
             let resolved = lib.resolved_path(config_dir);
+
             let (title_count, skipped_count): (i64, i64) = sqlx::query_as(
-                "SELECT (SELECT COUNT(*) FROM items WHERE library = ?1) + (SELECT COUNT(*) FROM albums WHERE library = ?1),
+                "SELECT (SELECT COUNT(*) FROM items WHERE library = ?1) + (SELECT COUNT(*) FROM albums WHERE library = ?1)
+                        + (SELECT COUNT(*) FROM books WHERE library = ?1),
                         (SELECT COUNT(*) FROM skipped WHERE library = ?1)",
             )
             .bind(&lib.name)
             .fetch_one(&state.db)
             .await?;
+
             out.push(ConfiguredLibrary {
                 name: lib.name.clone(),
                 path: lib.path.clone(),
@@ -133,6 +141,7 @@ impl Settings {
                 skipped_count,
             });
         }
+
         Ok(out)
     }
 
@@ -146,6 +155,7 @@ impl Settings {
 
     async fn paths(&self, ctx: &Context<'_>) -> ServerPaths {
         let state = ctx.state();
+
         ServerPaths {
             config: state.config.path().display().to_string(),
             data: state.paths.data_dir.display().to_string(),
@@ -191,9 +201,11 @@ impl SettingsQuery {
         let state = ctx.state();
         ctx.admin()?;
         let start = path.filter(|p| !p.trim().is_empty()).unwrap_or_else(|| "~".into());
+
         let path: PathBuf = resolve_config_path(&start, state.config.config_dir())
             .or_else(|_| resolve_config_path("/", state.config.config_dir()))
             .map_err(|e| ApiError::bad_request(format!("{e:#}")))?;
+
         let mut folders: Vec<Folder> = std::fs::read_dir(&path)
             .map_err(|e| ApiError::bad_request(format!("can't open {}: {e}", path.display())))?
             .filter_map(Result::ok)
@@ -201,7 +213,9 @@ impl SettingsQuery {
             .filter(|e| !e.file_name().to_string_lossy().starts_with('.'))
             .map(|e| Folder { name: e.file_name().to_string_lossy().to_string(), path: e.path().display().to_string() })
             .collect();
+
         folders.sort_by_key(|f| f.name.to_lowercase());
+
         Ok(FolderListing {
             parent: path.parent().map(|p| p.display().to_string()),
             path: path.display().to_string(),
@@ -212,10 +226,12 @@ impl SettingsQuery {
 
     async fn skipped_files(&self, ctx: &Context<'_>) -> ApiResult<Vec<SkippedFile>> {
         ctx.admin()?;
+
         let rows: Vec<(String, String, String)> =
             sqlx::query_as("SELECT library, path, reason FROM skipped ORDER BY library, path")
                 .fetch_all(&ctx.state().db)
                 .await?;
+
         Ok(rows.into_iter().map(|(library, path, reason)| SkippedFile { library, path, reason }).collect())
     }
 }
@@ -224,11 +240,14 @@ fn check_library(state: &AppState, input: &LibraryInput) -> ApiResult<()> {
     if input.name.trim().is_empty() {
         return Err(ApiError::bad_request("give the library a name"));
     }
+
     let path = resolve_config_path(input.path.trim(), state.config.config_dir())
         .map_err(|e| ApiError::bad_request(format!("{e:#}")))?;
+
     if !path.is_dir() {
         return Err(ApiError::bad_request(format!("{} isn't a folder tinystream can see", path.display())));
     }
+
     Ok(())
 }
 
@@ -273,6 +292,7 @@ impl SettingsMutation {
 
         if old.name != new_name {
             let mut tx = state.db.begin().await?;
+
             for table in ["items", "skipped", "tracks", "albums", "artists"] {
                 sqlx::query(sqlx::AssertSqlSafe(format!("UPDATE {table} SET library = ? WHERE library = ?")))
                     .bind(&new_name)
@@ -280,6 +300,7 @@ impl SettingsMutation {
                     .execute(&mut *tx)
                     .await?;
             }
+
             for table in ["stars", "ratings"] {
                 sqlx::query(sqlx::AssertSqlSafe(format!(
                     "UPDATE {table} SET target = ?1 || substr(target, length(?2) + 1)
@@ -290,15 +311,18 @@ impl SettingsMutation {
                 .execute(&mut *tx)
                 .await?;
             }
+
             tx.commit().await?;
             permissions::rename_library(state, &old.name, &new_name).await?;
         }
+
         if old.metadata_provider != input.metadata_provider {
             sqlx::query("UPDATE items SET match_state = 'pending' WHERE library = ? AND match_state != 'manual'")
                 .bind(&new_name)
                 .execute(&state.db)
                 .await?;
         }
+
         state.config.update_library(index, input).await.map_err(ApiError::bad_request)?;
         state.metadata.wake();
         Ok(Settings::now(state))
@@ -316,6 +340,7 @@ impl SettingsMutation {
         let state = ctx.state();
         ctx.admin()?;
         let config = state.config.current();
+
         match library {
             Some(name) => {
                 config.library(&name).ok_or_else(|| ApiError::not_found("library"))?;
@@ -327,6 +352,7 @@ impl SettingsMutation {
                 }
             },
         }
+
         Ok(true)
     }
 }

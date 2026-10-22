@@ -70,6 +70,7 @@ impl From<ApiError> for async_graphql::Error {
             s if s.is_client_error() => "BAD_REQUEST",
             _ => "INTERNAL",
         };
+
         async_graphql::ErrorExtensions::extend_with(async_graphql::Error::new(e.message), |_, ext| {
             ext.set("code", code)
         })

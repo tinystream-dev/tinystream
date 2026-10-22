@@ -14,6 +14,7 @@ pub fn local_art(dir: &Path, names: &[&str]) -> Option<PathBuf> {
     for name in names {
         for ext in IMAGE_EXTENSIONS {
             let p = dir.join(format!("{name}.{ext}"));
+
             if p.is_file() {
                 return Some(p);
             }
@@ -51,8 +52,10 @@ pub fn image_type(data: &[u8]) -> Result<&'static str, &'static str> {
 
 pub fn validate_image(data: &[u8]) -> Result<(), &'static str> {
     image_type(data)?;
+
     let mut reader =
         ImageReader::new(Cursor::new(data)).with_guessed_format().map_err(|_| "that picture could not be decoded")?;
+
     let mut limits = Limits::default();
     limits.max_image_width = Some(8192);
     limits.max_image_height = Some(8192);
@@ -71,11 +74,13 @@ mod tests {
 
     fn directory() -> PathBuf {
         static NEXT: AtomicUsize = AtomicUsize::new(0);
+
         let p = std::env::temp_dir().join(format!(
             "tinystream-art-{}-{}",
             std::process::id(),
             NEXT.fetch_add(1, Ordering::Relaxed)
         ));
+
         fs::create_dir_all(&p).unwrap();
         p
     }
@@ -108,12 +113,14 @@ mod tests {
     #[test]
     fn old_jpeg_sidecars_and_all_image_formats_work() {
         let dir = directory();
+
         for ext in IMAGE_EXTENSIONS {
             let image = dir.join(format!("Episode.{ext}"));
             fs::write(&image, []).unwrap();
             assert_eq!(local_still(&dir.join("Episode.mp4")), Some(image.clone()));
             fs::remove_file(image).unwrap();
         }
+
         fs::create_dir(dir.join("thumbnail.png")).unwrap();
         fs::write(dir.join("thumbnail.svg"), []).unwrap();
         assert_eq!(local_art(&dir, POSTER_NAMES), None);
@@ -148,7 +155,9 @@ mod tests {
         for header in [b"\x89PNG\r\n\x1a\n".as_slice(), b"\xff\xd8\xff", b"RIFF0000WEBP", b"GIF89a"] {
             assert!(validate_image(header).is_err());
         }
+
         let picture = image::DynamicImage::new_rgb8(2, 2);
+
         for format in
             [image::ImageFormat::Png, image::ImageFormat::Jpeg, image::ImageFormat::WebP, image::ImageFormat::Gif]
         {

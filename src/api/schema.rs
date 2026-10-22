@@ -9,8 +9,10 @@ use super::appearance::{AppearanceMutation, AppearanceQuery};
 use super::auth::{AuthMutation, AuthQuery};
 #[cfg(feature = "torrent")]
 use super::automation::{AutomationMutation, AutomationQuery};
+use super::books::{BookMutation, BookQuery};
 use super::clips::{ClipMutation, ClipQuery};
 use super::discovery::DiscoveryQuery;
+use super::email::{EmailMutation, EmailQuery};
 use super::events::EventSubscription;
 use super::invites::{InviteMutation, InviteQuery};
 use super::library::{LibraryMutation, LibraryQuery};
@@ -30,9 +32,11 @@ use crate::state::AppState;
 pub struct Query(
     AuthQuery,
     InviteQuery,
+    EmailQuery,
     UserQuery,
     LibraryQuery,
     MusicQuery,
+    BookQuery,
     DiscoveryQuery,
     RoomQuery,
     ListenQuery,
@@ -48,9 +52,11 @@ pub struct Query(
 pub struct Query(
     AuthQuery,
     InviteQuery,
+    EmailQuery,
     UserQuery,
     LibraryQuery,
     MusicQuery,
+    BookQuery,
     DiscoveryQuery,
     RoomQuery,
     ListenQuery,
@@ -65,9 +71,11 @@ pub struct Query(
 pub struct Mutation(
     AuthMutation,
     InviteMutation,
+    EmailMutation,
     UserMutation,
     LibraryMutation,
     MusicMutation,
+    BookMutation,
     RoomMutation,
     ListenMutation,
     ClipMutation,
@@ -82,9 +90,11 @@ pub struct Mutation(
 pub struct Mutation(
     AuthMutation,
     InviteMutation,
+    EmailMutation,
     UserMutation,
     LibraryMutation,
     MusicMutation,
+    BookMutation,
     RoomMutation,
     ListenMutation,
     ClipMutation,
@@ -211,16 +221,19 @@ mod tests {
     #[cfg(all(feature = "torrent", feature = "metadata"))]
     #[test]
     fn schema_file_is_current() {
-        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/web/schema.graphql");
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/packages/shared/schema.graphql");
         let sdl = super::sdl();
+
         if std::env::var_os("TINYSTREAM_WRITE_SCHEMA").is_some() {
             std::fs::write(path, &sdl).unwrap();
             return;
         }
+
         let current = std::fs::read_to_string(path).unwrap_or_default();
+
         assert!(
             current == sdl,
-            "web/schema.graphql is out of date; run `TINYSTREAM_WRITE_SCHEMA=1 cargo test schema_file_is_current`, \
+            "packages/shared/schema.graphql is out of date; run `TINYSTREAM_WRITE_SCHEMA=1 cargo test schema_file_is_current`, \
              then `bun run codegen` in web/"
         );
     }

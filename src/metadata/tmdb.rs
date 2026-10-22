@@ -149,13 +149,17 @@ impl Client {
         let Some(key) = config.tmdb_api_key.as_deref().filter(|k| !k.is_empty()) else {
             bail!("TMDB needs an API key: set `tmdb-api-key` under [metadata] in config.toml (or in Settings)");
         };
+
         let mut req =
             self.http.get(format!("{API}{path}")).query(query).query(&[("language", config.language.as_str())]);
+
         req = if key.len() > 40 { req.bearer_auth(key) } else { req.query(&[("api_key", key)]) };
         let res = req.send().await.context("can't reach TMDB")?;
+
         if res.status() == reqwest::StatusCode::UNAUTHORIZED {
             bail!("TMDB rejected the API key in config.toml");
         }
+
         Ok(res.error_for_status()?.json().await?)
     }
 
@@ -170,14 +174,19 @@ impl Client {
             ItemKind::Show => ("/search/tv", "first_air_date_year"),
             ItemKind::Movie => ("/search/movie", "year"),
         };
+
         let mut q = vec![("query", query.to_string())];
+
         if let Some(y) = year_hint {
             q.push((year_param, y.to_string()));
         }
+
         let mut page: SearchPage = self.get(config, path, &q).await?;
+
         if page.results.is_empty() && year_hint.is_some() {
             page = self.get(config, path, &q[..1]).await?;
         }
+
         Ok(page.results.into_iter().map(|r| candidate(r, kind)).collect())
     }
 
@@ -197,12 +206,15 @@ impl Client {
             ItemKind::Show => "/tv",
             ItemKind::Movie => "/movie",
         };
+
         let pages = futures::future::join_all(ids.iter().map(|id| async move {
             let page: anyhow::Result<SearchPage> = self.get(config, &format!("{base}/{id}/recommendations"), &[]).await;
             (id, page)
         }))
         .await;
+
         let mut out = HashMap::new();
+
         for (id, page) in pages {
             match page {
                 Ok(page) => {
@@ -214,20 +226,24 @@ impl Client {
                 Err(e) => tracing::debug!("TMDB recommendations for {id}: {e:#}"),
             }
         }
+
         Ok(out)
     }
 
     pub async fn schedule(&self, config: &Metadata, id: &str) -> anyhow::Result<(ShowSchedule, ExternalIds)> {
         let show: ScheduleShow = self.get(config, &format!("/tv/{id}"), &[]).await?;
+
         let alt: AltTitles = self
             .get(config, &format!("/tv/{id}/alternative_titles"), &[])
             .await
             .unwrap_or(AltTitles { results: vec![] });
+
         let external: ExternalIds = self.get(config, &format!("/tv/{id}/external_ids"), &[]).await.unwrap_or_default();
         let mut aliases = vec![show.name.clone()];
         aliases.extend(show.original_name.clone());
         aliases.extend(alt.results.into_iter().map(|a| a.title));
         aliases.dedup();
+
         let mut schedule = ShowSchedule {
             status: show.status.as_deref().map(|s| {
                 match s {
@@ -240,10 +256,13 @@ impl Client {
             aliases,
             seasons: Vec::new(),
         };
+
         let today = time::OffsetDateTime::now_utc().date();
+
         for summary in show.seasons.iter().take(60) {
             let n = summary.season_number;
             let season: Season = self.get(config, &format!("/tv/{id}/season/{n}"), &[]).await?;
+
             schedule.seasons.push(SeasonSchedule {
                 number: n,
                 provider_id: None,
@@ -256,6 +275,7 @@ impl Client {
                     .into_iter()
                     .map(|e| {
                         let date = e.air_date.as_deref().and_then(parse_date);
+
                         ScheduledEpisode {
                             number: e.episode_number,
                             title: non_empty(e.name),
@@ -266,6 +286,7 @@ impl Client {
                     .collect(),
             });
         }
+
         Ok((schedule, external))
     }
 
@@ -280,7 +301,9 @@ impl Client {
             ItemKind::Show => format!("/tv/{id}"),
             ItemKind::Movie => format!("/movie/{id}"),
         };
+
         let show: Show = self.get(config, &path, &[]).await?;
+
         let mut details = Details {
             title: show.name,
             year: year(&show.first_air_date),
@@ -292,9 +315,11 @@ impl Client {
             aliases: Vec::new(),
             seasons: Vec::new(),
         };
+
         for summary in show.seasons.iter().filter(|s| seasons.contains(&s.season_number)) {
             let n = summary.season_number;
             let season: Season = self.get(config, &format!("/tv/{id}/season/{n}"), &[]).await?;
+
             details.seasons.push(SeasonDetails {
                 number: n,
                 title: non_empty(season.name),
@@ -315,6 +340,7 @@ impl Client {
                     .collect(),
             });
         }
+
         Ok(details)
     }
 }
@@ -327,6 +353,7 @@ mod tests {
     fn candidates_keep_the_search_kind() {
         let result =
             |title| serde_json::from_value::<SearchResult>(serde_json::json!({ "id": 1, "title": title })).unwrap();
+
         assert_eq!(candidate(result("Show"), ItemKind::Show).category, MediaCategory::Episodes);
         assert_eq!(candidate(result("Movie"), ItemKind::Movie).category, MediaCategory::Movies);
     }

@@ -44,7 +44,9 @@ pub fn webauthn_for(headers: &HeaderMap) -> ApiResult<Webauthn> {
         .and_then(|v| v.to_str().ok())
         .and_then(|o| Url::parse(o).ok())
         .ok_or_else(|| ApiError::bad_request("passkeys need a browser request with an Origin"))?;
+
     let rp_id = origin.host_str().ok_or_else(|| ApiError::bad_request("the page's origin has no host"))?.to_string();
+
     WebauthnBuilder::new(&rp_id, &origin)
         .and_then(|b| b.rp_name("tinystream").danger_set_user_presence_only_security_keys(true).build())
         .map_err(|e| ApiError::bad_request(format!("passkeys need a secure page (https, or http://localhost): {e}")))
@@ -64,9 +66,11 @@ pub fn start_registration(
     existing: Vec<SecurityKey>,
 ) -> ApiResult<(String, CreationChallengeResponse)> {
     let exclude = existing.iter().map(|k| k.cred_id().clone()).collect();
+
     let (ccr, state) = wa
         .start_securitykey_registration(handle, username, username, Some(exclude), None, None)
         .map_err(webauthn_err)?;
+
     let id = challenges.put(Pending::Register { user_id, name, state });
     Ok((id, ccr))
 }

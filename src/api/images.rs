@@ -11,6 +11,7 @@ use crate::auth::User;
 use crate::error::{ApiError, ApiResult};
 use crate::library::{BACKDROP_NAMES, POSTER_NAMES, image_type, local_art, local_still};
 use crate::state::AppState;
+use crate::tint::Source;
 
 const CACHE: &str = "public, max-age=604800, immutable";
 
@@ -22,17 +23,42 @@ async fn serve_file(path: &FsPath) -> ApiResult<Response> {
 
 fn serve_upload(data: Vec<u8>) -> ApiResult<Response> {
     let mime = image_type(&data).map_err(ApiError::bad_request)?;
+
     Ok(([(header::CONTENT_TYPE, mime), (header::CACHE_CONTROL, "private, max-age=604800, immutable")], data)
         .into_response())
 }
 
 async fn serve_remote(state: &AppState, url: &str) -> ApiResult<Response> {
     let dir = state.paths.cache_dir().join("images");
+
     let file = super::image_cache::remote(&state.http, &dir, url).await.map_err(|e| {
         tracing::debug!("image {url}: {e:#}");
         if e.is::<reqwest::Error>() { ApiError::not_found("image") } else { ApiError::from(e) }
     })?;
+
     serve_file(&file).await
+}
+
+/// Where `item_art` gets the picture from, without fetching it.
+pub(super) fn item_source(
+    id: i64,
+    path: &str,
+    kind: &'static str,
+    remote: Option<&str>,
+    custom: bool,
+    version: i64,
+) -> Option<Source> {
+    let names = if kind == "poster" { POSTER_NAMES } else { BACKDROP_NAMES };
+
+    if custom {
+        return Some(Source::Upload { id, kind, version });
+    }
+
+    if let Some(local) = local_art(FsPath::new(path), names) {
+        return Some(Source::File(local));
+    }
+
+    remote.map(|url| Source::Remote(url.into()))
 }
 
 pub async fn item(
@@ -45,6 +71,7 @@ pub async fn item(
         .fetch_optional(&state.db)
         .await?
         .ok_or_else(|| ApiError::not_found("image"))?;
+
     user.can_access(&state, &library).await?;
     item_art(&state, id, &kind).await
 }
@@ -61,17 +88,21 @@ pub(super) async fn item_art(state: &AppState, id: i64, kind: &str) -> ApiResult
         .fetch_optional(&state.db)
         .await?
         .ok_or_else(|| ApiError::not_found("image"))?;
+
     let (names, remote, custom) = match kind {
         "poster" => (POSTER_NAMES, poster, custom_poster),
         "backdrop" => (BACKDROP_NAMES, backdrop, custom_backdrop),
         _ => return Err(ApiError::not_found("image")),
     };
+
     if let Some(data) = custom {
         return serve_upload(data);
     }
+
     if let Some(local) = local_art(FsPath::new(&path), names) {
         return serve_file(&local).await;
     }
+
     serve_remote(state, &remote.ok_or_else(|| ApiError::not_found("image"))?).await
 }
 
@@ -88,6 +119,7 @@ pub async fn season(
     .fetch_optional(&state.db)
     .await?
     .ok_or_else(|| ApiError::not_found("image"))?;
+
     user.can_access(&state, &library).await?;
     serve_remote(&state, &poster.ok_or_else(|| ApiError::not_found("image"))?).await
 }
@@ -99,6 +131,7 @@ pub async fn still(State(state): State<Arc<AppState>>, user: User, Path(id): Pat
             .fetch_optional(&state.db)
             .await?
             .ok_or_else(|| ApiError::not_found("image"))?;
+
     user.can_access(&state, &library).await?;
     episode_still(&state, id).await
 }
@@ -110,12 +143,15 @@ pub(super) async fn episode_still(state: &AppState, id: i64) -> ApiResult<Respon
             .fetch_optional(&state.db)
             .await?
             .ok_or_else(|| ApiError::not_found("image"))?;
+
     if let Some(data) = custom {
         return serve_upload(data);
     }
+
     if let Some(local) = local_still(FsPath::new(&path)) {
         return serve_file(&local).await;
     }
+
     if let Some(url) = still
         && let Ok(res) = serve_remote(state, &url).await
     {
@@ -126,5 +162,6 @@ pub(super) async fn episode_still(state: &AppState, id: i64) -> ApiResult<Respon
         tracing::debug!("thumbnail for {path}: {e:#}");
         ApiError::not_found("image")
     })?;
+
     serve_file(&thumb).await
 }

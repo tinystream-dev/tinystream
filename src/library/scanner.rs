@@ -110,21 +110,28 @@ fn is_download_dir(path: &Path, download_dirs: &[PathBuf]) -> bool {
 
 fn walk(root: &Path, download_dirs: &[PathBuf]) -> std::io::Result<Walk> {
     let mut walk = Walk::default();
+
     for entry in sorted_entries(root)? {
         let path = entry.path();
+
         if is_hidden(&entry) || is_download_dir(&path, download_dirs) {
             continue;
         }
+
         let Ok(ft) = entry.file_type() else { continue };
         let is_dir = ft.is_dir() || (ft.is_symlink() && path.is_dir());
+
         if !is_dir {
             if matches!(parse::file_kind(&path), FileKind::Video) {
                 walk.skip(&path, "video at the library root; put it in a folder: `Title (Year)/file` for a movie, `Show/Season 01/… S01E01` for a show");
             }
+
             continue;
         }
+
         walk_title_folder(&path, &mut walk);
     }
+
     Ok(walk)
 }
 
@@ -132,19 +139,24 @@ fn walk_title_folder(dir: &Path, walk: &mut Walk) {
     let Ok(entries) = sorted_entries(dir) else {
         return walk.skip(dir, "can't read this folder (permissions?)");
     };
+
     let name = dir.file_name().unwrap_or_default().to_string_lossy().to_string();
     let (title, year) = parse::title_and_year(&name);
 
     let mut seasons = Vec::new();
     let mut other_dirs = Vec::new();
     let mut videos = Vec::new();
+
     for entry in entries {
         if is_hidden(&entry) {
             continue;
         }
+
         let path = entry.path();
+
         if path.is_dir() {
             let dir_name = entry.file_name().to_string_lossy().to_string();
+
             match parse::season_number(&dir_name) {
                 Some(n) => seasons.push((n, path)),
                 None => other_dirs.push(path),
@@ -158,17 +170,22 @@ fn walk_title_folder(dir: &Path, walk: &mut Walk) {
         for v in &videos {
             walk.skip(v, "video outside a season folder; move it into e.g. `Season 01`");
         }
+
         for d in &other_dirs {
             walk.skip(d, "folder isn't a season folder (expected a name like `Season 01`, `S01` or `Specials`)");
         }
+
         let mut media = Vec::new();
         let mut seen: HashMap<(u32, u32), PathBuf> = HashMap::new();
+
         for (folder_season, season_dir) in seasons {
             walk_season_folder(&season_dir, folder_season, &mut media, &mut seen, walk);
         }
+
         if media.is_empty() {
             return walk.skip(dir, "show has season folders but no playable episodes or extras");
         }
+
         walk.items.push(FoundItem { path: dir.to_path_buf(), kind: Kind::Show, title, year, media });
     } else if videos
         .iter()
@@ -183,14 +200,18 @@ fn walk_title_folder(dir: &Path, walk: &mut Walk) {
     } else if !videos.is_empty() {
         let (samples, mut mains): (Vec<_>, Vec<_>) =
             videos.into_iter().partition(|v| parse::is_sample(&v.file_stem().unwrap_or_default().to_string_lossy()));
+
         for s in &samples {
             walk.skip(s, "sample file");
         }
+
         if mains.is_empty() {
             return walk.skip(dir, "movie folder only contains samples");
         }
+
         mains.sort_by_key(|p| std::cmp::Reverse(file_info(p).0));
         let main = mains.remove(0);
+
         for extra in &mains {
             walk.skip(
                 extra,
@@ -200,10 +221,13 @@ fn walk_title_folder(dir: &Path, walk: &mut Walk) {
                 ),
             );
         }
+
         for d in &other_dirs {
             walk.skip(d, "folders inside a movie folder are ignored");
         }
+
         let (size, mtime) = file_info(&main);
+
         walk.items.push(FoundItem {
             path: dir.to_path_buf(),
             kind: Kind::Movie,
@@ -226,17 +250,22 @@ fn walk_season_folder(
     let Ok(entries) = sorted_entries(dir) else {
         return walk.skip(dir, "can't read this folder (permissions?)");
     };
+
     for entry in entries {
         if is_hidden(&entry) {
             continue;
         }
+
         let path = entry.path();
+
         if path.is_dir() {
             if !entry.file_type().is_ok_and(|ft| ft.is_symlink()) {
                 walk_extras(&path, folder_season, media, walk);
             }
+
             continue;
         }
+
         match parse::file_kind(&path) {
             FileKind::Video => {},
             FileKind::Quiet => continue,
@@ -245,17 +274,21 @@ fn walk_season_folder(
                 continue;
             },
         }
+
         let stem = path.file_stem().unwrap_or_default().to_string_lossy().to_string();
+
         if parse::is_sample(&stem) {
             walk.skip(&path, "sample file");
             continue;
         }
+
         let Some(mut ep) = parse::episode_number(&stem) else {
             if folder_season == 0 {
                 let (size, mtime) = file_info(&path);
                 media.push(FoundMedia { path, ep: None, season: Some(0), size, mtime });
                 continue;
             }
+
             walk.skip(&path, "no SxxEyy episode number in the file name (e.g. `Show S01E05.mkv`)");
             continue;
         };
@@ -267,8 +300,10 @@ fn walk_season_folder(
                 ep.season,
                 folder_season
             );
+
             ep.season = folder_season;
         }
+
         if let Some(first) = seen.get(&(ep.season, ep.episode)) {
             walk.skip(
                 &path,
@@ -279,8 +314,10 @@ fn walk_season_folder(
                     first.file_name().unwrap_or_default().to_string_lossy()
                 ),
             );
+
             continue;
         }
+
         seen.insert((ep.season, ep.episode), path.clone());
         let (size, mtime) = file_info(&path);
         media.push(FoundMedia { path, ep: Some(ep), season: Some(folder_season), size, mtime });
@@ -291,11 +328,14 @@ fn walk_extras(dir: &Path, season: u32, media: &mut Vec<FoundMedia>, walk: &mut 
     let Ok(entries) = sorted_entries(dir) else {
         return walk.skip(dir, "can't read this folder (permissions?)");
     };
+
     for entry in entries {
         if is_hidden(&entry) {
             continue;
         }
+
         let path = entry.path();
+
         if path.is_dir() {
             if !entry.file_type().is_ok_and(|ft| ft.is_symlink()) {
                 walk_extras(&path, season, media, walk);
@@ -305,6 +345,7 @@ fn walk_extras(dir: &Path, season: u32, media: &mut Vec<FoundMedia>, walk: &mut 
                 walk.skip(&path, "sample file");
                 continue;
             }
+
             let (size, mtime) = file_info(&path);
             media.push(FoundMedia { path, ep: None, season: Some(season), size, mtime });
         }
@@ -316,11 +357,13 @@ pub fn spawn_worker(state: Arc<AppState>, mut rx: mpsc::UnboundedReceiver<String
         while let Some(first) = rx.recv().await {
             tokio::time::sleep(Duration::from_millis(100)).await;
             let mut pending = vec![first];
+
             while let Ok(more) = rx.try_recv() {
                 if !pending.contains(&more) {
                     pending.push(more);
                 }
             }
+
             for library in pending {
                 if let Err(e) = scan_library(&state, &library).await {
                     tracing::error!("scanning {library:?} failed: {e:#}");
@@ -333,6 +376,7 @@ pub fn spawn_worker(state: Arc<AppState>, mut rx: mpsc::UnboundedReceiver<String
 async fn scan_library(state: &Arc<AppState>, name: &str) -> anyhow::Result<()> {
     let config = state.config.current();
     let Some(library) = config.library(name) else { return Ok(()) };
+
     let root = match library.resolved_path(state.config.config_dir()) {
         Ok(p) => p,
         Err(e) => {
@@ -340,19 +384,28 @@ async fn scan_library(state: &Arc<AppState>, name: &str) -> anyhow::Result<()> {
             return Ok(());
         },
     };
+
     if !root.is_dir() {
         tracing::error!(
             "library {name:?}: {} doesn't exist or isn't a folder; keeping what was already scanned",
             root.display()
         );
+
         return Ok(());
     }
 
     state.events.send(Event::ScanStarted { library: name.to_string() });
+
     if library.is_music() {
         return super::music::scan(state, name, &root, download_dirs(state, &config)).await;
     }
+
+    if library.is_books() {
+        return super::books::scan(state, name, &root, download_dirs(state, &config)).await;
+    }
+
     let started = std::time::Instant::now();
+
     let walk = {
         let root = root.clone();
         let download_dirs = download_dirs(state, &config);
@@ -360,14 +413,17 @@ async fn scan_library(state: &Arc<AppState>, name: &str) -> anyhow::Result<()> {
     };
 
     let db = &state.db;
+
     let existing: i64 =
         sqlx::query_scalar("SELECT COUNT(*) FROM items WHERE library = ?").bind(name).fetch_one(db).await?;
+
     if walk.items.is_empty() && existing > 0 {
         tracing::warn!(
             "library {name:?}: {} is empty; if it's a drive that isn't mounted, that's why. \
              Keeping the {existing} titles already scanned",
             root.display()
         );
+
         return Ok(());
     }
 
@@ -376,8 +432,10 @@ async fn scan_library(state: &Arc<AppState>, name: &str) -> anyhow::Result<()> {
     let mut keep_items = HashSet::new();
     let mut new_media = 0usize;
     let mut media_count = 0usize;
+
     for item in &walk.items {
         let path = item.path.to_string_lossy().to_string();
+
         let item_id: i64 = sqlx::query_scalar(
             "INSERT INTO items (library, kind, path, folder_title, folder_year, title, sort_title, year, added_at, updated_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?4, ?6, ?5, ?7, ?7)
@@ -399,15 +457,19 @@ async fn scan_library(state: &Arc<AppState>, name: &str) -> anyhow::Result<()> {
         .bind(ts)
         .fetch_one(&mut *tx)
         .await?;
+
         keep_items.insert(item_id);
 
         let mut keep_media = Vec::new();
+
         for m in &item.media {
             media_count += 1;
+
             let (season, episode, episode_end) = match m.ep {
                 Some(ep) => (m.season.map(i64::from), Some(ep.episode as i64), ep.episode_end.map(|e| e as i64)),
                 None => (m.season.map(i64::from), None, None),
             };
+
             let (id, inserted): (i64, bool) = sqlx::query_as(
                 "INSERT INTO media (item_id, path, season, episode, episode_end, size, mtime, added_at)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
@@ -431,18 +493,24 @@ async fn scan_library(state: &Arc<AppState>, name: &str) -> anyhow::Result<()> {
             .bind(ts)
             .fetch_one(&mut *tx)
             .await?;
+
             if inserted {
                 new_media += 1;
             }
+
             keep_media.push(id);
         }
+
         let ids = keep_media.iter().map(i64::to_string).collect::<Vec<_>>().join(",");
+
         sqlx::query(sqlx::AssertSqlSafe(format!("DELETE FROM media WHERE item_id = ? AND id NOT IN ({ids})")))
             .bind(item_id)
             .execute(&mut *tx)
             .await?;
     }
+
     let ids = keep_items.iter().map(i64::to_string).collect::<Vec<_>>().join(",");
+
     let removed = sqlx::query(sqlx::AssertSqlSafe(format!(
         "DELETE FROM items WHERE library = ? AND id NOT IN ({})",
         if ids.is_empty() { "-1".to_string() } else { ids }
@@ -459,14 +527,18 @@ async fn scan_library(state: &Arc<AppState>, name: &str) -> anyhow::Result<()> {
             .await?
             .into_iter()
             .collect();
+
     sqlx::query("DELETE FROM skipped WHERE library = ?").bind(name).execute(&mut *tx).await?;
+
     for (path, reason) in &walk.skipped {
         let path = path.to_string_lossy().to_string();
+
         if previous.get(&path) == Some(reason) {
             tracing::debug!("skipped {path}: {reason}");
         } else {
             tracing::warn!("skipped {path}: {reason}");
         }
+
         sqlx::query("INSERT OR REPLACE INTO skipped (path, library, reason, seen_at) VALUES (?, ?, ?, ?)")
             .bind(&path)
             .bind(name)
@@ -475,21 +547,25 @@ async fn scan_library(state: &Arc<AppState>, name: &str) -> anyhow::Result<()> {
             .execute(&mut *tx)
             .await?;
     }
+
     tx.commit().await?;
 
     let shows = walk.items.iter().filter(|i| i.kind == Kind::Show).count();
     let movies = walk.items.len() - shows;
+
     tracing::info!(
         "scanned {name:?} in {:.1?}: {shows} shows, {movies} movies, {media_count} files ({new_media} new, {removed} titles removed), {} skipped",
         started.elapsed(),
         walk.skipped.len(),
     );
+
     state.events.send(Event::ScanFinished {
         library: name.to_string(),
         items: walk.items.len(),
         media: media_count,
         skipped: walk.skipped.len(),
     });
+
     if new_media > 0 || removed > 0 {
         state.events.send(Event::LibraryChanged { library: name.to_string() });
     }
@@ -505,29 +581,38 @@ async fn prune_removed_libraries(state: &AppState, names: &[String]) -> anyhow::
     let mut q = sqlx::query(sqlx::AssertSqlSafe(sql.clone()));
     let skipped_sql = sql.replace("items", "skipped");
     let mut q2 = sqlx::query(sqlx::AssertSqlSafe(skipped_sql));
+
     if names.is_empty() {
         q = q.bind("");
         q2 = q2.bind("");
     }
+
     for n in names {
         q = q.bind(n);
         q2 = q2.bind(n);
     }
+
     let removed = q.execute(&state.db).await?.rows_affected();
     q2.execute(&state.db).await?;
+
     for table in ["tracks", "albums", "artists"] {
         let mut q = sqlx::query(sqlx::AssertSqlSafe(sql.replace("items", table)));
+
         if names.is_empty() {
             q = q.bind("");
         }
+
         for n in names {
             q = q.bind(n);
         }
+
         q.execute(&state.db).await?;
     }
+
     if removed > 0 {
         tracing::info!("forgot {removed} titles from libraries removed from config.toml");
     }
+
     Ok(())
 }
 
@@ -543,24 +628,31 @@ pub fn spawn_triggers(state: Arc<AppState>) {
         loop {
             let config = rx.borrow_and_update().clone();
             let config_dir = state.config.config_dir().to_path_buf();
+
             let current: Vec<(String, String, bool)> =
                 config.libraries.iter().map(|l| (l.name.clone(), l.path.clone(), config.scan.watch)).collect();
 
             if current != previous {
                 let names: Vec<String> = config.libraries.iter().map(|l| l.name.clone()).collect();
+
                 if let Err(e) = prune_removed_libraries(&state, &names).await {
                     tracing::error!("{e:#}");
                 }
+
                 for lib in &config.libraries {
                     let unchanged = previous.iter().any(|(n, p, _)| n == &lib.name && p == &lib.path);
+
                     if !unchanged || previous.is_empty() {
                         state.scanner.request(&lib.name);
                     }
                 }
+
                 watchers = None;
+
                 if config.scan.watch {
                     watchers = watch_libraries(&config, &config_dir, fs_tx.clone());
                 }
+
                 previous = current;
             }
 
@@ -568,17 +660,21 @@ pub fn spawn_triggers(state: Arc<AppState>) {
                 if let Some(t) = interval_task.take() {
                     t.abort();
                 }
+
                 if let Some(every) = config.scan.interval.filter(|d| !d.is_zero()) {
                     let state = state.clone();
+
                     interval_task = Some(tokio::spawn(async move {
                         loop {
                             tokio::time::sleep(*every).await;
+
                             for lib in &state.config.current().libraries {
                                 state.scanner.request(&lib.name);
                             }
                         }
                     }));
                 }
+
                 previous_interval = Some(config.scan.interval);
             }
 
@@ -592,11 +688,14 @@ pub fn spawn_triggers(state: Arc<AppState>) {
                     let config = state.config.current();
 
                     let download_dirs = download_dirs(&state, &config);
+
                     paths.retain(|p| {
                         let p = p.canonicalize().unwrap_or_else(|_| p.clone());
                         !download_dirs.iter().any(|d| p.starts_with(d))
                     });
+
                     let mut hit = HashSet::new();
+
                     for lib in &config.libraries {
                         if let Ok(root) = lib.resolved_path(&config_dir)
                             && paths.iter().any(|p| p.starts_with(&root))
@@ -604,6 +703,7 @@ pub fn spawn_triggers(state: Arc<AppState>) {
                             hit.insert(lib.name.clone());
                         }
                     }
+
                     for name in hit {
                         tracing::debug!("files changed in {name:?}; rescanning");
                         state.scanner.request(&name);
@@ -611,6 +711,7 @@ pub fn spawn_triggers(state: Arc<AppState>) {
                 }
             }
         }
+
         drop(watchers);
     });
 }
@@ -631,8 +732,10 @@ fn watch_libraries(
     })
     .map_err(|e| tracing::warn!("can't watch libraries for changes: {e}"))
     .ok()?;
+
     for lib in &config.libraries {
         let Ok(root) = lib.resolved_path(config_dir) else { continue };
+
         if let Err(e) = watcher.watch(&root, RecursiveMode::Recursive) {
             tracing::warn!(
                 "can't watch {} for changes ({e}); use `[scan] interval` to rescan periodically",
@@ -640,6 +743,7 @@ fn watch_libraries(
             );
         }
     }
+
     Some(watcher)
 }
 
@@ -652,11 +756,13 @@ mod tests {
     impl Library {
         fn new(files: &[&str]) -> Self {
             let root = std::env::temp_dir().join(format!("tinystream-scan-{}", uuid::Uuid::new_v4()));
+
             for file in files {
                 let path = root.join(file);
                 std::fs::create_dir_all(path.parent().unwrap()).unwrap();
                 std::fs::write(path, b"video").unwrap();
             }
+
             Self(root)
         }
 
@@ -683,6 +789,7 @@ mod tests {
             "Show/Season 01/extras/OP.ass",
             "Show/Season 02/Show S02E01.mkv",
         ]);
+
         let scan = library.scan();
         assert_eq!(scan.items.len(), 1);
         let media = &scan.items[0].media;
@@ -691,6 +798,7 @@ mod tests {
         assert_eq!(media.iter().filter(|m| m.ep.is_none() && m.season == Some(1)).count(), 3);
         assert_eq!(scan.skipped.len(), 1);
         let again = library.scan();
+
         assert_eq!(
             media.iter().map(|m| &m.path).collect::<Vec<_>>(),
             again.items[0].media.iter().map(|m| &m.path).collect::<Vec<_>>()

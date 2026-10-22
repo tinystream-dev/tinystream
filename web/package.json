@@ -1,14 +1,14 @@
 {
   "name": "tinystream-web",
-  "version": "0.28.3",
+  "version": "0.37.2",
   "license": "AGPL-3.0-or-later",
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "bun run decoder && vite dev --port 5173",
-    "build": "bun run decoder && vite build",
-    "decoder": "bun scripts/decoder.ts",
-    "typecheck": "bun run decoder && tsc --noEmit",
+    "dev": "bun run wasm && vite dev --port 5173",
+    "build": "bun run wasm && vite build",
+    "wasm": "bun scripts/wasm.ts",
+    "typecheck": "bun run wasm && tsc --noEmit",
     "codegen": "graphql-codegen"
   },
   "dependencies": {
@@ -16,8 +16,8 @@
     "@tanstack/react-query": "^5.104.0",
     "@tanstack/react-router": "^1.170.40",
     "@tanstack/react-start": "^1.168.59",
+    "@tinystream/shared": "*",
     "graphql-ws": "^6.3.0",
-    "jassub": "^2.5.16",
     "lucide-react": "^1.48.0",
     "react": "^19.3.0",
     "react-dom": "^19.3.0"
@@ -25,6 +25,7 @@
   "devDependencies": {
     "@graphql-codegen/cli": "^7.4.3",
     "@graphql-codegen/client-preset": "^6.2.0",
+    "@graphql-typed-document-node/core": "^3.2.0",
     "@tailwindcss/vite": "^4.3.3",
     "@types/node": "^26.6.3",
     "@types/react": "^19.3.0",

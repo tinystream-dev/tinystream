@@ -35,15 +35,20 @@ fn all_music(state: &AppState) -> Vec<String> {
 async fn enter(state: &AppState, code: &str, headers: &HeaderMap) -> ApiResult<(Arc<Room>, Option<User>)> {
     let room = state.music.listen.open(&state.db, code).await?.ok_or_else(|| ApiError::not_found("room"))?;
     let info = room.info();
+
     let user = match auth::token_from(headers) {
         Some(t) => auth::user_from_token(state, &t).await?,
         None => None,
     };
+
     let host = auth::load_user(state, info.host_id).await?.ok_or_else(|| ApiError::not_found("room"))?;
+
     if !host.permissions.watch_together {
         return Err(ApiError::not_found("room"));
     }
+
     let public = info.public && host.permissions.share_links;
+
     let allowed = public
         || match &user {
             Some(u) => {
@@ -51,6 +56,7 @@ async fn enter(state: &AppState, code: &str, headers: &HeaderMap) -> ApiResult<(
             },
             None => false,
         };
+
     if !allowed {
         return Err(match user {
             None => ApiError::new(StatusCode::UNAUTHORIZED, "sign in to join this room"),
@@ -59,6 +65,7 @@ async fn enter(state: &AppState, code: &str, headers: &HeaderMap) -> ApiResult<(
             },
         });
     }
+
     Ok((room, user))
 }
 
@@ -164,13 +171,17 @@ impl ListenMutation {
     async fn start_listen_room(&self, ctx: &Context<'_>, input: NewListenRoom) -> ApiResult<ListenRoomView> {
         let state = ctx.state();
         let user = ctx.allowed(|p| p.watch_together)?;
+
         if input.public && !user.permissions.share_links {
             return Err(ApiError::new(StatusCode::FORBIDDEN, "you can't make public links"));
         }
+
         let tracks = checked(state, user, &input.tracks).await?;
+
         if tracks.is_empty() {
             return Err(ApiError::bad_request("queue something to listen to first"));
         }
+
         let room = state
             .music
             .listen
@@ -187,6 +198,7 @@ impl ListenMutation {
                 },
             )
             .await?;
+
         tracing::info!("{} started listening together", user.username);
         Ok(ListenRoomView { room, user: Some(user.clone()), host: user.clone() })
     }
@@ -210,6 +222,7 @@ pub async fn socket(
     ws: WebSocketUpgrade,
 ) -> ApiResult<Response> {
     let (room, user) = enter(&state, &code, &headers).await?;
+
     let name = match &user {
         Some(u) => u.username.clone(),
         None => q
@@ -218,6 +231,7 @@ pub async fn socket(
             .filter(|n| !n.is_empty() && !n.chars().any(char::is_control))
             .unwrap_or_else(|| format!("Guest {}", GUEST_NAMES.choose(&mut rand::rng()).unwrap_or(&"Guest"))),
     };
+
     Ok(ws.on_upgrade(move |socket| connection(state, room, user, name, socket)))
 }
 
@@ -226,8 +240,10 @@ async fn connection(state: Arc<AppState>, room: Arc<Room>, user: Option<User>, n
     let me = room.join(name, user.as_ref().map(|u| u.id), user.as_ref().and_then(|u| u.avatar));
     let (mut out, mut incoming) = socket.split();
     let welcome = json!({ "type": "welcome", "you": me, "serverTime": now_ms() }).to_string();
+
     let mut ok = out.send(Message::Text(welcome.into())).await.is_ok()
         && out.send(Message::Text(room.current().to_string().into())).await.is_ok();
+
     while ok {
         tokio::select! {
             msg = incoming.next() => match msg {
@@ -242,6 +258,7 @@ async fn connection(state: Arc<AppState>, room: Arc<Room>, user: Option<User>, n
             update = updates.recv() => match update {
                 Ok(snapshot) => {
                     ok = out.send(Message::Text(snapshot.to_string().into())).await.is_ok();
+
                     if &*snapshot == ENDED {
                         break;
                     }
@@ -251,6 +268,7 @@ async fn connection(state: Arc<AppState>, room: Arc<Room>, user: Option<User>, n
             },
         }
     }
+
     if room.leave(me)
         && let Err(e) = state.music.listen.save(&state.db, &room).await
     {
@@ -266,8 +284,10 @@ async fn handle(state: &AppState, room: &Arc<Room>, me: u64, user: Option<&User>
     let Ok(cmd) = serde_json::from_str::<Command>(text) else {
         return Some(error("didn't understand that"));
     };
+
     let info = room.info();
     let is_host = user.is_some_and(|u| u.id == info.host_id);
+
     let save = |r: Result<(), &'static str>| async move {
         if r.is_ok()
             && let Err(e) = state.music.listen.save(&state.db, room).await
@@ -276,6 +296,7 @@ async fn handle(state: &AppState, room: &Arc<Room>, me: u64, user: Option<&User>
         }
         r
     };
+
     let result = match cmd {
         Command::Ping { id, c } => return Some(json!({ "type": "pong", "id": id, "c": c, "s": now_ms() }).to_string()),
         Command::Queue { tracks, current, position } => match user {
@@ -319,6 +340,7 @@ async fn handle(state: &AppState, room: &Arc<Room>, me: u64, user: Option<&User>
                 if let Err(e) = state.music.listen.end(&state.db, &room.code).await {
                     tracing::warn!("can't end the room: {e}");
                 }
+
                 notifications::withdraw(state, &format!("/listen/{}", room.code)).await;
                 Ok(())
             } else {
@@ -331,6 +353,7 @@ async fn handle(state: &AppState, room: &Arc<Room>, me: u64, user: Option<&User>
             if structural { save(r).await } else { r }
         },
     };
+
     result.err().map(error)
 }
 
@@ -341,18 +364,23 @@ async fn invite(state: &AppState, room: &Room, from: &User, user_id: i64) -> Res
         .await
         .ok()
         .flatten();
+
     if exists.is_none() || user_id == from.id {
         return Err("there's nobody like that to invite");
     }
+
     room.invite(user_id);
     let _ = state.music.listen.save(&state.db, room).await;
     let info = room.info();
     let first = info.queue.get(info.current).copied();
+
     let title = match first {
         Some(id) => catalog::track(&state.db, id).await.ok().flatten().map(|t| t.album).unwrap_or_default(),
         None => String::new(),
     };
+
     let code = &room.code;
+
     notifications::send(
         state,
         &[user_id],
@@ -373,6 +401,7 @@ async fn invite(state: &AppState, room: &Room, from: &User, user_id: i64) -> Res
         },
     )
     .await;
+
     tracing::info!("{} invited someone to listen together", from.username);
     Ok(())
 }
@@ -429,8 +458,10 @@ pub async fn avatar(
     headers: HeaderMap,
 ) -> ApiResult<Response> {
     let (room, _) = enter(&state, &code, &headers).await?;
+
     if !room.has_user(user_id) {
         return Err(ApiError::not_found("picture"));
     }
+
     Ok(users::avatar_image(&state, user_id).await?.into_response())
 }

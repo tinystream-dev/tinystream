@@ -4,10 +4,12 @@ mod appearance;
 mod auth;
 #[cfg(feature = "torrent")]
 mod automation;
+mod books;
 mod clips;
 mod discovery;
+mod email;
 mod events;
-mod image_cache;
+pub(crate) mod image_cache;
 mod images;
 mod invites;
 mod library;
@@ -36,6 +38,7 @@ use axum::routing::get;
 use axum::{Json, Router};
 use schema::{AppSchema, Session};
 use serde_json::json;
+use tower_http::compression::CompressionLayer;
 
 use crate::auth::{token_from, user_from_token};
 use crate::state::AppState;
@@ -80,11 +83,16 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/listen/{code}/tracks/{id}/stream", get(listen::stream))
         .route("/listen/{code}/tracks/{id}/cover", get(listen::cover))
         .route("/listen/{code}/avatars/{user}", get(listen::avatar))
+        .route("/books/{id}/content", get(books::content).layer(CompressionLayer::new()))
+        .route("/books/{id}/files/{*name}", get(books::resource))
+        .route("/books/{id}/cover", get(books::cover))
+        .route("/books/{id}/file", get(books::file))
         .route("/clips/still/{media}", get(clips::still))
         .route("/clips/{id}/video", get(clips::file))
         .route("/clips/{id}/image", get(clips::file))
         .route("/clips/{id}/poster", get(clips::poster))
         .with_state(state.clone());
+
     let api = graphql.merge(files).fallback(|| async {
         (StatusCode::NOT_FOUND, Json(json!({ "error": "no such endpoint; the API is at /api/graphql" })))
     });
@@ -96,9 +104,12 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/c/{code}/poster.jpg", get(clips::public_poster))
         .layer(middleware::from_fn(clips::rate_limit))
         .with_state(state.clone());
+
     let app = Router::new().nest("/api", api).merge(public).merge(subsonic::router(state.clone()));
+
     #[cfg(feature = "web-ui")]
     let app = app.merge(crate::web::router());
+
     #[cfg(not(feature = "web-ui"))]
     let app = app.route(
         "/",
@@ -110,10 +121,12 @@ pub fn router(state: Arc<AppState>) -> Router {
 
 async fn session(state: &AppState, headers: HeaderMap) -> Session {
     let token = token_from(&headers);
+
     let user = match &token {
         Some(t) => user_from_token(state, t).await.ok().flatten(),
         None => None,
     };
+
     Session { user, token, headers }
 }
 
@@ -122,6 +135,7 @@ async fn graphql_post(State(api): State<Api>, headers: HeaderMap, req: Request) 
         Ok(r) => r,
         Err(e) => return e,
     };
+
     let session = session(&api.state, headers).await;
     GraphQLResponse::from(api.schema.execute(req.data(session)).await).into_response()
 }
@@ -130,25 +144,30 @@ async fn graphql_get(State(api): State<Api>, req: Request) -> Response {
     let (mut parts, _) = req.into_parts();
     let protocol = GraphQLProtocol::from_request_parts(&mut parts, &()).await;
     let upgrade = WebSocketUpgrade::from_request_parts(&mut parts, &()).await;
+
     let (Ok(protocol), Ok(upgrade)) = (protocol, upgrade) else {
         return Html(GraphiQLSource::build().endpoint("/api/graphql").subscription_endpoint("/api/graphql").finish())
             .into_response();
     };
+
     let headers = parts.headers;
     let session = session(&api.state, headers).await;
     let state = api.state.clone();
+
     upgrade
         .protocols(ALL_WEBSOCKET_PROTOCOLS)
         .on_upgrade(move |socket| async move {
             GraphQLWebSocket::new(socket, api.schema, protocol)
                 .on_connection_init(move |payload| async move {
                     let mut session = session;
+
                     if session.user.is_none()
                         && let Some(token) = payload.get("token").and_then(|t| t.as_str())
                     {
                         session.user = user_from_token(&state, token).await.ok().flatten();
                         session.token = Some(token.to_string());
                     }
+
                     let mut data = Data::default();
                     data.insert(session);
                     Ok(data)
@@ -169,9 +188,11 @@ async fn isolation(req: Request, next: Next) -> Response {
 
 async fn cors(State(state): State<Arc<AppState>>, req: Request, next: Next) -> Response {
     let origin = req.headers().get(header::ORIGIN).cloned();
+
     let allowed = origin.as_ref().and_then(|o| {
         let config = state.config.current();
         let list = &config.network.cors;
+
         if list.iter().any(|c| c == "*") {
             Some(HeaderValue::from_static("*"))
         } else {
@@ -179,11 +200,14 @@ async fn cors(State(state): State<Arc<AppState>>, req: Request, next: Next) -> R
             list.iter().any(|c| c.trim_end_matches('/') == o_str).then(|| o.clone())
         }
     });
+
     let Some(allow) = allowed else {
         return next.run(req).await;
     };
+
     let preflight =
         req.method() == Method::OPTIONS && req.headers().contains_key(header::ACCESS_CONTROL_REQUEST_METHOD);
+
     let mut res = if preflight { StatusCode::NO_CONTENT.into_response() } else { next.run(req).await };
     let h = res.headers_mut();
     h.insert(header::ACCESS_CONTROL_ALLOW_ORIGIN, allow);

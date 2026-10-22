@@ -37,13 +37,3 @@ pub const AVERROR_EOF: c_int = FFERRTAG(b'E', b'O', b'F', b' ');
 pub const fn av_inv_q(q: AVRational) -> AVRational {
     AVRational { num: q.den, den: q.num }
 }
-
-pub type VaList = <ass_message_cb as MessageCallback>::Args;
-
-pub trait MessageCallback {
-    type Args;
-}
-
-impl<L, F, A, D> MessageCallback for Option<unsafe extern "C" fn(L, F, A, D)> {
-    type Args = A;
-}

@@ -1,7 +1,4 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-//
-// OpenSubsonic, for music apps: what Feishin and Symfonium use, at /rest.
-// https://opensubsonic.netlify.app
 
 mod browse;
 mod encode;
@@ -73,6 +70,7 @@ impl From<crate::error::ApiError> for Failure {
             400 => 10,
             _ => 0,
         };
+
         Self::new(code, e.message)
     }
 }
@@ -103,12 +101,14 @@ pub struct Params(Vec<(String, String)>);
 impl Params {
     fn parse(query: Option<&str>, body: &[u8]) -> Self {
         let mut all: Vec<(String, String)> = Vec::new();
+
         for src in [query.unwrap_or("").as_bytes(), body] {
             for (k, v) in url::form_urlencoded::parse(src) {
                 let k = k.trim_end_matches("[]").to_string();
                 all.push((k, v.into_owned()));
             }
         }
+
         Params(all)
     }
 
@@ -158,9 +158,11 @@ fn remembered(state: &AppState, key: [u8; 32]) -> Option<i64> {
 
 fn remember(state: &AppState, key: [u8; 32], user_id: i64) {
     let mut map = state.music.logins.lock().unwrap();
+
     if map.len() > 1024 {
         map.retain(|_, (_, at)| at.elapsed() < Duration::from_secs(600));
     }
+
     map.insert(key, (user_id, Instant::now()));
 }
 
@@ -185,25 +187,32 @@ async fn used(state: &AppState, id: i64, client: &str) {
 async fn sign_in(state: &AppState, params: &Params, client: &str) -> Result<User> {
     let api_key = params.get("apiKey");
     let username = params.get("u");
+
     if let Some(key) = api_key {
         if username.is_some() {
             return Err(Failure::new(43, "use either an API key or a username, not both"));
         }
+
         let row: Option<(i64, i64)> = sqlx::query_as("SELECT id, user_id FROM app_passwords WHERE secret = ?")
             .bind(key)
             .fetch_optional(&state.db)
             .await?;
+
         let (id, user_id) = row.ok_or_else(|| Failure::new(44, "that API key isn't valid"))?;
         used(state, id, client).await;
         return auth::load_user(state, user_id).await?.ok_or_else(|| Failure::new(44, "that API key isn't valid"));
     }
+
     let username = username.ok_or_else(|| Failure::missing("u"))?;
     let wrong = || Failure::new(40, "wrong username or password");
+
     let account: Option<(i64, String)> = sqlx::query_as("SELECT id, password_hash FROM users WHERE username = ?")
         .bind(username)
         .fetch_optional(&state.db)
         .await?;
+
     let (user_id, hash) = account.ok_or_else(wrong)?;
+
     let apps: Vec<(i64, String)> = sqlx::query_as("SELECT id, secret FROM app_passwords WHERE user_id = ?")
         .bind(user_id)
         .fetch_all(&state.db)
@@ -212,6 +221,7 @@ async fn sign_in(state: &AppState, params: &Params, client: &str) -> Result<User
     let ok = if let (Some(token), Some(salt)) = (params.get("t"), params.get("s")) {
         let token = token.to_ascii_lowercase();
         let found = apps.iter().find(|(_, secret)| hex::encode(Md5::digest(format!("{secret}{salt}"))) == token);
+
         match found {
             Some((id, _)) => {
                 used(state, *id, client).await;
@@ -221,11 +231,13 @@ async fn sign_in(state: &AppState, params: &Params, client: &str) -> Result<User
         }
     } else if let Some(p) = params.get("p") {
         let password = decode_password(p);
+
         if let Some((id, _)) = apps.iter().find(|(_, secret)| *secret == password) {
             used(state, *id, client).await;
             true
         } else {
             let key: [u8; 32] = Sha256::digest(format!("{user_id}\0{password}\0{hash}")).into();
+
             if remembered(state, key) == Some(user_id) {
                 true
             } else if auth::verify_password(password, hash).await {
@@ -238,10 +250,12 @@ async fn sign_in(state: &AppState, params: &Params, client: &str) -> Result<User
     } else {
         return Err(Failure::new(42, "sign in with a password, a token, or an API key"));
     };
+
     if !ok {
         tracing::info!("a music app ({client}) failed to sign in as {username}");
         return Err(wrong());
     }
+
     auth::load_user(state, user_id).await?.ok_or_else(wrong)
 }
 
@@ -258,6 +272,7 @@ fn base() -> Map<String, Value> {
 pub fn respond(params: &Params, result: Result<Reply>) -> Response {
     let format = params.get("f").unwrap_or("xml");
     let mut body = base();
+
     match result {
         Ok(Reply::Raw(res)) => return res,
         Ok(Reply::Fields(fields)) => body.extend(fields),
@@ -266,6 +281,7 @@ pub fn respond(params: &Params, result: Result<Reply>) -> Response {
             body.insert("error".into(), json!({ "code": f.code, "message": f.message }));
         },
     }
+
     match format {
         "json" => {
             let text = json!({ "subsonic-response": body }).to_string();
@@ -290,20 +306,24 @@ async fn rest(
     req: Request,
 ) -> Response {
     let name = endpoint.strip_suffix(".view").unwrap_or(&endpoint).to_string();
+
     let form = headers
         .get(header::CONTENT_TYPE)
         .and_then(|v| v.to_str().ok())
         .is_some_and(|v| v.starts_with("application/x-www-form-urlencoded"));
-    // Media endpoints pass the request on, for ranges; the rest may carry a form or JSON.
+
     let streams = matches!(name.as_str(), "stream" | "download");
+
     let (req, body) = if method == Method::POST && !streams {
         let bytes = axum::body::to_bytes(req.into_body(), 1 << 20).await.unwrap_or_default();
         (None, bytes)
     } else {
         (Some(req), Bytes::new())
     };
+
     let params = Params::parse(query.as_deref(), if form { &body } else { &[] });
     let client = params.get("c").unwrap_or("an app").chars().take(60).collect::<String>();
+
     if matches!(name.as_str(), "getOpenSubsonicExtensions" | "getLicense" | "ping")
         && params.get("u").is_none()
         && params.get("apiKey").is_none()
@@ -311,16 +331,20 @@ async fn rest(
         let result = Box::pin(dispatch(&state, &name, None, &params, &body, req)).await;
         return respond(&params, result);
     }
+
     let user = match sign_in(&state, &params, &client).await {
         Ok(u) => u,
         Err(f) => return respond(&params, Err(f)),
     };
+
     let result = Box::pin(dispatch(&state, &name, Some((user, client)), &params, &body, req)).await;
+
     if let Err(f) = &result
         && f.code == 0
     {
         tracing::warn!("music API {name}: {}", f.message);
     }
+
     respond(&params, result)
 }
 
@@ -343,8 +367,10 @@ async fn dispatch(
         "getOpenSubsonicExtensions" => return Ok(Reply::one("openSubsonicExtensions", extensions())),
         _ => {},
     }
+
     let Some((user, client)) = who else { return Err(Failure::missing("u")) };
     let call = Call { user, client, params: Params(p.0.clone()), body: body.clone() };
+
     match name {
         "getMusicFolders" => browse::music_folders(state, &call).await,
         "getIndexes" => browse::indexes(state, &call).await,

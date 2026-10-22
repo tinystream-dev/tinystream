@@ -3,6 +3,7 @@
 pub mod invites;
 pub mod passkeys;
 pub mod permissions;
+pub mod resets;
 
 use std::sync::Arc;
 
@@ -45,9 +46,12 @@ pub async fn load_user(state: &AppState, id: i64) -> ApiResult<Option<User>> {
     .bind(id)
     .fetch_optional(&state.db)
     .await?;
+
     let Some((id, handle, username, is_admin, overrides, avatar)) = row else { return Ok(None) };
+
     let permissions =
         permissions::effective(is_admin, &Overrides::parse(&overrides), &permissions::defaults(state).await?);
+
     Ok(Some(User { id, handle, username, is_admin, avatar, permissions }))
 }
 
@@ -56,6 +60,7 @@ pub async fn hash_password(password: String) -> anyhow::Result<String> {
         let mut bytes = [0u8; 16];
         rand::rng().fill_bytes(&mut bytes);
         let salt = SaltString::encode_b64(&bytes).map_err(|e| anyhow::anyhow!("{e}"))?;
+
         Argon2::default()
             .hash_password(password.as_bytes(), &salt)
             .map(|h| h.to_string())
@@ -76,20 +81,25 @@ pub async fn verify_password(password: String, hash: String) -> bool {
 
 pub fn validate_credentials(username: &str, password: &str) -> ApiResult<()> {
     validate_username(username)?;
+
     if password.chars().count() < 4 {
         return Err(ApiError::bad_request("passwords need at least 4 characters"));
     }
+
     Ok(())
 }
 
 pub fn validate_username(username: &str) -> ApiResult<()> {
     let u = username.trim();
+
     if u.is_empty() || u.len() > 64 {
         return Err(ApiError::bad_request("pick a username (up to 64 characters)"));
     }
+
     if u.chars().any(|c| c.is_control()) {
         return Err(ApiError::bad_request("usernames can't contain control characters"));
     }
+
     Ok(())
 }
 
@@ -101,6 +111,7 @@ pub async fn create_session(state: &AppState, user_id: i64) -> ApiResult<String>
     let mut bytes = [0u8; 32];
     rand::rng().fill_bytes(&mut bytes);
     let token = hex::encode(bytes);
+
     sqlx::query("INSERT INTO sessions (token_hash, user_id, created_at, last_seen) VALUES (?, ?, ?, ?)")
         .bind(token_hash(&token))
         .bind(user_id)
@@ -108,6 +119,7 @@ pub async fn create_session(state: &AppState, user_id: i64) -> ApiResult<String>
         .bind(now())
         .execute(&state.db)
         .await?;
+
     Ok(token)
 }
 
@@ -140,13 +152,16 @@ pub async fn delete_session(state: &AppState, token: &str) -> ApiResult<()> {
 
 pub async fn user_from_token(state: &AppState, token: &str) -> ApiResult<Option<User>> {
     let hash = token_hash(token);
+
     let row: Option<(i64, i64)> =
         sqlx::query_as("SELECT user_id, last_seen FROM sessions WHERE token_hash = ? AND last_seen > ?")
             .bind(&hash)
             .bind(now() - SESSION_DAYS * 24 * 3600)
             .fetch_optional(&state.db)
             .await?;
+
     let Some((id, last_seen)) = row else { return Ok(None) };
+
     if now() - last_seen > 3600 {
         sqlx::query("UPDATE sessions SET last_seen = ? WHERE token_hash = ?")
             .bind(now())
@@ -154,6 +169,7 @@ pub async fn user_from_token(state: &AppState, token: &str) -> ApiResult<Option<
             .execute(&state.db)
             .await?;
     }
+
     load_user(state, id).await
 }
 

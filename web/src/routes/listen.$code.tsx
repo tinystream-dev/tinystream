@@ -9,7 +9,6 @@ import { Login } from '../components/Login'
 import { toast } from '../components/feedback'
 import { Button, Panel, Popover, Spinner } from '../components/ui'
 import { graphql } from '../gql'
-import { useAmbient } from '../lib/ambient'
 import { ApiError, request } from '../lib/api'
 import { useMe, usePeople } from '../lib/hooks'
 import { useTitle } from '../lib/title'
@@ -215,7 +214,7 @@ function Room({ client, info }: { client: ListenClient; info: { isHost: boolean;
   const queue = usePlayer((s) => s.queue)
   const index = usePlayer((s) => s.index)
   const paused = usePlayer((s) => !s.playing)
-  const tint = useAmbient(entry ? cover(entry.track.cover, 32) : null)
+  const tint = entry?.track.coverTint ?? null
   const navigate = useNavigate()
   useEffect(() => {
     if (snap.ended) void navigate({ to: '/' })

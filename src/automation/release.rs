@@ -75,11 +75,13 @@ fn strip_extension(title: &str) -> &str {
 
 pub fn attributes(title: &str) -> Attributes {
     let title = strip_extension(title);
+
     let resolution = RESOLUTION
         .captures(title)
         .or_else(|| RESOLUTION_WXH.captures(title))
         .and_then(|c| c[1].parse().ok())
         .or_else(|| UHD.is_match(title).then_some(2160));
+
     let codec = if HEVC.is_match(title) {
         Some("hevc")
     } else if AV1.is_match(title) {
@@ -89,6 +91,7 @@ pub fn attributes(title: &str) -> Attributes {
     } else {
         None
     };
+
     let source = if BLURAY.is_match(title) {
         Some("bluray")
     } else if WEB.is_match(title) {
@@ -100,6 +103,7 @@ pub fn attributes(title: &str) -> Attributes {
     } else {
         None
     };
+
     Attributes {
         group: group(title),
         resolution,
@@ -120,7 +124,9 @@ fn group(title: &str) -> Option<String> {
             return Some(g.to_string());
         }
     }
+
     let untagged = TRAILING_TAGS.replace(title, "");
+
     SCENE_GROUP.captures(&untagged).map(|c| c[1].to_string()).filter(|g| {
         !H264.is_match(g) && !HEVC.is_match(g) && !RESOLUTION.is_match(g) && !g.chars().all(|c| c.is_ascii_digit())
     })
@@ -129,6 +135,7 @@ fn group(title: &str) -> Option<String> {
 pub fn normalize(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     let mut space = true;
+
     for c in s.chars() {
         if c == '\'' || c == '’' || c == '`' {
             continue;
@@ -140,6 +147,7 @@ pub fn normalize(s: &str) -> String {
             if !space {
                 out.push(' ');
             }
+
             out.push_str("and ");
             space = true;
         } else if !space {
@@ -147,14 +155,17 @@ pub fn normalize(s: &str) -> String {
             space = true;
         }
     }
+
     out.trim_end().to_string()
 }
 
 pub fn normalized_name(title: &str) -> String {
     let mut t = strip_extension(title);
+
     while let Some(m) = LEADING_GROUP.find(t) {
         t = &t[m.end()..];
     }
+
     normalize(t)
 }
 
@@ -162,6 +173,7 @@ pub fn after_title<'a>(name: &'a str, alias: &str) -> Option<&'a str> {
     if alias.is_empty() {
         return None;
     }
+
     let rest = name.strip_prefix(alias)?;
     if rest.is_empty() { Some(rest) } else { rest.strip_prefix(' ') }
 }
@@ -176,6 +188,7 @@ pub fn is_movie(title: &str) -> bool {
 
 pub fn media_category(title: &str, episodes: &[(u32, u32)]) -> crate::metadata::MediaCategory {
     use crate::metadata::MediaCategory;
+
     if !episodes.is_empty() {
         if episodes.iter().all(|e| e.0 == 0) {
             MediaCategory::Specials
@@ -215,19 +228,24 @@ pub fn numbers(rest: &str) -> Option<Numbers> {
     let tokens: Vec<&str> = rest.split(' ').filter(|t| !t.is_empty()).collect();
     let mut n = Numbers::default();
     let mut i = 0;
+
     while i < tokens.len() {
         let t = tokens[i];
         let next = tokens.get(i + 1).copied();
+
         if matches!(t, "movie" | "ova" | "oad" | "ona" | "special" | "specials" | "sp" | "recap" | "pv" | "trailer") {
             return None;
         }
+
         if matches!(t, "batch" | "complete" | "collection") {
             n.batch = true;
         }
+
         if n.episodes.is_some() {
             i += 1;
             continue;
         }
+
         if let Some(c) = SXXEYY.captures(t) {
             let e: u32 = c[2].parse().ok()?;
             let mut end = c.get(3).and_then(|m| m.as_str().parse().ok()).filter(|x| *x > e).unwrap_or(e);
@@ -239,20 +257,25 @@ pub fn numbers(rest: &str) -> Option<Numbers> {
                 end = x;
                 i += 1;
             }
+
             n.season = c[1].parse().ok();
             n.episodes = Some((e, end));
+
             if end > e {
                 n.batch = true;
             }
+
             i += 1;
             continue;
         }
+
         if let Some(c) = SXX.captures(t) {
             n.season = c[1].parse().ok();
 
             i += 1;
             continue;
         }
+
         if let Some(c) = ORDINAL.captures(t)
             && matches!(next, Some("season" | "series"))
         {
@@ -260,6 +283,7 @@ pub fn numbers(rest: &str) -> Option<Numbers> {
             i += 2;
             continue;
         }
+
         if let Some(c) = ORDINAL.captures(t)
             && next == Some("cour")
         {
@@ -267,6 +291,7 @@ pub fn numbers(rest: &str) -> Option<Numbers> {
             i += 2;
             continue;
         }
+
         if let Some(c) = ORDINAL.captures(t) {
             let episode = next.is_some_and(|t| {
                 number(t).is_some_and(|e| e > 0 && !is_year(e))
@@ -274,15 +299,19 @@ pub fn numbers(rest: &str) -> Option<Numbers> {
                     || (matches!(t, "ep" | "episode" | "e")
                         && tokens.get(i + 2).and_then(|t| number(t)).is_some_and(|e| e > 0))
             });
+
             let season = c[1].parse().ok()?;
+
             if !episode || n.season.is_some_and(|s| s != season) {
                 return None;
             }
+
             n.season = Some(season);
             n.nonstandard = true;
             i += 1;
             continue;
         }
+
         if matches!(t, "part" | "cour")
             && let Some(p) = next.and_then(number).filter(|p| (1..10).contains(p))
         {
@@ -290,6 +319,7 @@ pub fn numbers(rest: &str) -> Option<Numbers> {
             i += 2;
             continue;
         }
+
         if matches!(t, "season" | "series")
             && let Some(s) = next.and_then(number)
         {
@@ -297,6 +327,7 @@ pub fn numbers(rest: &str) -> Option<Numbers> {
             i += 2;
             continue;
         }
+
         if matches!(t, "ep" | "episode" | "e")
             && let Some(e) = next.and_then(number)
         {
@@ -304,12 +335,14 @@ pub fn numbers(rest: &str) -> Option<Numbers> {
             i += 2;
             continue;
         }
+
         if let Some(c) = EXX.captures(t) {
             let e = c[1].parse().ok()?;
             n.episodes = Some((e, e));
             i += 1;
             continue;
         }
+
         if let Some(e) = number(t) {
             if is_year(e) && next.and_then(number).is_some() {
                 i += 1;
@@ -320,34 +353,44 @@ pub fn numbers(rest: &str) -> Option<Numbers> {
                 i += 1;
                 continue;
             }
+
             let end = next.and_then(number).filter(|x| *x > e && !is_year(*x));
             n.episodes = Some((e, end.unwrap_or(e)));
+
             if end.is_some() {
                 n.batch = true;
                 i += 1;
             }
+
             i += 1;
             continue;
         }
+
         i += 1;
     }
+
     if n.episodes.is_none() && (n.season.is_some() || n.part.is_some()) {
         n.batch = true;
     }
+
     if n.episodes.is_none() && n.season.is_none() && n.part.is_none() && !n.batch {
         return None;
     }
+
     Some(n)
 }
 
 pub fn parse_size(s: &str) -> Option<i64> {
     let s = s.trim();
+
     if let Ok(n) = s.parse::<i64>() {
         return Some(n);
     }
+
     let split = s.find(|c: char| c.is_alphabetic())?;
     let (num, unit) = s.split_at(split);
     let num: f64 = num.trim().replace(',', "").parse().ok()?;
+
     let mult: f64 = match unit.trim().to_ascii_lowercase().as_str() {
         "b" | "bytes" => 1.0,
         "kb" => 1e3,
@@ -360,6 +403,7 @@ pub fn parse_size(s: &str) -> Option<i64> {
         "tib" => 1024f64.powi(4),
         _ => return None,
     };
+
     Some((num * mult) as i64)
 }
 
@@ -403,6 +447,7 @@ mod tests {
             "Re:Zero kara Hajimeru Isekai Seikatsu",
         )
         .unwrap();
+
         assert_eq!((n.season, n.episodes), (Some(3), Some((5, 5))));
         let n = after("[Group] Show S2 - 05 [720p]", "Show").unwrap();
         assert_eq!((n.season, n.episodes), (Some(2), Some((5, 5))));
@@ -421,7 +466,9 @@ mod tests {
             assert_eq!((n.season, n.episodes), (Some(4), Some((18, 18))), "{suffix}");
             assert!(n.nonstandard);
         }
+
         assert!(!after("Show 4th Season 18", "Show").unwrap().nonstandard);
+
         for suffix in ["4th", "4th unknown 18", "4th 1080p", "4th 2024", "S2 4th 18"] {
             assert!(after(&format!("Show {suffix}"), "Show").is_none(), "{suffix}");
         }
@@ -434,6 +481,7 @@ mod tests {
             "Re:Zero kara Hajimeru Isekai Seikatsu",
         )
         .unwrap();
+
         assert_eq!((n.season, n.part, n.episodes), (Some(2), Some(2), Some((3, 3))));
         let n = after("[G] Show 2nd Cour - 05 [1080p]", "Show").unwrap();
         assert_eq!((n.season, n.part, n.episodes), (None, Some(2), Some((5, 5))));

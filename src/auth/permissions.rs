@@ -92,6 +92,7 @@ impl Permissions {
 
     fn from_config(config: &Config) -> Self {
         let mode = config.requests.mode.unwrap_or_default();
+
         Self {
             request: mode != RequestMode::Off,
             auto_approve: mode == RequestMode::Auto,
@@ -185,9 +186,11 @@ pub async fn defaults(state: &AppState) -> ApiResult<Permissions> {
         .bind(DEFAULTS_KEY)
         .fetch_optional(&state.db)
         .await?;
+
     if let Some(json) = stored {
         return Ok(serde_json::from_str(&json).unwrap_or_default());
     }
+
     let seeded = Permissions::from_config(&state.config.current());
     set_defaults(state, &seeded).await?;
     Ok(seeded)
@@ -201,25 +204,33 @@ pub async fn set_defaults(state: &AppState, p: &Permissions) -> ApiResult<()> {
     .bind(serde_json::to_string(p).map_err(anyhow::Error::from)?)
     .execute(&state.db)
     .await?;
+
     Ok(())
 }
 
 pub async fn rename_library(state: &AppState, old: &str, new: &str) -> ApiResult<()> {
     let rename = |list: &mut Vec<String>| {
         let mut changed = false;
+
         for l in list.iter_mut().filter(|l| *l == old) {
             *l = new.to_string();
             changed = true;
         }
+
         changed
     };
+
     let mut d = defaults(state).await?;
+
     if rename(&mut d.libraries) {
         set_defaults(state, &d).await?;
     }
+
     let rows: Vec<(i64, String)> = sqlx::query_as("SELECT id, permissions FROM users").fetch_all(&state.db).await?;
+
     for (id, json) in rows {
         let mut o = Overrides::parse(&json);
+
         if o.libraries.as_mut().is_some_and(rename) {
             sqlx::query("UPDATE users SET permissions = ? WHERE id = ?")
                 .bind(o.to_json())
@@ -228,5 +239,6 @@ pub async fn rename_library(state: &AppState, old: &str, new: &str) -> ApiResult
                 .await?;
         }
     }
+
     Ok(())
 }

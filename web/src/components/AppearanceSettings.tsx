@@ -3,11 +3,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { CircleAlert, Copy, GitFork, Pencil, Pin, PinOff, Plus, Scissors, Trash2, Upload, Users } from 'lucide-react'
 import { type CSSProperties, useEffect, useRef, useState } from 'react'
-import { graphql } from '../gql'
-import type { AppearanceSettingsInput, ComponentStyle, SchemeChoiceInput, SchemeMode } from '../gql/graphql'
-import { request } from '../lib/api'
-import type { Scheme } from '../lib/appearance'
-import { useMe } from '../lib/hooks'
 import {
   SEEDS,
   type SeedName,
@@ -19,7 +14,12 @@ import {
   derive,
   parseColor,
   toRecord,
-} from '../lib/theme'
+} from '@tinystream/shared/theme'
+import { graphql } from '../gql'
+import type { AppearanceSettingsInput, ComponentStyle, SchemeChoiceInput, SchemeMode } from '../gql/graphql'
+import { request } from '../lib/api'
+import type { Scheme } from '../lib/appearance'
+import { useMe } from '../lib/hooks'
 import { ask, toast, toastError } from './feedback'
 import { Card, Row } from './SettingsKit'
 import { Squircle } from './Squircle'

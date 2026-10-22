@@ -39,6 +39,7 @@ pub fn is_audio(path: &Path) -> bool {
 pub fn release_dir(path: &Path) -> (PathBuf, Option<i64>) {
     let dir = path.parent().unwrap_or(Path::new("/"));
     let name = dir.file_name().unwrap_or_default().to_string_lossy();
+
     match DISC_FOLDER.captures(&name) {
         Some(c) => (dir.parent().unwrap_or(dir).to_path_buf(), c["n"].parse().ok()),
         None => (dir.to_path_buf(), None),
@@ -145,6 +146,7 @@ pub fn read(path: &Path) -> anyhow::Result<Tags> {
     let props = file.properties();
     let tag = file.primary_tag().or_else(|| file.first_tag());
     let one = |key: ItemKey| tag.and_then(|t| t.get_string(key)).and_then(clean);
+
     let many = |key: ItemKey| -> Vec<String> {
         tag.map(|t| t.get_strings(key).filter_map(clean).collect()).unwrap_or_default()
     };
@@ -155,18 +157,23 @@ pub fn read(path: &Path) -> anyhow::Result<Tags> {
 
     let artist_values = many(ItemKey::TrackArtist);
     let mut artists = many(ItemKey::TrackArtists);
+
     if artists.is_empty() {
         artists = artist_values.clone();
     }
+
     let artist = match artist_values.len() {
         0 => artists.join(", "),
         _ => artist_values.join(", "),
     };
+
     let album_artist_values = many(ItemKey::AlbumArtist);
     let mut album_artists = many(ItemKey::AlbumArtists);
+
     if album_artists.is_empty() {
         album_artists = album_artist_values.clone();
     }
+
     let album_artist = (!album_artist_values.is_empty()).then(|| album_artist_values.join(", "));
 
     let recorded = one(ItemKey::RecordingDate).or_else(|| one(ItemKey::Year));
@@ -237,10 +244,12 @@ pub fn read(path: &Path) -> anyhow::Result<Tags> {
 pub fn embedded_cover(path: &Path) -> Option<(Vec<u8>, String)> {
     let file = Probe::open(path).ok()?.guess_file_type().ok()?.read().ok()?;
     let pictures: Vec<_> = file.tags().iter().flat_map(|t| t.pictures()).collect();
+
     let pic = pictures
         .iter()
         .find(|p| p.pic_type() == lofty::picture::PictureType::CoverFront)
         .or_else(|| pictures.first())?;
+
     let mime = pic.mime_type().map(|m| m.as_str().to_string()).unwrap_or_else(|| "image/jpeg".into());
     Some((pic.data().to_vec(), mime))
 }
@@ -257,16 +266,21 @@ fn walk(root: &Path, download_dirs: &[PathBuf], out: &mut Vec<Found>) {
         tracing::warn!("can't read {} (permissions?)", root.display());
         return;
     };
+
     let mut entries: Vec<_> = entries.filter_map(Result::ok).collect();
     entries.sort_by_key(|e| e.file_name());
+
     for entry in entries {
         if entry.file_name().to_string_lossy().starts_with('.') {
             continue;
         }
+
         let path = entry.path();
         let Ok(ft) = entry.file_type() else { continue };
+
         if ft.is_dir() || (ft.is_symlink() && path.is_dir()) {
             let canonical = path.canonicalize().unwrap_or_else(|_| path.clone());
+
             if !download_dirs.iter().any(|d| d == &canonical) {
                 walk(&path, download_dirs, out);
             }
@@ -282,10 +296,12 @@ fn read_all(files: Vec<Found>) -> Vec<(Found, anyhow::Result<Tags>)> {
     let chunk = files.len().div_ceil(threads).max(1);
     let mut files = files;
     let mut chunks = Vec::new();
+
     while !files.is_empty() {
         let rest = files.split_off(chunk.min(files.len()));
         chunks.push(std::mem::replace(&mut files, rest));
     }
+
     std::thread::scope(|s| {
         let handles: Vec<_> = chunks
             .into_iter()
@@ -300,6 +316,7 @@ fn read_all(files: Vec<Found>) -> Vec<(Found, anyhow::Result<Tags>)> {
                 })
             })
             .collect();
+
         handles.into_iter().flat_map(|h| h.join().unwrap_or_default()).collect()
     })
 }
@@ -310,8 +327,10 @@ fn json<T: Serialize>(v: &T) -> String {
 
 pub async fn scan(state: &AppState, name: &str, root: &Path, download_dirs: Vec<PathBuf>) -> anyhow::Result<()> {
     let started = std::time::Instant::now();
+
     let found = {
         let root = root.to_path_buf();
+
         tokio::task::spawn_blocking(move || {
             let mut out = Vec::new();
             walk(&root, &download_dirs, &mut out);
@@ -319,9 +338,12 @@ pub async fn scan(state: &AppState, name: &str, root: &Path, download_dirs: Vec<
         })
         .await?
     };
+
     let db = &state.db;
+
     let known: Vec<(i64, String, i64, i64)> =
         sqlx::query_as("SELECT id, path, size, mtime FROM tracks WHERE library = ?").bind(name).fetch_all(db).await?;
+
     if found.is_empty() && !known.is_empty() {
         tracing::warn!(
             "library {name:?}: {} has no music; if it's a drive that isn't mounted, that's why. \
@@ -329,12 +351,16 @@ pub async fn scan(state: &AppState, name: &str, root: &Path, download_dirs: Vec<
             root.display(),
             known.len()
         );
+
         return Ok(());
     }
+
     let unchanged: HashMap<&str, (i64, i64)> = known.iter().map(|(_, p, s, m)| (p.as_str(), (*s, *m))).collect();
     let present: HashSet<String> = found.iter().map(|f| f.path.to_string_lossy().to_string()).collect();
+
     let (same, changed): (Vec<Found>, Vec<Found>) =
         found.into_iter().partition(|f| unchanged.get(f.path.to_string_lossy().as_ref()) == Some(&(f.size, f.mtime)));
+
     let read = tokio::task::spawn_blocking(move || read_all(changed)).await?;
     let gone: Vec<i64> = known.iter().filter(|(_, p, ..)| !present.contains(p)).map(|(id, ..)| *id).collect();
 
@@ -342,6 +368,7 @@ pub async fn scan(state: &AppState, name: &str, root: &Path, download_dirs: Vec<
     let mut tx = db.begin().await?;
     let mut skipped = Vec::new();
     let mut new_tracks = 0usize;
+
     for (f, tags) in &read {
         let t = match tags {
             Ok(t) => t,
@@ -350,6 +377,7 @@ pub async fn scan(state: &AppState, name: &str, root: &Path, download_dirs: Vec<
                 continue;
             },
         };
+
         let inserted: bool = sqlx::query_scalar(
             "INSERT INTO tracks (library, path, size, mtime, album_key, title, artist, artists, artist_sort, album,
                 album_artist, album_artists, album_artist_sort, album_sort, composers, compilation, disc, disc_subtitle,
@@ -426,15 +454,19 @@ pub async fn scan(state: &AppState, name: &str, root: &Path, download_dirs: Vec<
         .bind(ts)
         .fetch_one(&mut *tx)
         .await?;
+
         if inserted {
             new_tracks += 1;
         }
     }
+
     for chunk in gone.chunks(500) {
         let ids = chunk.iter().map(i64::to_string).collect::<Vec<_>>().join(",");
         sqlx::query(sqlx::AssertSqlSafe(format!("DELETE FROM tracks WHERE id IN ({ids})"))).execute(&mut *tx).await?;
     }
+
     let changed = !read.is_empty() || !gone.is_empty();
+
     if changed {
         derive(&mut tx, name, ts).await?;
     }
@@ -443,8 +475,10 @@ pub async fn scan(state: &AppState, name: &str, root: &Path, download_dirs: Vec<
         .bind(name)
         .execute(&mut *tx)
         .await?;
+
     for (path, reason) in &skipped {
         tracing::warn!("skipped {}: {reason}", path.display());
+
         sqlx::query("INSERT OR REPLACE INTO skipped (path, library, reason, seen_at) VALUES (?, ?, ?, ?)")
             .bind(path.to_string_lossy().to_string())
             .bind(name)
@@ -453,6 +487,7 @@ pub async fn scan(state: &AppState, name: &str, root: &Path, download_dirs: Vec<
             .execute(&mut *tx)
             .await?;
     }
+
     tx.commit().await?;
 
     let (tracks, albums): (i64, i64) = sqlx::query_as(
@@ -461,6 +496,7 @@ pub async fn scan(state: &AppState, name: &str, root: &Path, download_dirs: Vec<
     .bind(name)
     .fetch_one(db)
     .await?;
+
     tracing::info!(
         "scanned {name:?} in {:.1?}: {albums} albums, {tracks} tracks ({} read, {new_tracks} new, {} removed, {} unchanged), {} skipped",
         started.elapsed(),
@@ -469,15 +505,18 @@ pub async fn scan(state: &AppState, name: &str, root: &Path, download_dirs: Vec<
         same.len(),
         skipped.len(),
     );
+
     state.events.send(Event::ScanFinished {
         library: name.to_string(),
         items: albums as usize,
         media: tracks as usize,
         skipped: skipped.len(),
     });
+
     if changed {
         state.events.send(Event::LibraryChanged { library: name.to_string() });
     }
+
     crate::music::loudness::wake(state);
     Ok(())
 }
@@ -518,12 +557,14 @@ fn list(s: &str) -> Vec<String> {
 
 fn most_common<'a>(values: impl Iterator<Item = &'a str>) -> Option<&'a str> {
     let mut counts: Vec<(&str, usize)> = Vec::new();
+
     for v in values {
         match counts.iter_mut().find(|(k, _)| *k == v) {
             Some((_, n)) => *n += 1,
             None => counts.push((v, 1)),
         }
     }
+
     counts.into_iter().rev().max_by_key(|(_, n)| *n).map(|(v, _)| v)
 }
 
@@ -548,6 +589,7 @@ async fn derive(tx: &mut sqlx::SqliteConnection, library: &str, ts: i64) -> anyh
     .await?;
 
     let mut groups: Vec<(&str, Vec<&Row>)> = Vec::new();
+
     for r in &rows {
         match groups.last_mut() {
             Some((k, g)) if *k == r.album_key => g.push(r),
@@ -556,19 +598,24 @@ async fn derive(tx: &mut sqlx::SqliteConnection, library: &str, ts: i64) -> anyh
     }
 
     let mut artists: HashMap<String, ArtistInfo> = HashMap::new();
+
     let mut note = |name: &str, sort: Option<&String>, mbid: Option<&String>| {
         let key = name.to_lowercase();
         let a = artists.entry(key).or_default();
+
         if a.name.is_empty() {
             a.name = name.to_string();
         }
+
         if a.sort.is_none() {
             a.sort = sort.cloned();
         }
+
         if a.mbid.is_none() {
             a.mbid = mbid.cloned();
         }
     };
+
     let mut album_links: Vec<(i64, Vec<String>)> = Vec::new();
     let mut track_links: Vec<(i64, Vec<String>, Vec<String>)> = Vec::new();
     let mut keep_albums = Vec::new();
@@ -579,6 +626,7 @@ async fn derive(tx: &mut sqlx::SqliteConnection, library: &str, ts: i64) -> anyh
         let tagged_artist = most_common(tracks.iter().filter_map(|t| t.album_artist.as_deref()));
         let flagged = tracks.iter().any(|t| t.compilation);
         let one_artist = tracks.iter().all(|t| t.artist == first.artist);
+
         let (artist, mut album_artists, compilation) = match tagged_artist {
             Some(a) => {
                 let names = tracks
@@ -587,6 +635,7 @@ async fn derive(tx: &mut sqlx::SqliteConnection, library: &str, ts: i64) -> anyh
                     .map(|t| list(&t.album_artists))
                     .filter(|l| !l.is_empty())
                     .unwrap_or_else(|| vec![a.to_string()]);
+
                 (a.to_string(), names, flagged)
             },
             None if !flagged && one_artist && !first.artist.is_empty() => {
@@ -595,11 +644,14 @@ async fn derive(tx: &mut sqlx::SqliteConnection, library: &str, ts: i64) -> anyh
             },
             None => (VARIOUS_ARTISTS.to_string(), vec![VARIOUS_ARTISTS.to_string()], true),
         };
+
         if album_artists.is_empty() {
             album_artists.push(artist.clone());
         }
+
         let source = tracks.iter().find(|t| t.album_artist.as_deref() == Some(artist.as_str())).unwrap_or(&first);
         let mbids = list(&source.album_artist_mbids);
+
         for (i, a) in album_artists.iter().enumerate() {
             let sort = (album_artists.len() == 1).then_some(source.album_artist_sort.as_ref()).flatten();
             note(a, sort, mbids.get(i));
@@ -607,6 +659,7 @@ async fn derive(tx: &mut sqlx::SqliteConnection, library: &str, ts: i64) -> anyh
 
         let mut genres = Vec::new();
         let mut discs: Vec<(i64, String)> = Vec::new();
+
         for t in tracks.iter() {
             for g in list(&t.genres) {
                 if !genres.contains(&g) {
@@ -619,10 +672,12 @@ async fn derive(tx: &mut sqlx::SqliteConnection, library: &str, ts: i64) -> anyh
                 discs.push((d, s.clone()));
             }
         }
+
         let dir = release_dir(Path::new(&first.path)).0;
         let cover = tracks.iter().find(|t| t.embedded_art).map(|t| t.id);
         let sort_title = first.album_sort.clone().unwrap_or_else(|| parse::sort_title(&title));
         let added = tracks.iter().map(|t| t.added_at).min().unwrap_or(ts);
+
         let album_id: i64 = sqlx::query_scalar(
             "INSERT INTO albums (library, key, title, sort_title, artist, year, release_date, original_date, genres,
                 release_types, labels, disc_titles, compilation, mbid, dir, cover_track, added_at)
@@ -662,33 +717,42 @@ async fn derive(tx: &mut sqlx::SqliteConnection, library: &str, ts: i64) -> anyh
         .bind(added)
         .fetch_one(&mut *tx)
         .await?;
+
         keep_albums.push(album_id);
         album_links.push((album_id, album_artists));
 
         for t in tracks.iter() {
             let mut names = list(&t.artists);
+
             if names.is_empty() && !t.artist.is_empty() {
                 names.push(t.artist.clone());
             }
+
             let mbids = list(&t.artist_mbids);
+
             for (i, a) in names.iter().enumerate() {
                 let sort = (names.len() == 1).then_some(t.artist_sort.as_ref()).flatten();
                 note(a, sort, mbids.get(i));
             }
+
             let composers = list(&t.composers);
+
             for c in &composers {
                 note(c, None, None);
             }
+
             sqlx::query("UPDATE tracks SET album_id = ? WHERE id = ?")
                 .bind(album_id)
                 .bind(t.id)
                 .execute(&mut *tx)
                 .await?;
+
             track_links.push((t.id, names, composers));
         }
     }
 
     let ids = keep_albums.iter().map(i64::to_string).collect::<Vec<_>>().join(",");
+
     sqlx::query(sqlx::AssertSqlSafe(format!(
         "DELETE FROM albums WHERE library = ? AND id NOT IN ({})",
         if ids.is_empty() { "-1".to_string() } else { ids }
@@ -698,6 +762,7 @@ async fn derive(tx: &mut sqlx::SqliteConnection, library: &str, ts: i64) -> anyh
     .await?;
 
     let mut artist_ids: HashMap<String, i64> = HashMap::new();
+
     for (key, a) in &artists {
         let id: i64 = sqlx::query_scalar(
             "INSERT INTO artists (library, key, name, sort_name, mbid, added_at) VALUES (?, ?, ?, ?, ?, ?)
@@ -713,9 +778,12 @@ async fn derive(tx: &mut sqlx::SqliteConnection, library: &str, ts: i64) -> anyh
         .bind(ts)
         .fetch_one(&mut *tx)
         .await?;
+
         artist_ids.insert(key.clone(), id);
     }
+
     let ids = artist_ids.values().map(i64::to_string).collect::<Vec<_>>().join(",");
+
     sqlx::query(sqlx::AssertSqlSafe(format!(
         "DELETE FROM artists WHERE library = ? AND id NOT IN ({})",
         if ids.is_empty() { "-1".to_string() } else { ids }
@@ -728,10 +796,12 @@ async fn derive(tx: &mut sqlx::SqliteConnection, library: &str, ts: i64) -> anyh
         .bind(library)
         .execute(&mut *tx)
         .await?;
+
     sqlx::query("DELETE FROM track_artists WHERE track_id IN (SELECT id FROM tracks WHERE library = ?)")
         .bind(library)
         .execute(&mut *tx)
         .await?;
+
     for (album_id, names) in &album_links {
         for (i, n) in names.iter().enumerate() {
             sqlx::query("INSERT OR IGNORE INTO album_artists (album_id, artist_id, position) VALUES (?, ?, ?)")
@@ -742,6 +812,7 @@ async fn derive(tx: &mut sqlx::SqliteConnection, library: &str, ts: i64) -> anyh
                 .await?;
         }
     }
+
     for (track_id, names, composers) in &track_links {
         for (role, list) in [("artist", names), ("composer", composers)] {
             for (i, n) in list.iter().enumerate() {
@@ -757,6 +828,7 @@ async fn derive(tx: &mut sqlx::SqliteConnection, library: &str, ts: i64) -> anyh
             }
         }
     }
+
     Ok(())
 }
 

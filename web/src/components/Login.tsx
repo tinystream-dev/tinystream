@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useNavigate } from '@tanstack/react-router'
 import { ArrowLeft, KeyRound, UserRound } from 'lucide-react'
 import { type FormEvent, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { flushSync } from 'react-dom'
 import { graphql } from '../gql'
 import { request } from '../lib/api'
+import { useEmailOn } from '../lib/hooks'
 import { getCredential } from '../lib/webauthn'
 import { Avatar } from './Avatar'
 import { Logo } from './Logo'
@@ -306,10 +308,21 @@ function Unlock({ profile, onBack, onDone }: { profile: Profile; onBack: () => v
                 Use your passkey
               </Button>
             )}
+            <Forgot />
           </form>
         )}
       </Panel>
     </div>
+  )
+}
+
+function Forgot() {
+  const navigate = useNavigate()
+  if (!useEmailOn()) return null
+  return (
+    <Button type="button" variant="plain" size="sm" className="w-full" onClick={() => void navigate({ to: '/reset' })}>
+      Forgot your password?
+    </Button>
   )
 }
 
@@ -381,6 +394,7 @@ function UsernameForm({ setup, onDone, onBack }: { setup: boolean; onDone: () =>
           <Button variant="primary" size="lg" className="w-full" disabled={busy || !username || !password}>
             {setup ? 'Create account' : 'Sign in'}
           </Button>
+          {!setup && <Forgot />}
         </form>
         {!setup && (
           <>

@@ -1,0 +1,24 @@
+{
+  "name": "@tinystream/shared",
+  "version": "0.37.2",
+  "license": "AGPL-3.0-or-later",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./schema.graphql": "./schema.graphql",
+    "./fragments.graphql": "./fragments.graphql",
+    "./*": "./src/*.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "bun test",
+    "codegen": "graphql-codegen"
+  },
+  "devDependencies": {
+    "@graphql-codegen/cli": "^7.4.3",
+    "@graphql-codegen/typescript": "^6.1.0",
+    "@types/bun": "^1.3.14",
+    "graphql": "^17.0.2",
+    "typescript": "^7.0.2"
+  }
+}

@@ -1,0 +1,4 @@
+CREATE TABLE image_tints (
+    key TEXT PRIMARY KEY,
+    tint TEXT NOT NULL
+) WITHOUT ROWID;

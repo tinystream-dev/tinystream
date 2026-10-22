@@ -84,19 +84,24 @@ impl Color {
     /// `#rrggbb`, or `rgb(r g b / a)` for anything see-through.
     pub fn parse(s: &str) -> Option<Self> {
         let s = s.trim();
+
         if let Some(hex) = s.strip_prefix('#') {
             if hex.len() != 6 || !hex.bytes().all(|b| b.is_ascii_hexdigit()) {
                 return None;
             }
+
             return u32::from_str_radix(hex, 16).ok().map(Self::hex);
         }
+
         let inner = s.strip_prefix("rgb(")?.strip_suffix(')')?;
         let (channels, alpha) = inner.split_once('/')?;
         let mut channels = channels.split_whitespace().map(|c| c.parse::<u8>().ok());
         let (r, g, b) = (channels.next()??, channels.next()??, channels.next()??);
+
         if channels.next().is_some() {
             return None;
         }
+
         let a = parse_alpha(alpha.trim())?;
         Some(Self { r, g, b, a })
     }
@@ -116,9 +121,11 @@ impl Color {
 /// `0.055` → 55. At most three decimals, so every value has one spelling.
 fn parse_alpha(s: &str) -> Option<u16> {
     let (whole, frac) = s.split_once('.').unwrap_or((s, ""));
+
     if frac.len() > 3 || !whole.bytes().chain(frac.bytes()).all(|b| b.is_ascii_digit()) || whole.is_empty() {
         return None;
     }
+
     let whole: u16 = whole.parse().ok()?;
     let frac: u16 = if frac.is_empty() { 0 } else { format!("{frac:0<3}").parse().ok()? };
     let a = whole.checked_mul(1000)?.checked_add(frac)?;
@@ -130,7 +137,9 @@ impl fmt::Display for Color {
         if self.opaque() {
             return write!(f, "#{:02x}{:02x}{:02x}", self.r, self.g, self.b);
         }
+
         let alpha = format!("{:03}", self.a);
+
         match alpha.trim_end_matches('0') {
             "" => write!(f, "rgb({} {} {} / 0)", self.r, self.g, self.b),
             alpha => write!(f, "rgb({} {} {} / 0.{alpha})", self.r, self.g, self.b),
@@ -172,10 +181,13 @@ impl Scheme {
         let [canvas, ink, accent, danger, ok, info, warn, highlight, social] = self.seeds;
         let dark = self.dark();
         let glow = if dark { Color::WHITE } else { Color::BLACK };
+
         let [raised, panel, float] =
             if dark { [30, 57, 91] } else { [350, 650, 1000] }.map(|t| canvas.mix(Color::WHITE, t));
+
         let on_accent =
             if accent.luma().abs_diff(canvas.luma()) >= accent.luma().abs_diff(ink.luma()) { canvas } else { ink };
+
         let mut t = [
             canvas,
             raised,
@@ -206,25 +218,31 @@ impl Scheme {
             glow,
             Color::BLACK,
         ];
+
         for (&i, &c) in &self.overrides {
             t[i] = c;
         }
+
         t
     }
 
     /// `ts1.<payload>`: what the scheme is, without its name.
     pub fn code(&self) -> String {
         let mut bytes = Vec::with_capacity(SEEDS.len() * 3 + self.overrides.len() * 6);
+
         for c in self.seeds {
             bytes.extend([c.r, c.g, c.b]);
         }
+
         for (&i, &c) in &self.overrides {
             let alpha = if c.opaque() { 0 } else { 0x80 };
             bytes.extend([i as u8 | alpha, c.r, c.g, c.b]);
+
             if !c.opaque() {
                 bytes.extend(c.a.to_be_bytes());
             }
         }
+
         format!("ts1.{}", URL_SAFE_NO_PAD.encode(bytes))
     }
 
@@ -238,16 +256,21 @@ impl Scheme {
     pub fn decode(code: &str) -> Result<(Scheme, Option<String>), CodeError> {
         let mut parts = code.trim().split('.');
         let version = parts.next().unwrap_or_default();
+
         if version != "ts1" {
             let newer = version.strip_prefix("ts").is_some_and(|v| v.parse::<u32>().is_ok_and(|v| v > 1));
             return Err(if newer { CodeError::Version(version.into()) } else { CodeError::NotACode });
         }
+
         let payload = parts.next().ok_or(CodeError::NotACode)?;
         let name = parts.next();
+
         if parts.next().is_some() {
             return Err(CodeError::Damaged);
         }
+
         let bytes = URL_SAFE_NO_PAD.decode(payload).map_err(|_| CodeError::Damaged)?;
+
         let name = match name {
             Some(n) => {
                 let raw = URL_SAFE_NO_PAD.decode(n).map_err(|_| CodeError::Damaged)?;
@@ -256,43 +279,56 @@ impl Scheme {
             },
             None => None,
         };
+
         Ok((Self::from_bytes(&bytes)?, name))
     }
 
     fn from_bytes(bytes: &[u8]) -> Result<Self, CodeError> {
         let seeds_len = SEEDS.len() * 3;
+
         if bytes.len() < seeds_len {
             return Err(CodeError::Damaged);
         }
+
         let mut seeds = [Color::BLACK; SEEDS.len()];
+
         for (seed, &[r, g, b]) in seeds.iter_mut().zip(bytes[..seeds_len].as_chunks::<3>().0) {
             *seed = Color::rgb(r, g, b);
         }
+
         let mut overrides = BTreeMap::new();
         let mut rest = &bytes[seeds_len..];
         let mut last = None;
+
         while let [head, r, g, b, tail @ ..] = rest {
             let index = (head & 0x7F) as usize;
-            // In order and each once, so a scheme has exactly one code.
+
             if index >= TOKENS.len() || last.is_some_and(|l| index <= l) {
                 return Err(CodeError::Damaged);
             }
+
             let mut color = Color::rgb(*r, *g, *b);
             rest = tail;
+
             if head & 0x80 != 0 {
                 let [hi, lo, tail @ ..] = rest else { return Err(CodeError::Damaged) };
                 color.a = u16::from_be_bytes([*hi, *lo]);
+
                 if color.a >= OPAQUE {
                     return Err(CodeError::Damaged);
                 }
+
                 rest = tail;
             }
+
             overrides.insert(index, color);
             last = Some(index);
         }
+
         if !rest.is_empty() {
             return Err(CodeError::Damaged);
         }
+
         Ok(Self { seeds, overrides })
     }
 }
@@ -314,12 +350,13 @@ fn builtin(id: &'static str, name: &'static str, seeds: [u32; 9], overrides: &[(
 
 /// The schemes tinystream ships. Read-only; their codes never change.
 pub fn builtins() -> [Builtin; 4] {
-    // Fixed accents that read well on any dark canvas.
     let accents = [0xEB8A7A, 0x8FC79A, 0x7DD3FC, 0xFCD34D, 0xF9A8D4, 0xC4B5FD];
+
     let dark = |canvas: u32, ink: u32| {
         let [d, o, i, w, h, s] = accents;
         [canvas, ink, ink, d, o, i, w, h, s]
     };
+
     [
         builtin(
             "grey",
@@ -384,6 +421,7 @@ const PAIRS: [(&str, &str, f64); 11] = [
 /// Pairs that are hard to read. Only advice: nothing is refused for it.
 pub fn contrast_warnings(tokens: &Tokens) -> Vec<ContrastWarning> {
     let get = |name| tokens[token_index(name).expect("a token")];
+
     PAIRS
         .iter()
         .filter_map(|&(fg, bg, minimum)| {
@@ -406,6 +444,7 @@ fn luminance(c: Color) -> f64 {
         let v = v as f64 / 255.0;
         if v <= 0.04045 { v / 12.92 } else { ((v + 0.055) / 1.055).powf(2.4) }
     };
+
     0.2126 * lin(c.r) + 0.7152 * lin(c.g) + 0.0722 * lin(c.b)
 }
 
@@ -430,6 +469,7 @@ mod tests {
     #[test]
     fn grey_is_the_old_palette() {
         let code = "ts1.GRkZ6-vq6-vq64p6j8eafdP8_NNN-ajUxLX9BZubmAZubmsM____ETi9-BP95ooU-78k";
+
         assert_eq!(
             rendered(&Scheme::decode(code).unwrap().0),
             [
@@ -475,12 +515,15 @@ mod tests {
             ("light", "ts1.8fHvHBwbHBwbwkEtL4pGC3-4qGoAwDZ-bU_WBoWFgw"),
             ("custom", "ts1.GRkZ6-vq6-vq64p6j8eafdP8_NNN-ajUxLX9hwAAAAAqDQAAAJr_ABIC6w"),
         ];
+
         let mut custom = grey();
+
         custom.overrides = BTreeMap::from([
             (token_index("line").unwrap(), Color::BLACK.alpha(42)),
             (token_index("on-accent").unwrap(), Color::rgb(0, 0, 0)),
             (token_index("glow").unwrap(), Color { r: 255, g: 0, b: 18, a: 747 }),
         ]);
+
         for (id, code) in vectors {
             let scheme = if id == "custom" { custom.clone() } else { find_builtin(id).unwrap().scheme };
             assert_eq!(scheme.code(), code, "{id}");
@@ -489,9 +532,11 @@ mod tests {
             assert_eq!(name, None);
             assert_eq!(decoded.code(), code, "{id}");
         }
+
         let tokens = Scheme::decode(vectors[4].1).unwrap().0.tokens();
         assert_eq!(tokens[token_index("line").unwrap()].to_string(), "rgb(0 0 0 / 0.042)");
         assert_eq!(tokens[token_index("glow").unwrap()].to_string(), "rgb(255 0 18 / 0.747)");
+
         assert_eq!(
             rendered(&Scheme::decode(vectors[3].1).unwrap().0)[..7],
             [
@@ -528,11 +573,11 @@ mod tests {
         assert_eq!(Scheme::decode(&format!("{code}=")), Err(CodeError::Damaged));
         assert_eq!(Scheme::decode(&format!("{code}.bmFtZQ.x")), Err(CodeError::Damaged));
         let mut bytes = URL_SAFE_NO_PAD.decode(&code[4..]).unwrap();
-        // Two overrides out of order.
+
         let first = 27;
         bytes.swap(first, first + 4);
         assert!(Scheme::decode(&format!("ts1.{}", URL_SAFE_NO_PAD.encode(&bytes))).is_err());
-        // An alpha that says opaque.
+
         let mut bytes = URL_SAFE_NO_PAD.decode(&code[4..]).unwrap();
         bytes.extend([0x80 | 27, 0, 0, 0, 0x03, 0xE8]);
         assert!(Scheme::decode(&format!("ts1.{}", URL_SAFE_NO_PAD.encode(&bytes))).is_err());
@@ -543,7 +588,9 @@ mod tests {
         for s in ["#00ff7f", "rgb(1 2 3 / 0.5)", "rgb(255 255 255 / 0.055)", "rgb(0 0 0 / 0)"] {
             assert_eq!(Color::parse(s).unwrap().to_string(), s);
         }
+
         assert_eq!(Color::parse("rgb(0 0 0 / 1)"), Some(Color::BLACK));
+
         for s in ["#fff", "#gggggg", "rgb(0 0 / 0.5)", "rgb(0 0 0 / 0.0555)", "rgb(0 0 0 / 1.5)", "red"] {
             assert_eq!(Color::parse(s), None, "{s}");
         }

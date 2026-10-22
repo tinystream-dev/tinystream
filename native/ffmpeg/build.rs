@@ -4,30 +4,32 @@ use native_support::Build;
 
 fn main() {
     let version = env!("CARGO_PKG_VERSION").strip_suffix(".0").unwrap_or(env!("CARGO_PKG_VERSION"));
-    let b = Build::new(
-        "ffmpeg",
-        version,
-        &["nasm", "va", "dav1d", "x264", "zimg", "freetype", "fribidi", "harfbuzz", "ass", "opus", "mp3lame"],
-    );
+
+    let apple = std::env::var("CARGO_CFG_TARGET_VENDOR").is_ok_and(|v| v == "apple");
+
+    let mut deps = vec!["nasm", "dav1d", "x264", "zimg", "opus", "mp3lame"];
+
+    if !apple {
+        deps.push("va");
+    }
+
+    let b = Build::new("ffmpeg", version, &deps);
+
     let lame = std::env::var("DEP_MP3LAME_PREFIX").expect("no metadata from lame-src");
-    let args = [
+
+    let mut args = vec![
         "--pkg-config-flags=--static".to_string(),
         format!("--extra-cflags={} -I{lame}/include", b.cflags()),
         format!("--extra-ldflags=-L{lame}/lib"),
         "--enable-static".into(),
         "--disable-shared".into(),
         "--enable-pic".into(),
-        "--extra-libs=-lstdc++ -lm".into(),
+        format!("--extra-libs=-l{} -lm", if apple { "c++" } else { "stdc++" }),
         "--enable-gpl".into(),
         "--enable-libx264".into(),
         "--enable-libdav1d".into(),
-        "--enable-vaapi".into(),
         "--disable-libdrm".into(),
         "--enable-libzimg".into(),
-        "--enable-libass".into(),
-        "--enable-libfreetype".into(),
-        "--enable-libfribidi".into(),
-        "--enable-libharfbuzz".into(),
         "--enable-libopus".into(),
         "--enable-libmp3lame".into(),
         "--disable-programs".into(),
@@ -39,10 +41,19 @@ fn main() {
         "--enable-optimizations".into(),
         "--enable-runtime-cpudetect".into(),
     ];
+
+    if apple {
+        args.push("--enable-videotoolbox".into());
+    } else {
+        args.push("--enable-vaapi".into());
+    }
+
     let url = format!("https://ffmpeg.org/releases/ffmpeg-{version}.tar.gz");
+
     b.once(&args.join(" "), |b| {
         b.fetch(&url, &[]);
-        b.configure(&args.each_ref().map(String::as_str));
+        b.configure(&args.iter().map(String::as_str).collect::<Vec<_>>());
     });
+
     b.licenses(&url, &["LICENSE.md", "COPYING.GPLv2", "COPYING.LGPLv2.1"]);
 }

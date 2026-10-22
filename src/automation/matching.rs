@@ -79,16 +79,21 @@ impl Matcher {
         numbering: Numbering,
     ) -> Self {
         let mut aliases: Vec<(String, Option<Scope>)> = Vec::new();
+
         let mut push = |title: &str, scope: Option<Scope>| {
             let n = release::normalize(title);
+
             if n.len() >= 2 && !aliases.iter().any(|(a, _)| *a == n) {
                 aliases.push((n, scope));
             }
         };
+
         for t in show_titles {
             push(t, None);
         }
+
         let mut parts: BTreeMap<u32, Vec<Scope>> = BTreeMap::new();
+
         for SeasonTitles { scope, titles } in season_titles {
             if scope.offset > 0 {
                 parts.entry(scope.season).or_default().push(*scope);
@@ -97,9 +102,11 @@ impl Matcher {
                 push(t, (scope.season > 1 || scope.offset > 0).then_some(*scope));
             }
         }
+
         for p in parts.values_mut() {
             p.sort_by_key(|s| s.offset);
         }
+
         let listed = aliases.clone();
         aliases.sort_by_key(|(a, _)| std::cmp::Reverse(a.len()));
         Self { aliases, listed, seasons, parts, scheduled: BTreeMap::new(), numbering }
@@ -111,8 +118,10 @@ impl Matcher {
                 .bind(series_id)
                 .fetch_one(db)
                 .await?;
+
         let folder =
             std::path::Path::new(&path).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+
         let (folder_title, _) = crate::library::parse::title_and_year(&folder);
         let mut show: Vec<String> = vec![title, folder_title];
         show.extend(serde_json::from_str::<Vec<String>>(&aliases).unwrap_or_default());
@@ -124,28 +133,35 @@ impl Matcher {
         .bind(series_id)
         .fetch_all(db)
         .await?;
+
         let known: Vec<(i64, i64)> =
             sqlx::query_as("SELECT season, MAX(episode) FROM episodes WHERE series_id = ? GROUP BY season")
                 .bind(series_id)
                 .fetch_all(db)
                 .await?;
+
         let mut seasons = BTreeMap::new();
         let mut season_titles = Vec::new();
+
         for (season, t, aliases, episodes, parts) in rows {
             let season = season as u32;
             let mut titles: Vec<String> = serde_json::from_str(&aliases).unwrap_or_default();
             titles.extend(t);
             season_titles.push(SeasonTitles { scope: Scope::season(season), titles });
             let parts: Vec<crate::metadata::PartSchedule> = serde_json::from_str(&parts).unwrap_or_default();
+
             for p in parts {
                 let scope = Scope { season, offset: p.offset as u32, episodes: p.episodes.map(|e| e as u32) };
                 season_titles.push(SeasonTitles { scope, titles: p.aliases });
             }
+
             seasons.insert(season, episodes.map(|e| e as u32));
         }
+
         for &(season, max) in &known {
             seasons.entry(season as u32).or_insert(Some(max as u32));
         }
+
         let mut matcher = Self::new(&show, &season_titles, seasons, Numbering::parse(&numbering));
         matcher.scheduled = known.into_iter().map(|(s, max)| (s as u32, max as u32)).collect();
         Ok(matcher)
@@ -155,25 +171,31 @@ impl Matcher {
         let ranked = |keep: &dyn Fn(&Option<Scope>) -> bool| -> Vec<String> {
             let mut group: Vec<String> = self.listed.iter().filter(|(_, s)| keep(s)).map(|(a, _)| a.clone()).collect();
             group.sort_by_key(|a| !a.is_ascii());
+
             let extended =
                 |a: &str| self.listed.iter().filter(|(b, _)| b.starts_with(a) && b[a.len()..].starts_with(' ')).count();
+
             if let Some(core) =
                 group.iter().filter(|a| a.is_ascii() && extended(a) > 0).max_by_key(|a| (extended(a), a.len())).cloned()
             {
                 group.retain(|a| *a != core);
                 group.insert(0, core);
             }
+
             group
         };
+
         let scoped = ranked(&|s| season.is_some_and(|x| s.is_some_and(|s| s.season == x)));
         let show = ranked(&|s| s.is_none());
 
         let mut out: Vec<String> = scoped.iter().take(1).chain(show.iter().take(1)).cloned().collect();
+
         for t in scoped.into_iter().chain(show) {
             if !out.contains(&t) {
                 out.push(t);
             }
         }
+
         out
     }
 
@@ -181,12 +203,15 @@ impl Matcher {
         if release::is_recap(title) {
             return None;
         }
+
         let name = release::normalized_name(title);
+
         for (alias, scope) in &self.aliases {
             let Some(rest) = release::after_title(&name, alias) else { continue };
             let Some(numbers) = release::numbers(rest) else { return None };
             return self.map(*scope, numbers);
         }
+
         None
     }
 
@@ -195,6 +220,7 @@ impl Matcher {
             if let Some(ep) = crate::library::parse::episode_number(file_name) {
                 return Some(Match { episodes: vec![(ep.season, ep.episode)], batch: false, nonstandard: false });
             }
+
             let numbers = release::numbers(&release::normalized_name(file_name))?;
             self.map(None, numbers)
         })
@@ -206,6 +232,7 @@ impl Matcher {
 
     fn absolute(&self, n: u32) -> Option<(u32, u32)> {
         let mut left = n;
+
         for (&season, &count) in self.seasons.range(1..) {
             match count {
                 Some(c) if left > c => left -= c,
@@ -222,6 +249,7 @@ impl Matcher {
 
     fn part(&self, season: u32, k: u32) -> Option<Scope> {
         let parts = self.parts.get(&season)?;
+
         match k {
             0 => None,
             1 => Some(Scope { season, offset: 0, episodes: parts.first().map(|p| p.offset) }),
@@ -236,9 +264,11 @@ impl Matcher {
             Some(k) => self.part(season.unwrap_or(1), k),
             None => scope.filter(|s| s.offset > 0 && n.season.is_none_or(|x| x == s.season)),
         };
+
         let Some((first, last)) = n.episodes else {
             if let Some(p) = part.filter(|p| p.offset > 0 || n.part.is_some()) {
                 let count = p.episodes?;
+
                 return Some(Match {
                     episodes: (1..=count).map(|e| (p.season, p.offset + e)).collect(),
                     batch: true,
@@ -252,19 +282,23 @@ impl Matcher {
 
             let s = season.or_else(|| (self.seasons.range(1..).count() <= 1).then_some(1))?;
             let count = self.count(s)?;
+
             return Some(Match {
                 episodes: (1..=count).map(|e| (s, e)).collect(),
                 batch: true,
                 nonstandard: n.nonstandard,
             });
         };
+
         let mut episodes = Vec::new();
+
         for e in first..=last {
             episodes.push(match part {
                 Some(p) if p.holds(e) => (p.season, p.offset + e),
                 _ => self.one(season, e, n.season.is_some())?,
             });
         }
+
         Some(Match { episodes, batch: n.batch, nonstandard: n.nonstandard })
     }
 
@@ -272,8 +306,10 @@ impl Matcher {
         if self.numbering == Numbering::Absolute && !explicit {
             return self.absolute(e);
         }
+
         let s = season.unwrap_or(1);
         let before = self.before(s);
+
         match self.count(s) {
             Some(c) if e > c => {
                 if self.numbering == Numbering::Seasonal {
@@ -296,6 +332,7 @@ impl Matcher {
             },
             None if self.numbering != Numbering::Seasonal => {
                 let scheduled = self.scheduled.get(&s).copied().unwrap_or(0);
+
                 match before {
                     Some(b) if b > 0 && e > b && e > scheduled && e - b <= scheduled => Some((s, e - b)),
                     _ => Some((s, e)),
@@ -323,6 +360,7 @@ mod tests {
             scope: Scope { season: 2, offset: 13, episodes: Some(12) },
             titles: vec!["Re:Zero kara Hajimeru Isekai Seikatsu 2nd Season Part 2".into()],
         };
+
         let mut m = Matcher::new(
             &show(),
             &[
@@ -334,6 +372,7 @@ mod tests {
             BTreeMap::from([(1, Some(25)), (2, Some(25)), (3, Some(16)), (4, None)]),
             Numbering::Auto,
         );
+
         m.scheduled = BTreeMap::from([(1, 25), (2, 25), (3, 16), (4, 19)]);
         m
     }
@@ -370,6 +409,7 @@ mod tests {
 
         let m = rezero_split();
         assert_eq!(eps(&m, "[SubsPlease] Re Zero kara Hajimeru Isekai Seikatsu 3rd Season - 05 (1080p)"), vec![(4, 5)]);
+
         assert_eq!(
             eps(&m, "[SubsPlease] Re Zero kara Hajimeru Isekai Seikatsu 2nd Season Part 2 - 03 (1080p)"),
             vec![(3, 3)]
@@ -432,6 +472,7 @@ mod tests {
     #[test]
     fn ordinal_seasons_keep_their_season() {
         let mut m = rezero();
+
         for numbering in [Numbering::Auto, Numbering::Seasonal, Numbering::Absolute] {
             m.numbering = numbering;
             let hit = m.matches("[G] Re Zero kara Hajimeru Isekai Seikatsu 4th_18 [1080p]").unwrap();
@@ -453,15 +494,18 @@ mod tests {
         ]
         .map(String::from)
         .to_vec();
+
         let seasons = [titles(
             2,
             &["Re:ZERO -Starting Life in Another World- Season 2", "Re:Zero kara Hajimeru Isekai Seikatsu 2nd Season"],
         )];
+
         let m = Matcher::new(&show, &seasons, BTreeMap::from([(1, Some(25)), (2, Some(25))]), Numbering::Auto);
         let s1 = m.search_titles(Some(1));
         assert_eq!(s1[..2], ["re zero", "re zero starting life in another world"]);
         assert_eq!(s1.last().unwrap(), "re zero bắt đầu lại ở thế giới khác");
         let s2 = m.search_titles(Some(2));
+
         assert_eq!(
             s2[..3],
             [

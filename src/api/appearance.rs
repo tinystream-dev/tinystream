@@ -121,6 +121,7 @@ impl Palette {
     fn of(scheme: &Scheme) -> Self {
         let token = |name: &str, c: &Color| Token { name: name.into(), value: c.to_string() };
         let tokens = scheme.tokens();
+
         Self {
             seeds: SEEDS.iter().zip(&scheme.seeds).map(|(n, c)| token(n, c)).collect(),
             overrides: scheme.overrides.iter().map(|(&i, c)| token(TOKENS[i], c)).collect(),
@@ -230,6 +231,7 @@ const COLUMNS: &str = "id, owner_id, name, code, published, forked_from, forked_
 
 fn from_row((id, owner, name, code, published, forked_from, forked_from_name): Row) -> Option<ColorScheme> {
     let (scheme, _) = Scheme::decode(&code).ok()?;
+
     Some(ColorScheme {
         id: id.to_string(),
         name,
@@ -246,7 +248,9 @@ async fn find(state: &AppState, user: Option<&User>, id: &str) -> ApiResult<Opti
     if let Some(b) = theme::find_builtin(id) {
         return Ok(Some(ColorScheme::builtin(b)));
     }
+
     let Ok(id) = id.parse::<i64>() else { return Ok(None) };
+
     let row: Option<Row> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "SELECT {COLUMNS} FROM schemes WHERE id = ? AND (published = 1 OR owner_id = ?)"
     )))
@@ -254,6 +258,7 @@ async fn find(state: &AppState, user: Option<&User>, id: &str) -> ApiResult<Opti
     .bind(user.map(|u| u.id))
     .fetch_optional(&state.db)
     .await?;
+
     Ok(row.and_then(from_row))
 }
 
@@ -263,12 +268,15 @@ async fn get(state: &AppState, user: &User, id: &str) -> ApiResult<ColorScheme> 
 
 async fn editable(state: &AppState, user: &User, id: &str) -> ApiResult<ColorScheme> {
     let s = get(state, user, id).await?;
+
     if s.built_in {
         return Err(ApiError::bad_request(format!("{} is built in; fork it to make changes", s.name)));
     }
+
     if !s.editable_by(user) {
         return Err(ApiError::forbidden());
     }
+
     Ok(s)
 }
 
@@ -277,12 +285,14 @@ pub async fn defaults(state: &AppState) -> ApiResult<Defaults> {
         .bind(DEFAULTS_KEY)
         .fetch_optional(&state.db)
         .await?;
+
     Ok(stored.and_then(|json| serde_json::from_str(&json).ok()).unwrap_or_default())
 }
 
 async fn personal(state: &AppState, user: &User) -> ApiResult<Personal> {
     let json: String =
         sqlx::query_scalar("SELECT appearance FROM users WHERE id = ?").bind(user.id).fetch_one(&state.db).await?;
+
     Ok(serde_json::from_str(&json).unwrap_or_default())
 }
 
@@ -290,11 +300,14 @@ async fn personal(state: &AppState, user: &User) -> ApiResult<Personal> {
 /// to the server's choice, then to Grey.
 async fn resolve(state: &AppState, user: Option<&User>) -> ApiResult<Appearance> {
     let defaults = defaults(state).await?;
+
     let personal = match user {
         Some(u) => personal(state, u).await?,
         None => Personal::default(),
     };
+
     let colors = personal.colors.clone().unwrap_or_else(|| defaults.colors.clone());
+
     let pick = async |id: &str, fallback: &str| -> ApiResult<ColorScheme> {
         for id in [id, fallback] {
             if let Some(s) = find(state, user, id).await? {
@@ -303,6 +316,7 @@ async fn resolve(state: &AppState, user: Option<&User>) -> ApiResult<Appearance>
         }
         Ok(ColorScheme::builtin(theme::find_builtin(FALLBACK).expect("Grey is built in")))
     };
+
     let (light, dark) = match colors.mode {
         SchemeMode::Single => {
             let s = pick(&colors.single, &defaults.colors.single).await?;
@@ -312,6 +326,7 @@ async fn resolve(state: &AppState, user: Option<&User>) -> ApiResult<Appearance>
             (pick(&colors.light, &defaults.colors.light).await?, pick(&colors.dark, &defaults.colors.dark).await?)
         },
     };
+
     Ok(Appearance {
         mode: colors.mode,
         light,
@@ -325,12 +340,15 @@ async fn resolve(state: &AppState, user: Option<&User>) -> ApiResult<Appearance>
 /// app.
 pub async fn public_head(state: &AppState) -> ApiResult<String> {
     let a = resolve(state, None).await?;
+
     let vars = |s: &ColorScheme| {
         let scheme = if s.scheme.dark() { "dark" } else { "light" };
         let vars: String = TOKENS.iter().zip(s.scheme.tokens()).map(|(n, c)| format!("--color-{n}:{c};")).collect();
         format!(":root{{color-scheme:{scheme};{vars}}}")
     };
+
     let canvas = |s: &ColorScheme| s.scheme.tokens()[0];
+
     Ok(match a.mode {
         SchemeMode::Single => {
             format!("<style>{}</style>\n<meta name=\"theme-color\" content=\"{}\">", vars(&a.light), canvas(&a.light))
@@ -349,17 +367,21 @@ pub async fn public_head(state: &AppState) -> ApiResult<String> {
 
 fn parse_colors(input: Vec<TokenInput>, names: &[&str], what: &str) -> ApiResult<BTreeMap<usize, Color>> {
     let mut out = BTreeMap::new();
+
     for t in input {
         let i = names
             .iter()
             .position(|n| *n == t.name)
             .ok_or_else(|| ApiError::bad_request(format!("{:?} isn't a {what}", t.name)))?;
+
         let c = Color::parse(&t.value)
             .ok_or_else(|| ApiError::bad_request(format!("{:?} isn't a colour like #1a2b3c", t.value)))?;
+
         if out.insert(i, c).is_some() {
             return Err(ApiError::bad_request(format!("{} is set twice", t.name)));
         }
     }
+
     Ok(out)
 }
 
@@ -374,16 +396,21 @@ pub struct SchemeInput {
 impl SchemeInput {
     fn parse(self) -> ApiResult<(String, Scheme)> {
         let name = theme::clamp_name(&self.name);
+
         if name.is_empty() {
             return Err(ApiError::bad_request("give the scheme a name"));
         }
+
         let seeds = parse_colors(self.seeds, &SEEDS, "seed")?;
+
         if seeds.len() != SEEDS.len() {
             return Err(ApiError::bad_request(format!("a scheme needs all {} seeds", SEEDS.len())));
         }
+
         if seeds.values().any(|c| !c.opaque()) {
             return Err(ApiError::bad_request("seeds can't be see-through"));
         }
+
         let seeds = std::array::from_fn(|i| seeds[&i]);
         let overrides = parse_colors(self.overrides, &TOKENS, "colour")?;
         Ok((name, Scheme { seeds, overrides }))
@@ -398,6 +425,7 @@ async fn insert(
     forked_from: Option<&ColorScheme>,
 ) -> ApiResult<ColorScheme> {
     let t = now();
+
     let id: i64 = sqlx::query_scalar(
         "INSERT INTO schemes (owner_id, name, code, forked_from, forked_from_name, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id",
@@ -411,6 +439,7 @@ async fn insert(
     .bind(t)
     .fetch_one(&state.db)
     .await?;
+
     get(state, owner, &id.to_string()).await
 }
 
@@ -450,6 +479,7 @@ impl AppearanceQuery {
     /// Built-ins, then published schemes, then your own.
     async fn color_schemes(&self, ctx: &Context<'_>) -> ApiResult<Vec<ColorScheme>> {
         let (state, user) = (ctx.state(), ctx.user()?);
+
         let rows: Vec<Row> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
             "SELECT {COLUMNS} FROM schemes WHERE published = 1 OR owner_id = ?
              ORDER BY published DESC, name COLLATE NOCASE, id"
@@ -457,6 +487,7 @@ impl AppearanceQuery {
         .bind(user.id)
         .fetch_all(&state.db)
         .await?;
+
         Ok(theme::builtins()
             .into_iter()
             .map(ColorScheme::builtin)
@@ -485,10 +516,13 @@ impl AppearanceMutation {
     async fn save_scheme(&self, ctx: &Context<'_>, id: Option<String>, input: SchemeInput) -> ApiResult<ColorScheme> {
         let (state, user) = (ctx.state(), ctx.user()?);
         let (name, scheme) = input.parse()?;
+
         let Some(id) = id else {
             return insert(state, user, &name, &scheme, None).await;
         };
+
         let old = editable(state, user, &id).await?;
+
         sqlx::query("UPDATE schemes SET name = ?, code = ?, updated_at = ? WHERE id = ?")
             .bind(&name)
             .bind(scheme.code())
@@ -496,6 +530,7 @@ impl AppearanceMutation {
             .bind(&old.id)
             .execute(&state.db)
             .await?;
+
         changed(state, (!old.published).then_some(user.id));
         get(state, user, &id).await
     }
@@ -511,11 +546,13 @@ impl AppearanceMutation {
     async fn import_scheme(&self, ctx: &Context<'_>, code: String, name: Option<String>) -> ApiResult<ColorScheme> {
         let (state, user) = (ctx.state(), ctx.user()?);
         let (scheme, carried) = Scheme::decode(&code).map_err(|e| ApiError::bad_request(e.to_string()))?;
+
         let name = name
             .map(|n| theme::clamp_name(&n))
             .filter(|n| !n.is_empty())
             .or(carried)
             .unwrap_or_else(|| "Imported scheme".into());
+
         insert(state, user, &name, &scheme, None).await
     }
 
@@ -531,7 +568,7 @@ impl AppearanceMutation {
     async fn publish_scheme(&self, ctx: &Context<'_>, id: String, published: bool) -> ApiResult<ColorScheme> {
         let (state, admin) = (ctx.state(), ctx.admin()?);
         let s = editable(state, admin, &id).await?;
-        // Taken back, it's private to whoever made it (or to you, if they're gone).
+
         sqlx::query("UPDATE schemes SET published = ?, owner_id = COALESCE(owner_id, ?), updated_at = ? WHERE id = ?")
             .bind(published)
             .bind(admin.id)
@@ -539,26 +576,31 @@ impl AppearanceMutation {
             .bind(&s.id)
             .execute(&state.db)
             .await?;
+
         tracing::info!(
             "{} {} the colour scheme {:?}",
             admin.username,
             if published { "published" } else { "unpublished" },
             s.name
         );
+
         changed(state, None);
         get(state, admin, &id).await
     }
 
     async fn set_appearance(&self, ctx: &Context<'_>, input: Personal) -> ApiResult<Appearance> {
         let (state, user) = (ctx.state(), ctx.user()?);
+
         if let Some(colors) = &input.colors {
             check_choice(state, Some(user), colors).await?;
         }
+
         sqlx::query("UPDATE users SET appearance = ? WHERE id = ?")
             .bind(serde_json::to_string(&input).map_err(anyhow::Error::from)?)
             .bind(user.id)
             .execute(&state.db)
             .await?;
+
         changed(state, Some(user.id));
         resolve(state, Some(user)).await
     }
@@ -567,6 +609,7 @@ impl AppearanceMutation {
     async fn set_server_appearance(&self, ctx: &Context<'_>, input: Defaults) -> ApiResult<Defaults> {
         let (state, admin) = (ctx.state(), ctx.admin()?);
         check_choice(state, None, &input.colors).await?;
+
         sqlx::query(
             "INSERT INTO server_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
         )
@@ -574,6 +617,7 @@ impl AppearanceMutation {
         .bind(serde_json::to_string(&input).map_err(anyhow::Error::from)?)
         .execute(&state.db)
         .await?;
+
         tracing::info!("{} changed the server's appearance", admin.username);
         changed(state, None);
         Ok(input)

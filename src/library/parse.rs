@@ -28,9 +28,11 @@ const QUIET_EXTENSIONS: &[&str] = &[
 
 pub fn season_number(folder_name: &str) -> Option<u32> {
     let caps = SEASON.captures(folder_name)?;
+
     if caps.name("specials").is_some() {
         return Some(0);
     }
+
     caps.name("n")?.as_str().parse().ok()
 }
 
@@ -58,11 +60,13 @@ pub fn title_and_year(folder_name: &str) -> (String, Option<i64>) {
 
 pub fn sort_title(title: &str) -> String {
     let lower = title.to_lowercase();
+
     for article in ["the ", "a ", "an "] {
         if let Some(rest) = lower.strip_prefix(article) {
             return rest.to_string();
         }
     }
+
     lower
 }
 
@@ -74,6 +78,7 @@ pub enum FileKind {
 
 pub fn file_kind(path: &Path) -> FileKind {
     let ext = path.extension().and_then(|e| e.to_str()).map(str::to_lowercase).unwrap_or_default();
+
     if VIDEO_EXTENSIONS.contains(&ext.as_str()) {
         FileKind::Video
     } else if QUIET_EXTENSIONS.contains(&ext.as_str()) {

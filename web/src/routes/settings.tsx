@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { createFileRoute, useNavigate } from '@tanstack/react-router'
 import {
   ArrowDownToLine,
+  BookOpen,
   ChevronRight,
   CircleUser,
   CornerLeftUp,
@@ -28,7 +29,7 @@ import {
   Zap,
 } from 'lucide-react'
 import { type ReactNode, useEffect, useState } from 'react'
-import { ask } from '../components/feedback'
+import { ask, toast, toastError } from '../components/feedback'
 import { Page, PageTitle } from '../components/Page'
 import { People, Profile } from '../components/People'
 import { AutomationSettings, DownloadsSettings, ProfilesSettings, RenamesSettings, SourcesSettings } from '../components/DownloadSettings'
@@ -138,6 +139,26 @@ const ChangePassword = graphql(`
   }
 `)
 
+const EmailQuery = graphql(`
+  query MyEmail {
+    viewer {
+      email
+    }
+  }
+`)
+
+const SetEmail = graphql(`
+  mutation SetEmail($email: String, $password: String!) {
+    setEmail(email: $email, password: $password)
+  }
+`)
+
+const SendTestEmail = graphql(`
+  mutation SendTestEmail($to: String!) {
+    sendTestEmail(to: $to)
+  }
+`)
+
 const ReplaceConfig = graphql(`
   mutation ReplaceConfig($text: String!) {
     replaceConfig(text: $text) {
@@ -157,9 +178,10 @@ const SkippedQuery = graphql(`
 `)
 
 /** The parts of config.toml the Server tab edits. */
-type ServerConfig = Pick<Settings, 'network' | 'log' | 'scan' | 'metadata' | 'transcode' | 'signIn'>
-const serverPart = ({ network, log, scan, metadata, transcode, signIn }: Settings): ServerConfig => ({ network, log, scan, metadata, transcode, signIn })
-import { useMe } from '../lib/hooks'
+type ServerConfig = Pick<Settings, 'network' | 'log' | 'scan' | 'metadata' | 'transcode' | 'signIn' | 'smtp'>
+const serverPart = ({ network, log, scan, metadata, transcode, signIn, smtp }: Settings): ServerConfig => ({ network, log, scan, metadata, transcode, signIn, smtp })
+const SMTP_PORTS = { STARTTLS: 587, TLS: 465, NONE: 25 }
+import { useEmailOn, useMe, useStatus } from '../lib/hooks'
 import { notifyEnabled, setNotify } from '../lib/notify'
 import { useTitle } from '../lib/title'
 import { createCredential } from '../lib/webauthn'
@@ -326,7 +348,13 @@ function Libraries() {
               onClick={() => setEditing(l)}
               className="flex w-full items-center gap-4 px-3 py-2.5 text-left transition-colors hover:bg-hover"
             >
-              {l.kind === 'MUSIC' ? <Music className="size-4.5 shrink-0 text-ink-3" /> : <Folder className="size-4.5 shrink-0 text-ink-3" />}
+              {l.kind === 'MUSIC' ? (
+                <Music className="size-4.5 shrink-0 text-ink-3" />
+              ) : l.kind === 'BOOKS' ? (
+                <BookOpen className="size-4.5 shrink-0 text-ink-3" />
+              ) : (
+                <Folder className="size-4.5 shrink-0 text-ink-3" />
+              )}
               <div className="min-w-0 flex-1">
                 <p className="text-sm font-medium">{l.name}</p>
                 <p className={`truncate text-xs ${l.exists ? 'text-ink-3' : 'text-danger'}`}>
@@ -335,7 +363,7 @@ function Libraries() {
               </div>
               {l.managed && <span className="shrink-0 rounded-md bg-panel px-1.5 py-0.5 text-2xs text-ink-2">Managed</span>}
               <span className="shrink-0 text-xs text-ink-3 tabular">
-                {l.titleCount} {l.kind === 'MUSIC' ? 'albums' : 'titles'}{l.skippedCount > 0 && `, ${l.skippedCount} skipped`}
+                {l.titleCount} {l.kind === 'MUSIC' ? 'albums' : l.kind === 'BOOKS' ? 'books' : 'titles'}{l.skippedCount > 0 && `, ${l.skippedCount} skipped`}
               </span>
               <ChevronRight className="size-4 shrink-0 text-ink-3" />
             </Squircle>
@@ -359,7 +387,7 @@ function Libraries() {
 function LibraryDialog({ library, onClose, onSaved }: { library: ConfigLibrary | null; onClose: () => void; onSaved: () => void }) {
   const [name, setName] = useState(library?.name ?? '')
   const [path, setPath] = useState(library?.path ?? '')
-  const [kind, setKind] = useState<'VIDEO' | 'MUSIC'>(library?.kind ?? 'VIDEO')
+  const [kind, setKind] = useState<'VIDEO' | 'MUSIC' | 'BOOKS'>(library?.kind ?? 'VIDEO')
   const [provider, setProvider] = useState<'' | Provider>(library?.metadataProvider ?? '')
   const [managed, setManaged] = useState(library?.managed ?? false)
   const [profile, setProfile] = useState(library?.profile ?? '')
@@ -368,13 +396,14 @@ function LibraryDialog({ library, onClose, onSaved }: { library: ConfigLibrary |
   const [browsing, setBrowsing] = useState(!library)
   const [error, setError] = useState<string | null>(null)
   const music = kind === 'MUSIC'
+  const video = kind === 'VIDEO'
   const body = {
     name,
     path,
     kind,
-    metadataProvider: music ? null : provider || null,
-    managed: music ? false : managed,
-    profile: music ? null : profile || null,
+    metadataProvider: video ? provider || null : null,
+    managed: video ? managed : false,
+    profile: video ? profile || null : null,
     downloadPath: downloadPath.trim() || null,
   }
   const save = useMutation({
@@ -394,10 +423,11 @@ function LibraryDialog({ library, onClose, onSaved }: { library: ConfigLibrary |
           options={[
             { value: 'VIDEO', label: 'Shows and movies' },
             { value: 'MUSIC', label: 'Music' },
+            { value: 'BOOKS', label: 'Books' },
           ]}
         />
         <Field label="Name">
-          <Input value={name} onChange={(e) => setName(e.target.value)} placeholder={music ? 'Music' : 'Anime'} autoFocus={!!library} />
+          <Input value={name} onChange={(e) => setName(e.target.value)} placeholder={music ? 'Music' : video ? 'Anime' : 'Novels'} autoFocus={!!library} />
         </Field>
         <Field label="Folder">
           <div className="flex gap-2">
@@ -418,12 +448,16 @@ function LibraryDialog({ library, onClose, onSaved }: { library: ConfigLibrary |
         )}
         {music ? (
           <p className="text-xs leading-relaxed text-ink-3">Albums and artists come from the files' tags, however the folders are laid out.</p>
+        ) : !video ? (
+          <p className="text-xs leading-relaxed text-ink-3">
+            EPUB, FB2 and plain text books, in any folders. What a book doesn't say about itself is looked up on Apple Books and Open Library.
+          </p>
         ) : (
           <Field label="Metadata provider">
             <Select value={provider} options={providers} onChange={setProvider} />
           </Field>
         )}
-        {settings?.downloads && !music && (
+        {settings?.downloads && video && (
           <>
             <Row label="Managed" hint="Off = read-only">
               <Toggle label="Managed" checked={managed} onChange={setManaged} />
@@ -527,6 +561,7 @@ function Dialog({ children, onClose, wide }: { children: ReactNode; onClose: () 
 }
 function Server() {
   const { data } = useSettings()
+  const smtp = !!useStatus().data?.server.smtp
   const [draft, setDraft] = useState<ServerConfig | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [saved, setSaved] = useState(false)
@@ -595,6 +630,73 @@ function Server() {
           </Field>
         </div>
       </Card>
+
+      {smtp && (
+        <Card title="Email" description="Sends invite links, and password resets to people who gave an address.">
+          <div className="grid gap-4 sm:grid-cols-[1fr_8rem]">
+            <Field label="SMTP server">
+              <Input
+                value={draft.smtp.host ?? ''}
+                placeholder="smtp.example.com"
+                onChange={(e) => set((c) => void (c.smtp.host = e.target.value.trim() || null))}
+              />
+            </Field>
+            <Field label="Port">
+              <Input
+                inputMode="numeric"
+                value={draft.smtp.port ?? ''}
+                placeholder={String(SMTP_PORTS[draft.smtp.security])}
+                onChange={(e) => set((c) => void (c.smtp.port = Number(e.target.value.replace(/\D/g, '')) || null))}
+              />
+            </Field>
+          </div>
+          <div className="mt-4 grid gap-4 sm:grid-cols-2">
+            <Field label="Encryption">
+              <Select
+                value={draft.smtp.security}
+                options={[
+                  { value: 'STARTTLS', label: 'STARTTLS' },
+                  { value: 'TLS', label: 'TLS' },
+                  { value: 'NONE', label: 'None' },
+                ]}
+                onChange={(v) => set((c) => void (c.smtp.security = v))}
+              />
+            </Field>
+            <Field label="From">
+              <Input
+                value={draft.smtp.from ?? ''}
+                placeholder="tinystream <me@example.com>"
+                onChange={(e) => set((c) => void (c.smtp.from = e.target.value.trim() || null))}
+              />
+            </Field>
+            <Field label="Username">
+              <Input
+                autoComplete="off"
+                value={draft.smtp.username ?? ''}
+                onChange={(e) => set((c) => void (c.smtp.username = e.target.value.trim() || null))}
+              />
+            </Field>
+            <Field label="Password">
+              <Input
+                type="password"
+                autoComplete="new-password"
+                value={draft.smtp.password ?? ''}
+                onChange={(e) => set((c) => void (c.smtp.password = e.target.value || null))}
+              />
+            </Field>
+          </div>
+          <div className="mt-4">
+            <Field label="Public address" hint="Where links in emails go">
+              <Input
+                value={draft.smtp.publicUrl ?? ''}
+                placeholder="https://tv.example.com"
+                onChange={(e) => set((c) => void (c.smtp.publicUrl = e.target.value.trim() || null))}
+              />
+            </Field>
+          </div>
+          {data.smtp.host && <TestEmail unsaved={JSON.stringify(draft.smtp) !== JSON.stringify(data.smtp)} />}
+        </Card>
+      )}
 
       <Card title="Library scanning">
         <Row label="Watch folders for changes">
@@ -676,6 +778,25 @@ function Server() {
         </Button>
       </div>
     </>
+  )
+}
+
+function TestEmail({ unsaved }: { unsaved: boolean }) {
+  const [to, setTo] = useState('')
+  const send = useMutation({
+    mutationFn: () => request(SendTestEmail, { to: to.trim() }),
+    onSuccess: () => toast({ title: `Sent to ${to.trim()}`, tone: 'ok' }),
+    onError: toastError,
+  })
+  return (
+    <div className="mt-4 flex gap-2">
+      <div className="flex-1">
+        <Input type="email" value={to} onChange={(e) => setTo(e.target.value)} placeholder={unsaved ? 'Save first, then send a test' : 'Where to send a test email'} />
+      </div>
+      <Button disabled={unsaved || !to.trim() || send.isPending} onClick={() => send.mutate()}>
+        Send test
+      </Button>
+    </div>
   )
 }
 
@@ -765,7 +886,56 @@ function Account() {
           </Button>
         </div>
       </Card>
+
+      <Email />
     </>
+  )
+}
+
+function Email() {
+  const qc = useQueryClient()
+  const on = useEmailOn()
+  const { data: saved } = useQuery({ queryKey: ['email'], queryFn: async () => (await request(EmailQuery)).viewer?.email ?? null, enabled: on })
+  const [draft, setDraft] = useState<string | null>(null)
+  const [password, setPassword] = useState('')
+  const save = useMutation({
+    mutationFn: async (email: string | null) => (await request(SetEmail, { email, password })).setEmail,
+    onSuccess: (email) => {
+      qc.setQueryData(['email'], email ?? null)
+      setDraft(null)
+      setPassword('')
+    },
+  })
+  if (!on || saved === undefined) return null
+  const value = draft ?? saved ?? ''
+
+  return (
+    <Card title="Email" description="Only used to send you a link if you forget your password.">
+      <div className="grid gap-4 sm:grid-cols-2">
+        <Field label="Address">
+          <Input type="email" autoComplete="email" value={value} placeholder="None" onChange={(e) => setDraft(e.target.value)} />
+        </Field>
+        <Field label="Your password">
+          <Input type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} />
+        </Field>
+      </div>
+      <div className="mt-4 flex items-center justify-end gap-3">
+        {save.isSuccess && <p className="text-sm text-ink-2">Saved</p>}
+        {save.error && <p className="text-sm text-danger">{(save.error as Error).message}</p>}
+        {saved && (
+          <Button variant="plain" disabled={!password || save.isPending} onClick={() => save.mutate(null)}>
+            Remove
+          </Button>
+        )}
+        <Button
+          variant="primary"
+          disabled={!value.trim() || value.trim() === saved || !password || save.isPending}
+          onClick={() => save.mutate(value.trim())}
+        >
+          Save
+        </Button>
+      </div>
+    </Card>
   )
 }
 

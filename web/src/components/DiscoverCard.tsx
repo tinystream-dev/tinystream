@@ -28,7 +28,7 @@ const CreateRequest = graphql(`
     }
   }
 `)
-import { mediaLabels } from '../lib/media'
+import { mediaLabels } from '@tinystream/shared/media'
 import { useMe } from '../lib/hooks'
 import { MonitorPicker } from './downloads'
 import { toast } from './feedback'

@@ -3,7 +3,6 @@ name = "tinystream"
 description = "A small self-hosted media server"
 version.workspace = true
 edition.workspace = true
-rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
@@ -20,17 +19,20 @@ exclude = [
     "/.ffmpeg",
     "/.libtorrent",
     "/.github",
+    "/node_modules",
     "/web/node_modules",
+    "/mobile",
     "/web/dist",
 ]
 
 [workspace]
-members = ["ffmpeg-sys", "libtorrent-sys", "native/*", "web/decoder"]
+members = ["ffmpeg-sys", "libtorrent-sys", "native/*", "rustyass", "rustyass/compare", "decoder/core", "web/decoder", "web/subtitles"]
+# The app's crates are a workspace of their own (mobile/Cargo.toml), so neither rebuilds the other.
+exclude = ["mobile"]
 
 [workspace.package]
-version = "0.28.3"
+version = "0.37.2"
 edition = "2024"
-rust-version = "1.94"
 license = "AGPL-3.0-or-later"
 authors = ["Phrolova <me@phrolova.moe>"]
 repository = "https://github.com/phrolova/tinystream"
@@ -39,7 +41,8 @@ repository = "https://github.com/phrolova/tinystream"
 default = ["web-ui", "metadata", "torrent"]
 web-ui = ["dep:axum-frontend", "dep:rust-embed"]
 metadata = []
-torrent = ["metadata", "dep:libtorrent-sys", "dep:quick-xml"]
+torrent = ["metadata", "dep:libtorrent-sys"]
+smtp = ["dep:lettre"]
 
 [dependencies]
 anyhow = "1"
@@ -49,22 +52,31 @@ axum = { version = "0.8", features = ["macros", "ws"] }
 axum-frontend = { version = "0.1", optional = true }
 base64 = "0.22"
 bytes = "1"
+chardetng = "1"
 clap = { version = "4", features = ["derive", "env", "wrap_help"] }
 dirs = "6"
 ebur128 = "0.1"
+encoding_rs = "0.8"
 ffmpeg-sys = { path = "ffmpeg-sys" }
 libtorrent-sys = { path = "libtorrent-sys", optional = true }
 futures = "0.3"
 humantime = "2"
 humantime-serde = "1"
+lettre = { version = "0.11", optional = true, default-features = false, features = [
+    "builder",
+    "hostname",
+    "smtp-transport",
+    "tokio1-rustls-tls",
+] }
 lofty = "0.25"
 md-5 = "0.10"
 mime_guess = "2"
 notify = "8"
 nucleo-matcher = "0.3"
-quick-xml = { version = "0.41", optional = true }
+quick-xml = { version = "0.41", features = ["escape-html"] }
 rand = "0.9"
 rust-embed = { version = "8", optional = true }
+rustyass = { path = "rustyass" }
 regex = "1"
 reqwest = { version = "0.12", default-features = false, features = [
     "json",
@@ -110,6 +122,7 @@ tracing-subscriber = { version = "0.3", features = [
 ] }
 url = "2"
 uuid = { version = "1", features = ["v4", "serde"] }
+zip = { version = "9", default-features = false, features = ["deflate-flate2"] }
 webauthn-rs = { version = "0.5", features = [
     "danger-user-presence-only-security-keys",
 ] }
@@ -120,6 +133,9 @@ async-graphql = { version = "7.2.1", default-features = false, features = [
     "graphiql",
 ] }
 async-graphql-axum = "7.2.1"
+
+[target.'cfg(target_vendor = "apple")'.dependencies]
+libc = "0.2"
 
 [profile.release]
 lto = "thin"

@@ -8,10 +8,9 @@ import { Empty, Page, Section } from '../components/Page'
 import { TitleSkeleton } from '../components/Skeleton'
 import { Button } from '../components/ui'
 import { graphql } from '../gql'
-import { useAmbient } from '../lib/ambient'
 import { request } from '../lib/api'
 import { useTitle } from '../lib/title'
-import { cover, hiRes, length, quality } from '../music/api'
+import { hiRes, length, quality } from '../music/api'
 import { AlbumGrid, AlbumTile, Cover, QualityBadge, StarButton, TrackList, TrackMenu } from '../music/components'
 import { useStartListening } from '../music/listen'
 import { current, music, usePlayer } from '../music/player'
@@ -22,6 +21,7 @@ const AlbumQuery = graphql(`
   query Album($id: Int!) {
     album(id: $id) {
       ...AlbumCard
+      coverTint
       library
       releaseDate
       originalDate
@@ -62,7 +62,7 @@ function AlbumPage() {
   const id = Number(Route.useParams().id)
   const { data: album, isPending } = useQuery({ queryKey: ['music', 'album', id], queryFn: async () => (await request(AlbumQuery, { id })).album })
   useTitle(album?.name)
-  const tint = useAmbient(album ? cover(album.cover, 32) : null)
+  const tint = album?.coverTint ?? null
   const firstArtist = album?.artists[0]?.id
   const { data: more } = useQuery({
     queryKey: ['music', 'more', firstArtist],

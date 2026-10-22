@@ -2,10 +2,11 @@
 
 import { useQuery } from '@tanstack/react-query'
 import { useEffect } from 'react'
+import { type Tokens, toRecord } from '@tinystream/shared/theme'
 import { graphql } from '../gql'
 import type { SchemeFieldsFragment } from '../gql/graphql'
 import { request } from './api'
-import { type Tokens, apply, toRecord } from './theme'
+import { apply } from './theme'
 
 export type Scheme = SchemeFieldsFragment
 

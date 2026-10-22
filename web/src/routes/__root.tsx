@@ -125,7 +125,7 @@ function useLiveUpdates(enabled: boolean) {
         switch (e.__typename) {
           case 'LibraryChanged':
           case 'ScanFinished':
-            invalidate(['home'], ['libraries'], ['library', e.library], ['settings'], ['music'])
+            invalidate(['home'], ['libraries'], ['library', e.library], ['settings'], ['music'], ['books', 'library', e.library], ['books', 'home'], ['books', 'book'])
             break
           case 'QueueChanged':
             // Another app moved the queue on; follow it unless we're the ones playing.
@@ -237,8 +237,8 @@ function Gate() {
   }, [video])
 
   if (isPending) return null
-  // Rooms decide for themselves who gets in; public ones need no account.
-  if (path === '/invite' || path.startsWith('/together/') || path.startsWith('/listen/'))
+  // Rooms decide for themselves who gets in; public ones need no account. Invites and resets are for the signed out.
+  if (path === '/invite' || path === '/reset' || path.startsWith('/together/') || path.startsWith('/listen/'))
     return (
       <>
         <Outlet />

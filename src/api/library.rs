@@ -48,9 +48,11 @@ pub(super) async fn item_row(state: &AppState, id: i64) -> ApiResult<Option<Item
 
 pub(super) fn episode_label(season: Option<i64>, episode: Option<i64>, episode_end: Option<i64>) -> Option<String> {
     let s = season?;
+
     let Some(e) = episode else {
         return Some(if s == 0 { "Special".into() } else { "Extra".into() });
     };
+
     let end = episode_end.map(|x| format!("–E{x:02}")).unwrap_or_default();
     Some(if s == 0 { format!("Special {e}") } else { format!("S{s:02}E{e:02}{end}") })
 }
@@ -141,14 +143,17 @@ impl Title {
         limit: usize,
     ) -> ApiResult<Vec<Self>> {
         let mut out = Vec::new();
+
         for id in ids {
             if let Some(t) = Self::load(state, access, id).await? {
                 out.push(t);
+
                 if out.len() >= limit {
                     break;
                 }
             }
         }
+
         Ok(out)
     }
 
@@ -172,6 +177,7 @@ impl Title {
                 .bind(self.row.id)
                 .fetch_one(&state.db)
                 .await?;
+
                 let genres = serde_json::from_str(&genres).unwrap_or_default();
                 Ok::<_, ApiError>(Details { overview, genres, rating, match_state, provider, provider_id })
             })
@@ -180,6 +186,7 @@ impl Title {
 
     async fn stats(&self, state: &AppState) -> ApiResult<Stats> {
         let person = self.access.person().id;
+
         self.stats
             .get_or_try_init(|| async {
                 let (total, watched, progress, fresh): (i64, i64, Option<f64>, i64) = sqlx::query_as(
@@ -196,6 +203,7 @@ impl Title {
                 .bind(now() - FRESH_FOR)
                 .fetch_one(&state.db)
                 .await?;
+
                 Ok::<_, ApiError>(Stats { total, watched, progress, fresh })
             })
             .await
@@ -213,6 +221,7 @@ impl Title {
     fn art(&self, kind: &str, names: &[&str], remote: &Option<String>) -> Option<String> {
         let local = local_art(FsPath::new(&self.row.path), names);
         let version = local_version(local.as_deref());
+
         ((if kind == "poster" { self.row.custom_poster } else { self.row.custom_backdrop })
             || remote.is_some()
             || local.is_some())
@@ -228,6 +237,18 @@ impl Title {
                 self.row.id, self.row.updated_at, self.row.artwork_version
             ),
         })
+    }
+
+    async fn tint(&self, ctx: &Context<'_>, kind: &'static str) -> Option<String> {
+        let row = &self.row;
+
+        let (remote, custom) =
+            if kind == "poster" { (&row.poster, row.custom_poster) } else { (&row.backdrop, row.custom_backdrop) };
+
+        let source =
+            super::images::item_source(row.id, &row.path, kind, remote.as_deref(), custom, row.artwork_version)?;
+
+        ctx.state().tints.get(ctx.state(), source).await
     }
 
     pub(super) fn poster_url(&self) -> Option<String> {
@@ -270,6 +291,16 @@ impl Title {
 
     async fn backdrop(&self) -> Option<String> {
         self.art("backdrop", BACKDROP_NAMES, &self.row.backdrop)
+    }
+
+    /// The most vivid colour of the poster as "r g b", empty until it's been worked out.
+    async fn poster_tint(&self, ctx: &Context<'_>) -> Option<String> {
+        self.tint(ctx, "poster").await
+    }
+
+    /// The same for the backdrop.
+    async fn backdrop_tint(&self, ctx: &Context<'_>) -> Option<String> {
+        self.tint(ctx, "backdrop").await
     }
 
     async fn custom_poster(&self) -> bool {
@@ -342,17 +373,21 @@ impl Title {
     async fn seasons(&self, ctx: &Context<'_>) -> ApiResult<Vec<Season>> {
         let state = ctx.state();
         let eps = self.episodes(state).await?;
+
         let meta: Vec<(i64, Option<String>, Option<String>, Option<String>)> =
             sqlx::query_as("SELECT number, title, overview, poster FROM seasons WHERE item_id = ?")
                 .bind(self.row.id)
                 .fetch_all(&state.db)
                 .await?;
+
         let mut numbers: Vec<i64> = eps.iter().filter_map(|e| e.season).collect();
         numbers.dedup();
+
         Ok(numbers
             .into_iter()
             .map(|n| {
                 let m = meta.iter().find(|s| s.0 == n);
+
                 Season {
                     number: n,
                     name: season_name(n, eps.iter().filter(|e| e.season == Some(n)).count()),
@@ -371,9 +406,11 @@ impl Title {
     async fn next_up(&self, ctx: &Context<'_>) -> ApiResult<Option<NextUp>> {
         let state = ctx.state();
         let eps = self.episodes(state).await?;
+
         let next = next_up(eps).or_else(|| {
             eps.iter().find(|e| e.season != Some(0) && e.episode.is_some()).or(eps.first()).map(|e| (e, false))
         });
+
         Ok(next.map(|(e, resuming)| {
             state.media.prefetch_subtitles(PathBuf::from(&e.path));
             NextUp { video: self.video(e), resuming }
@@ -395,21 +432,26 @@ impl Title {
     ) -> ApiResult<MatchCandidates> {
         self.editor(ctx)?;
         let state = ctx.state();
+
         let (folder_title, folder_year): (String, Option<i64>) =
             sqlx::query_as("SELECT folder_title, folder_year FROM items WHERE id = ?")
                 .bind(self.row.id)
                 .fetch_one(&state.db)
                 .await?;
+
         let chosen = provider
             .or_else(|| state.config.current().library(&self.row.library).and_then(|l| l.metadata_provider))
             .unwrap_or(Provider::Tmdb);
+
         let kind = if self.row.kind == "show" { ItemKind::Show } else { ItemKind::Movie };
         let query = query.filter(|q| !q.trim().is_empty()).unwrap_or(folder_title);
+
         let results = state
             .metadata
             .search(state, chosen, kind, &query, if provider.is_some() { None } else { folder_year })
             .await
             .map_err(|e| ApiError::bad_request(format!("{e:#}")))?;
+
         Ok(MatchCandidates { provider: chosen, query, results })
     }
 
@@ -487,10 +529,16 @@ pub(super) async fn episodes(state: &AppState, user: &User, item_id: i64) -> Api
 
 pub(super) fn next_up(eps: &[Episode]) -> Option<(&Episode, bool)> {
     let last = eps.iter().filter(|e| e.updated_at.is_some()).max_by_key(|e| e.updated_at)?;
-    if last.finished != Some(true) && last.position.unwrap_or(0.0) > 5.0 {
-        return Some((last, true));
+
+    if last.finished != Some(true) {
+        let started = last.position.unwrap_or(0.0) > 5.0;
+        if started || (last.season != Some(0) && last.episode.is_some()) {
+            return Some((last, started));
+        }
     }
+
     let idx = eps.iter().position(|e| e.id == last.id)?;
+
     eps[idx + 1..]
         .iter()
         .find(|e| e.season != Some(0) && e.episode.is_some() && e.finished != Some(true))
@@ -510,9 +558,12 @@ impl Video {
                 .bind(id)
                 .fetch_optional(&state.db)
                 .await?;
+
         let Some(ep) = ep else { return Ok(None) };
+
         let library: String =
             sqlx::query_scalar("SELECT library FROM items WHERE id = ?").bind(ep.item_id).fetch_one(&state.db).await?;
+
         Ok(access.sees(ep.item_id, &library).then(|| Self { ep, access: access.clone() }))
     }
 
@@ -522,6 +573,7 @@ impl Video {
 
     async fn neighbours(&self, state: &AppState) -> ApiResult<(Option<Video>, Option<Video>)> {
         let mut eps = episodes(state, self.access.person(), self.ep.item_id).await?;
+
         eps.retain(|e| {
             if self.ep.episode.is_none() {
                 e.episode.is_none() && e.season == self.ep.season
@@ -529,6 +581,7 @@ impl Video {
                 e.episode.is_some()
             }
         });
+
         let Some(p) = eps.iter().position(|e| e.id == self.ep.id) else { return Ok((None, None)) };
         let wrap = |e: &Episode| Video { ep: e.clone(), access: self.access.clone() };
         Ok((p.checked_sub(1).map(|p| wrap(&eps[p])), eps.get(p + 1).map(wrap)))
@@ -576,6 +629,7 @@ impl Video {
     async fn still(&self) -> String {
         let local = local_still(FsPath::new(&self.ep.path));
         let version = local_version(local.as_deref());
+
         match self.access.room() {
             Some(code) => {
                 format!("/api/together/{code}/stills/{}?v={}&l={version}", self.ep.id, self.ep.artwork_version)
@@ -619,9 +673,11 @@ impl Video {
     async fn media(&self, ctx: &Context<'_>) -> ApiResult<Arc<MediaInfo>> {
         let state = ctx.state();
         let path = self.path();
+
         let info = state.media.probe(&path).await.map_err(|e| {
             ApiError::new(axum::http::StatusCode::UNPROCESSABLE_ENTITY, format!("can't read this file: {e:#}"))
         })?;
+
         if let Some(d) = info.duration {
             sqlx::query("UPDATE media SET duration = ? WHERE id = ? AND duration IS NULL")
                 .bind(d)
@@ -631,9 +687,11 @@ impl Video {
         }
 
         state.media.prefetch_subtitles(path);
+
         if let (_, Some(next)) = self.neighbours(state).await? {
             state.media.prefetch_subtitles(next.path());
         }
+
         Ok(info)
     }
 }
@@ -667,6 +725,11 @@ impl Library {
             .await?)
     }
 
+    /// A series counting as one, as its books are shown.
+    async fn book_count(&self, ctx: &Context<'_>) -> ApiResult<i64> {
+        Ok(crate::books::catalog::count(&ctx.state().db, &self.name).await? as i64)
+    }
+
     async fn show_count(&self, ctx: &Context<'_>) -> ApiResult<i64> {
         Ok(sqlx::query_scalar("SELECT COUNT(*) FROM items WHERE library = ? AND kind = 'show'")
             .bind(&self.name)
@@ -688,6 +751,7 @@ impl Library {
         .bind(&self.name)
         .fetch_all(&ctx.state().db)
         .await?;
+
         Ok(Title::from_rows(rows, &self.access))
     }
 }
@@ -727,6 +791,7 @@ impl Home {
     async fn continue_watching(&self, ctx: &Context<'_>) -> ApiResult<Vec<ContinueEntry>> {
         let state = ctx.state();
         let user = self.access.person();
+
         let recent: Vec<i64> = sqlx::query_scalar(
             "SELECT m.item_id FROM progress p JOIN media m ON m.path = p.media_path
              WHERE p.user_id = ? GROUP BY m.item_id ORDER BY MAX(p.updated_at) DESC LIMIT 30",
@@ -734,12 +799,15 @@ impl Home {
         .bind(user.id)
         .fetch_all(&state.db)
         .await?;
+
         let mut out = Vec::new();
+
         for item_id in recent {
             let Some(title) = Title::load(state, &self.access, item_id).await? else { continue };
             let eps = title.episodes(state).await?;
             let Some((ep, resuming)) = next_up(eps) else { continue };
             let watched_at = eps.iter().filter_map(|e| e.updated_at).max();
+
             out.push(ContinueEntry {
                 position: if resuming { ep.position.unwrap_or(0.0) } else { 0.0 },
                 up_next: !resuming,
@@ -749,16 +817,19 @@ impl Home {
                 watched_at,
                 video: title.video(ep),
             });
+
             if out.len() >= 16 {
                 break;
             }
         }
+
         Ok(out)
     }
 
     async fn recently_added(&self, ctx: &Context<'_>) -> ApiResult<Vec<Shelf>> {
         let state = ctx.state();
         let mut shelves = Vec::new();
+
         for library in self.access.person().libraries(state).await? {
             let rows: Vec<ItemRow> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
                 "SELECT {ITEM_COLUMNS} FROM items i WHERE i.library = ?
@@ -767,8 +838,10 @@ impl Home {
             .bind(&library)
             .fetch_all(&state.db)
             .await?;
+
             shelves.push(Shelf { library, titles: Title::from_rows(rows, &self.access) });
         }
+
         Ok(shelves)
     }
 
@@ -800,6 +873,7 @@ impl Fuzzy {
     fn rank<T, const N: usize>(&self, candidates: Vec<T>, limit: usize, fields: impl Fn(&T) -> [&str; N]) -> Vec<T> {
         let mut matcher = Matcher::new(Config::DEFAULT);
         let mut buf = Vec::new();
+
         let mut scored: Vec<(u32, usize, T)> = candidates
             .into_iter()
             .filter_map(|c| {
@@ -810,9 +884,11 @@ impl Fuzzy {
                         (score >= self.floor).then_some((score, f.chars().count()))
                     })
                     .max_by_key(|&(score, len)| (score, Reverse(len)))?;
+
                 Some((best.0, best.1, c))
             })
             .collect();
+
         scored.sort_by_key(|&(score, len, _)| (Reverse(score), len));
         scored.into_iter().take(limit).map(|(_, _, c)| c).collect()
     }
@@ -829,10 +905,12 @@ async fn search(state: &AppState, access: &Arc<Access>, q: &str) -> ApiResult<Se
     let Some(fuzzy) = Fuzzy::new(q) else {
         return Ok(SearchResults { titles: Vec::new(), videos: Vec::new() });
     };
+
     let rows: Vec<SearchRow> =
         sqlx::query_as(sqlx::AssertSqlSafe(format!("SELECT {ITEM_COLUMNS}, i.folder_title FROM items i")))
             .fetch_all(&state.db)
             .await?;
+
     let rows = rows.into_iter().filter(|r| access.sees(r.item.id, &r.item.library)).collect();
     let rows = fuzzy.rank(rows, 12, |r| [r.item.title.as_str(), r.folder_title.as_str()]);
     let titles = Title::from_rows(rows.into_iter().map(|r| r.item).collect(), access);
@@ -842,11 +920,14 @@ async fn search(state: &AppState, access: &Arc<Access>, q: &str) -> ApiResult<Se
     )
     .fetch_all(&state.db)
     .await?;
+
     let eps = eps.into_iter().filter(|e| access.sees(e.1, &e.2)).collect();
     let mut videos = Vec::new();
+
     for (id, ..) in fuzzy.rank(eps, 8, |e| [e.3.as_str()]) {
         videos.extend(Video::load(state, access, id).await?);
     }
+
     Ok(SearchResults { titles, videos })
 }
 
@@ -903,6 +984,7 @@ async fn artwork_upload(ctx: &Context<'_>, image: Option<Upload>) -> ApiResult<O
     let Some(image) = image else { return Ok(None) };
     let value = image.value(ctx).map_err(|e| ApiError::bad_request(e.to_string()))?;
     let content = value.content;
+
     tokio::task::spawn_blocking(move || {
         validate_image(&content).map_err(ApiError::bad_request)?;
         Ok(Some(content.to_vec()))
@@ -913,9 +995,11 @@ async fn artwork_upload(ctx: &Context<'_>, image: Option<Upload>) -> ApiResult<O
 
 async fn set_watched(state: &AppState, user: &User, media: &[(String, Option<f64>)], watched: bool) -> ApiResult<()> {
     let mut tx = state.db.begin().await?;
+
     for (path, duration) in media {
         if watched {
             let d = duration.unwrap_or(1.0);
+
             sqlx::query(
                 "INSERT INTO progress (user_id, media_path, position, duration, finished, updated_at) VALUES (?, ?, ?, ?, 1, ?)
                  ON CONFLICT(user_id, media_path) DO UPDATE SET position = excluded.position, duration = excluded.duration,
@@ -936,6 +1020,7 @@ async fn set_watched(state: &AppState, user: &User, media: &[(String, Option<f64
                 .await?;
         }
     }
+
     tx.commit().await?;
     Ok(())
 }
@@ -945,23 +1030,29 @@ impl LibraryMutation {
     async fn set_watched(&self, ctx: &Context<'_>, video_ids: Vec<i64>, watched: bool) -> ApiResult<Vec<Video>> {
         let (state, access) = (ctx.state(), ctx.access()?);
         let mut media = Vec::new();
+
         for id in &video_ids {
             let video = Video::load(state, &access, *id).await?.ok_or_else(|| ApiError::not_found("video"))?;
             media.push((video.ep.path.clone(), video.ep.duration));
         }
+
         set_watched(state, access.person(), &media, watched).await?;
         let mut out = Vec::new();
+
         for id in video_ids {
             out.extend(Video::load(state, &access, id).await?);
         }
+
         Ok(out)
     }
 
     async fn set_title_watched(&self, ctx: &Context<'_>, id: i64, watched: bool) -> ApiResult<Title> {
         let (state, access) = (ctx.state(), ctx.access()?);
         Title::load(state, &access, id).await?.ok_or_else(|| ApiError::not_found("title"))?;
+
         let media: Vec<(String, Option<f64>)> =
             sqlx::query_as("SELECT path, duration FROM media WHERE item_id = ?").bind(id).fetch_all(&state.db).await?;
+
         set_watched(state, access.person(), &media, watched).await?;
         Title::load(state, &access, id).await?.ok_or_else(|| ApiError::not_found("title"))
     }
@@ -969,10 +1060,13 @@ impl LibraryMutation {
     async fn save_progress(&self, ctx: &Context<'_>, video_id: i64, position: f64, duration: f64) -> ApiResult<Video> {
         let (state, access) = (ctx.state(), ctx.access()?);
         let video = Video::load(state, &access, video_id).await?.ok_or_else(|| ApiError::not_found("video"))?;
+
         if !(position.is_finite() && duration.is_finite() && duration > 0.0) {
             return Err(ApiError::bad_request("bad position"));
         }
+
         let finished = position / duration >= 0.92 || duration - position <= 30.0;
+
         sqlx::query(
             "INSERT INTO progress (user_id, media_path, position, duration, finished, updated_at) VALUES (?, ?, ?, ?, ?, ?)
              ON CONFLICT(user_id, media_path) DO UPDATE SET position = excluded.position, duration = excluded.duration,
@@ -987,6 +1081,7 @@ impl LibraryMutation {
         .bind(now())
         .execute(&state.db)
         .await?;
+
         Video::load(state, &access, video_id).await?.ok_or_else(|| ApiError::not_found("video"))
     }
 
@@ -1000,11 +1095,13 @@ impl LibraryMutation {
         let (state, access) = (ctx.state(), ctx.access()?);
         let title = Title::load(state, &access, id).await?.ok_or_else(|| ApiError::not_found("title"))?;
         title.editor(ctx)?;
+
         state
             .metadata
             .apply(state, id, provider, &provider_id, true)
             .await
             .map_err(|e| ApiError::bad_request(format!("{e:#}")))?;
+
         Title::load(state, &access, id).await?.ok_or_else(|| ApiError::not_found("title"))
     }
 
@@ -1019,6 +1116,7 @@ impl LibraryMutation {
         let title = Title::load(state, &access, id).await?.ok_or_else(|| ApiError::not_found("title"))?;
         title.editor(ctx)?;
         let data = artwork_upload(ctx, image).await?;
+
         let sql = match kind {
             TitleArtwork::Poster => {
                 "UPDATE items SET poster_override = ?, artwork_version = artwork_version + 1 WHERE id = ?"
@@ -1027,6 +1125,8 @@ impl LibraryMutation {
                 "UPDATE items SET backdrop_override = ?, artwork_version = artwork_version + 1 WHERE id = ?"
             },
         };
+
+        state.tints.forget_uploads(state, id).await?;
         sqlx::query(sql).bind(data).bind(id).execute(&state.db).await?;
         state.events.send(crate::events::Event::MetadataUpdated { item_id: id });
         Title::load(state, &access, id).await?.ok_or_else(|| ApiError::not_found("title"))
@@ -1038,11 +1138,13 @@ impl LibraryMutation {
         let title = Title::load(state, &access, video.ep.item_id).await?.ok_or_else(|| ApiError::not_found("title"))?;
         title.editor(ctx)?;
         let data = artwork_upload(ctx, image).await?;
+
         sqlx::query("UPDATE media SET still_override = ?, artwork_version = artwork_version + 1 WHERE id = ?")
             .bind(data)
             .bind(video_id)
             .execute(&state.db)
             .await?;
+
         state.events.send(crate::events::Event::MetadataUpdated { item_id: video.ep.item_id });
         Video::load(state, &access, video_id).await?.ok_or_else(|| ApiError::not_found("video"))
     }
@@ -1051,11 +1153,13 @@ impl LibraryMutation {
         let (state, access) = (ctx.state(), ctx.access()?);
         let title = Title::load(state, &access, id).await?.ok_or_else(|| ApiError::not_found("title"))?;
         title.editor(ctx)?;
+
         let (match_state, provider, provider_id): (String, Option<String>, Option<String>) =
             sqlx::query_as("SELECT match_state, provider, provider_id FROM items WHERE id = ?")
                 .bind(id)
                 .fetch_one(&state.db)
                 .await?;
+
         match (parse_provider(provider.as_deref()), provider_id) {
             (Some(p), Some(pid)) => state
                 .metadata
@@ -1067,9 +1171,11 @@ impl LibraryMutation {
                     .bind(id)
                     .execute(&state.db)
                     .await?;
+
                 state.metadata.wake();
             },
         }
+
         Title::load(state, &access, id).await?.ok_or_else(|| ApiError::not_found("title"))
     }
 }
@@ -1086,6 +1192,7 @@ mod fuzzy_tests {
     fn matches_across_punctuation_and_accents() {
         let titles =
             ["Re:ZERO -Starting Life in Another World-", "Attack on Titan", "Pokémon", "Neon Genesis Evangelion"];
+
         assert_eq!(hits("rezero", &titles), ["Re:ZERO -Starting Life in Another World-"]);
         assert_eq!(hits("aot", &titles)[0], "Attack on Titan");
         assert_eq!(hits("pokemon", &titles), ["Pokémon"]);
@@ -1137,6 +1244,7 @@ mod tests {
             episode(3, 2, Some(1), false, None),
             episode(4, 0, Some(1), false, None),
         ];
+
         assert_eq!(next_up(&eps).map(|(e, resume)| (e.id, resume)), Some((3, false)));
         eps[1].updated_at = Some(20);
         eps[1].position = Some(30.0);
@@ -1146,5 +1254,17 @@ mod tests {
         eps[2].finished = Some(true);
         eps[2].updated_at = Some(30);
         assert!(next_up(&eps).is_none());
+    }
+
+    #[test]
+    fn next_up_keeps_a_barely_started_episode() {
+        let mut eps = vec![
+            episode(1, 1, Some(1), true, Some(10)),
+            episode(2, 1, Some(2), false, Some(20)),
+            episode(3, 1, Some(3), false, None),
+        ];
+
+        eps[1].position = Some(3.0);
+        assert_eq!(next_up(&eps).map(|(e, resume)| (e.id, resume)), Some((2, false)));
     }
 }

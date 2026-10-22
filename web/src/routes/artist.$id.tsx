@@ -8,10 +8,8 @@ import { Empty, Page, Section } from '../components/Page'
 import { TitleSkeleton } from '../components/Skeleton'
 import { Button } from '../components/ui'
 import { graphql } from '../gql'
-import { useAmbient } from '../lib/ambient'
 import { request } from '../lib/api'
 import { useTitle } from '../lib/title'
-import { cover } from '../music/api'
 import { AlbumGrid, AlbumTile, Cover, StarButton, TrackList } from '../music/components'
 import { music } from '../music/player'
 
@@ -21,6 +19,7 @@ const ArtistQuery = graphql(`
   query Artist($id: Int!) {
     artist(id: $id) {
       ...ArtistCard
+      coverTint
       albums {
         ...AlbumCard
         releaseTypes
@@ -39,7 +38,7 @@ function ArtistPage() {
   const id = Number(Route.useParams().id)
   const { data: artist, isPending } = useQuery({ queryKey: ['music', 'artist', id], queryFn: async () => (await request(ArtistQuery, { id })).artist })
   useTitle(artist?.name)
-  const tint = useAmbient(artist?.cover ? cover(artist.cover, 32) : null)
+  const tint = artist?.coverTint ?? null
   const [all, setAll] = useState(false)
 
   if (isPending) return <TitleSkeleton />

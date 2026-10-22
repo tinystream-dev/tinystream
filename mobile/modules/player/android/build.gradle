@@ -1,0 +1,27 @@
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+
+group = 'dev.tinystream.player'
+
+def media3 = '1.11.1'
+
+android {
+  namespace 'dev.tinystream.player'
+  defaultConfig {
+    versionCode 1
+    versionName '1.0'
+  }
+}
+
+dependencies {
+  implementation 'com.facebook.react:react-android'
+  implementation "androidx.media3:media3-exoplayer:$media3"
+  implementation "androidx.media3:media3-session:$media3"
+  implementation 'com.squareup.okhttp3:okhttp:4.9.2'
+  testImplementation 'junit:junit:4.13.2'
+}
+
+apply from: '../../../gradle/rust.gradle'
+rust.jni('tinystream-subtitles')

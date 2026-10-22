@@ -23,6 +23,7 @@ import {
   VolumeX,
 } from 'lucide-react'
 import { type ReactNode, type RefObject, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { clock, language } from '@tinystream/shared/format'
 import { Shortcuts } from '../components/Shell'
 import { Squircle } from '../components/Squircle'
 import { MenuItem, Panel, Popover, Segmented, Spinner, useTip } from '../components/ui'
@@ -32,21 +33,32 @@ import { type Chapter, type Clip, type Playback, request } from '../lib/api'
 import { fetchClip } from '../lib/clips'
 import type { SeriesGlimpse } from '../components/SeriesPanel'
 import { airs, episodeCode } from '../lib/downloads'
-import { clock, language } from '../lib/format'
 import { useCanClip, useMe } from '../lib/hooks'
 import { ClipEditor } from './ClipEditor'
 import { StreamEngine, plan } from './engine'
 import { type RoomContext, RoomButton, RoomNotices, TapToJoin, controlledBy, useRoomSnapshot } from './Room'
 import { SubtitleRenderer } from './subtitles'
-import { canControl, pickShared } from './sync'
+import {
+  type AudioChoice,
+  type SubtitleChoice,
+  audioChoice,
+  canControl,
+  pickShared,
+  roomAudio,
+  roomSubtitle,
+  sameAudio,
+  sameSubtitle,
+  subtitleChoice,
+} from './sync'
 
 type Quality = 'auto' | 1080 | 720 | 480
 
-const SKIPPABLE = /^(op|opening|intro|ed|ending|credits|preview|next episode|recap)\b/i
+// Not "intro": releases often call the cold open that, and it's part of the episode.
+const SKIPPABLE = /^(op|opening|ed|ending|credits|preview|next episode|recap)\b/i
 
 function skipLabel(title: string) {
   const t = title.toLowerCase()
-  if (/^(op|opening|intro)/.test(t)) return 'Skip opening'
+  if (/^(op|opening)/.test(t)) return 'Skip opening'
   if (/^(ed|ending|credits)/.test(t)) return 'Skip credits'
   if (/^recap/.test(t)) return 'Skip recap'
   return 'Skip preview'
@@ -57,11 +69,36 @@ export const pref = {
   set: (k: string, v: string) => localStorage.setItem(`tinystream.${k}`, v),
 }
 
+function readChoice<T>(k: string): T | 'off' | null {
+  const v = pref.get(k)
+  if (!v) return null
+  if (v === 'off') return v
+  try {
+    return JSON.parse(v) as T
+  } catch {
+    return null
+  }
+}
+
+/** The audio picked last for this show, or anywhere when it's new. */
+function defaultAudio(pb: Playback): number | null {
+  const choice = readChoice<AudioChoice>(`audio.${pb.title.id}`) ?? readChoice<AudioChoice>('audioTrack')
+  const lang = pref.get('audioLanguage')
+  const a =
+    (choice && choice !== 'off' && sameAudio(pb.media.audio, choice)) ||
+    (lang && pb.media.audio.find((t) => t.language === lang)) ||
+    pb.media.audio.find((t) => t.default)
+  return a?.index ?? null
+}
+
+/** The subtitles picked last for this show, or anywhere when it's new. */
 function defaultSubtitle(pb: Playback): string | null {
   const usable = pb.media.subtitles.filter((s) => s.supported)
-  if (!usable.length || pref.get('subtitles') === 'off') return null
+  const choice = readChoice<SubtitleChoice>(`subtitles.${pb.title.id}`) ?? readChoice<SubtitleChoice>('subtitleTrack')
+  if (!usable.length || choice === 'off' || (!choice && pref.get('subtitles') === 'off')) return null
   const lang = pref.get('subtitleLanguage')
   return (
+    (choice && sameSubtitle(usable, choice)) ||
     (lang && usable.find((s) => s.language === lang && !s.forced)?.id) ||
     usable.find((s) => s.default)?.id ||
     usable.find((s) => !s.forced)?.id ||
@@ -248,9 +285,7 @@ export function Player({ mediaId, room, editClip, startAt }: { mediaId: number; 
   // Pick initial tracks once the file's info arrives. (Rooms pick below.)
   useEffect(() => {
     if (!pb || room) return
-    const lang = pref.get('audioLanguage')
-    const a = (lang && pb.media.audio.find((t) => t.language === lang)) || pb.media.audio.find((t) => t.default)
-    setAudioIndex(a?.index ?? null)
+    setAudioIndex(defaultAudio(pb))
     setSubtitle(defaultSubtitle(pb))
   }, [pb, room])
 
@@ -270,20 +305,27 @@ export function Player({ mediaId, room, editClip, startAt }: { mediaId: number; 
     if (!room || !pb || !rs || !shared) return
     const audio = change.audio !== undefined ? change.audio : shared.audio
     const sub = change.subtitle !== undefined ? change.subtitle : shared.subtitle
+    const track = pb.media.subtitles.find((s) => s.id === sub)
     room.client.setTracks({
+      // Kept while off, so turning them back on finds the same track.
+      ...rs.tracks,
+      ...(track && roomSubtitle(track)),
       mediaId: pb.id,
       audio,
-      audioLanguage: pb.media.audio.find((a) => a.index === audio)?.language ?? null,
+      ...roomAudio(pb.media.audio.find((a) => a.index === audio)),
       subtitle: sub,
-      // Kept while off, so turning them back on finds the same language.
-      subtitleLanguage: sub ? (pb.media.subtitles.find((s) => s.id === sub)?.language ?? null) : rs.tracks.subtitleLanguage,
     })
   }
   const chooseAudio = (index: number) => {
     resumeAt.current = videoRef.current?.currentTime ?? null
     setAudioIndex(index)
-    const lang = pb?.media.audio.find((a) => a.index === index)?.language
-    if (lang) pref.set('audioLanguage', lang)
+    const track = pb?.media.audio.find((a) => a.index === index)
+    if (track?.language) pref.set('audioLanguage', track.language)
+    if (pb && track) {
+      const choice = JSON.stringify(audioChoice(track))
+      pref.set(`audio.${pb.title.id}`, choice)
+      pref.set('audioTrack', choice)
+    }
     if (room) {
       setOwnAudio(scope === 'me')
       if (scope === 'everyone') shareTracks({ audio: index })
@@ -292,8 +334,13 @@ export function Player({ mediaId, room, editClip, startAt }: { mediaId: number; 
   const chooseSubtitle = (id: string | null) => {
     setSubtitle(id)
     pref.set('subtitles', id ? 'on' : 'off')
-    const lang = id && pb?.media.subtitles.find((s) => s.id === id)?.language
-    if (lang) pref.set('subtitleLanguage', lang)
+    const track = id ? pb?.media.subtitles.find((s) => s.id === id) : null
+    if (track?.language) pref.set('subtitleLanguage', track.language)
+    if (pb) {
+      const choice = track ? JSON.stringify(subtitleChoice(track)) : 'off'
+      pref.set(`subtitles.${pb.title.id}`, choice)
+      if (track) pref.set('subtitleTrack', choice)
+    }
     if (room) {
       setOwnSubtitle(scope === 'me')
       if (scope === 'everyone') shareTracks({ subtitle: id })
@@ -539,9 +586,9 @@ export function Player({ mediaId, room, editClip, startAt }: { mediaId: number; 
             paused: v.paused,
             tracks: {
               audio: audioIndex ?? null,
-              audioLanguage: pb.media.audio.find((a) => a.index === audioIndex)?.language ?? null,
+              ...roomAudio(pb.media.audio.find((a) => a.index === audioIndex)),
               subtitle,
-              subtitleLanguage: pb.media.subtitles.find((s) => s.id === subtitle)?.language ?? null,
+              ...roomSubtitle(pb.media.subtitles.find((s) => s.id === subtitle)),
             },
           },
         })
@@ -564,7 +611,10 @@ export function Player({ mediaId, room, editClip, startAt }: { mediaId: number; 
     if (!ended || !pb?.next) return
     setCountdown(5)
     const id = setInterval(() => setCountdown((c) => (c === null ? null : c - 1)), 1000)
-    return () => clearInterval(id)
+    return () => {
+      clearInterval(id)
+      setCountdown(null)
+    }
   }, [ended, pb])
   useEffect(() => {
     if (countdown !== null && countdown <= 0 && pb?.next && controls) goTo(pb.next.id)
@@ -726,6 +776,16 @@ export function Player({ mediaId, room, editClip, startAt }: { mediaId: number; 
   const overview = details?.video?.overview ?? details?.title?.overview ?? null
 
   const showChrome = ((!playing && !rested) || !idle || !!error) && !clipping
+  // The skip button shows for a while as its chapter starts, then only with the controls.
+  const skipAt = skippable?.start ?? null
+  const [skipFresh, setSkipFresh] = useState<number | null>(null)
+  useEffect(() => {
+    if (skipAt === null) return
+    setSkipFresh(skipAt)
+    const t = setTimeout(() => setSkipFresh(null), 6000)
+    return () => clearTimeout(t)
+  }, [skipAt])
+  const showSkip = skipFresh === skipAt || showChrome
   const title = pb?.title.name ?? ''
   const subtitleLine = pb?.title.kind === 'SHOW' ? [pb.label, pb.name].filter(Boolean).join(' · ') : null
 
@@ -759,15 +819,25 @@ export function Player({ mediaId, room, editClip, startAt }: { mediaId: number; 
         onDoubleClick={() => pointerType.current !== 'touch' && toggleFullscreen()}
         onPlay={() => (setPlaying(true), setEnded(false), setCountdown(null))}
         onPause={() => (setPlaying(false), save())}
-        onWaiting={() => setWaiting(true)}
+        onWaiting={() => {
+          // Some files end a little short of their stated length, and the browser waits there instead of ending.
+          if (engine.current?.exhausted()) (setEnded(true), save())
+          else setWaiting(true)
+        }}
         onPlaying={() => (setWaiting(false), setStarted(true))}
         onCanPlay={() => (setWaiting(false), setStarted(true))}
         onStalled={() => engine.current?.recover()}
         onEnded={() => (setEnded(true), save())}
+        onSeeking={() => {
+          // A paused video doesn't play again on seeking back, so ending has to be undone here.
+          setEnded(false)
+        }}
         onRateChange={(e) => !room && setRate(e.currentTarget.playbackRate)}
         onTimeUpdate={(e) => {
           const v = e.currentTarget
           setTime(v.currentTime)
+          // Seeking to the end while paused doesn't always fire "ended".
+          if (v.ended) setEnded(true)
           const b = v.buffered
           const r: [number, number][] = []
           for (let i = 0; i < b.length; i++) r.push([b.start(i), b.end(i)])
@@ -831,9 +901,11 @@ export function Player({ mediaId, room, editClip, startAt }: { mediaId: number; 
         {room && <RoomButton ctx={room} />}
       </div>
 
-      <div className="absolute right-6 bottom-28 flex flex-col items-end gap-3">
+      <div className="absolute right-6 bottom-28 z-10 flex flex-col items-end gap-3">
         {skippable && !nearEnd && controls && (
-          <SkipPill onClick={() => seek(skippable.end)}>{skipLabel(skippable.title!)}</SkipPill>
+          <SkipPill shown={showSkip} onClick={() => seek(skippable.end)}>
+            {skipLabel(skippable.title!)}
+          </SkipPill>
         )}
         {pb?.next && (nearEnd || ended) && (
           <UpNext
@@ -1281,15 +1353,17 @@ export function ChromeButton({
   )
 }
 
-function SkipPill({ children, onClick }: { children: ReactNode; onClick: () => void }) {
+function SkipPill({ children, shown, onClick }: { children: ReactNode; shown: boolean; onClick: () => void }) {
   return (
-    <div className="lift animate-[pop_160ms_ease-out]">
+    <div
+      className={`animate-[pop_160ms_ease-out] transition-opacity duration-500 ${shown ? 'opacity-100' : 'pointer-events-none opacity-0'}`}
+    >
       <Squircle
         as="button"
-        radius={14}
+        radius={12}
         edge
         onClick={onClick}
-        className="flex h-11 items-center gap-2 bg-media-ink/12 px-4 text-sm font-medium text-media-ink backdrop-blur-xl transition-colors hover:bg-media-ink/20"
+        className="flex h-9 items-center gap-2 bg-media-ink/10 px-3.5 text-[13px] font-medium text-media-ink/85 backdrop-blur-xl transition-colors hover:bg-media-ink/20 hover:text-media-ink"
       >
         {children}
         <span className="text-2xs text-media-ink/50">S</span>
@@ -1310,34 +1384,48 @@ function UpNext({
   /** Missing when someone else decides. */
   onPlay?: () => void
 }) {
-  return (
-    <div className="lift animate-[pop_180ms_ease-out]">
-      <Squircle radius={16} edge className="w-80 bg-media-panel/85 p-2.5 backdrop-blur-xl">
-        <div className="flex gap-3">
-          <Squircle radius={9} className="aspect-video w-28 shrink-0 bg-panel">
-            <img src={still} alt="" className="size-full object-cover" />
-          </Squircle>
-          <div className="min-w-0 flex-1 py-0.5">
-            <p className="text-xs text-ink-3">Up next · {next.label}</p>
-            <p className="mt-0.5 line-clamp-2 text-sm leading-snug font-medium">{next.name ?? next.label}</p>
-          </div>
+  const body = (
+    <>
+      <div className="flex gap-3">
+        <Squircle radius={9} className="aspect-video w-28 shrink-0 bg-panel">
+          <img src={still} alt="" className="size-full object-cover" />
+        </Squircle>
+        <div className="min-w-0 flex-1 py-0.5">
+          <p className="text-xs text-ink-3">Up next · {next.label}</p>
+          <p className="mt-0.5 line-clamp-2 text-sm leading-snug font-medium">{next.name ?? next.label}</p>
         </div>
-        {onPlay && (
-        <button
-          onClick={onPlay}
-          className="relative mt-2.5 flex h-9 w-full items-center justify-center gap-2 overflow-hidden rounded-[10px] bg-accent/85 text-sm font-medium text-on-accent hover:bg-accent-hover"
+      </div>
+      {onPlay && (
+        <span
+          className={`relative mt-2.5 flex h-9 w-full items-center justify-center gap-2 overflow-hidden rounded-[10px] text-sm font-medium text-on-accent transition-colors ${countdown !== null ? 'bg-accent/40' : 'bg-accent/85 group-hover:bg-accent-hover'}`}
         >
           {/* The countdown, as a fill sweeping across. */}
-          {countdown !== null && (
-            <span className="absolute inset-0 origin-left animate-[sweep_5s_linear_forwards] bg-accent-hover" />
-          )}
+          {countdown !== null && <span className="absolute inset-0 origin-left animate-[sweep_5s_linear_forwards] bg-accent" />}
           <span className="relative flex items-center gap-2">
             <Play className="size-4 fill-current" />
             {countdown !== null ? 'Playing next' : 'Play now'}
           </span>
-        </button>
-        )}
-      </Squircle>
+        </span>
+      )}
+    </>
+  )
+  return (
+    <div className="lift animate-[pop_180ms_ease-out]">
+      {onPlay ? (
+        <Squircle
+          as="button"
+          radius={16}
+          edge
+          onClick={onPlay}
+          className="group block w-80 bg-media-panel/85 p-2.5 text-left backdrop-blur-xl transition-colors hover:bg-media-panel"
+        >
+          {body}
+        </Squircle>
+      ) : (
+        <Squircle radius={16} edge className="w-80 bg-media-panel/85 p-2.5 backdrop-blur-xl">
+          {body}
+        </Squircle>
+      )}
     </div>
   )
 }

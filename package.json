@@ -1,0 +1,17 @@
+{
+  "name": "tinystream",
+  "license": "AGPL-3.0-or-later",
+  "private": true,
+  "workspaces": [
+    "web",
+    "mobile",
+    "packages/*"
+  ],
+  "trustedDependencies": [
+    "@shopify/react-native-skia"
+  ],
+  "devDependencies": {
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0"
+  }
+}

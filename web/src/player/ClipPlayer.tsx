@@ -2,8 +2,8 @@
 
 import { Maximize, Minimize, Pause, PictureInPicture2, Play } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { clock } from '@tinystream/shared/format'
 import { Spinner } from '../components/ui'
-import { clock } from '../lib/format'
 import { music } from '../music/player'
 import { ChromeButton, type Hud, HudView, Timeline, VolumeControl, pref } from './Player'
 

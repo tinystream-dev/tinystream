@@ -55,15 +55,18 @@ impl Clips {
                 .fetch_all(&state.db)
                 .await
                 .unwrap_or_default();
+
         for (id, owner, screenshot) in rows {
             self.render_later(state, id, owner, screenshot);
         }
+
         self.kick(state);
     }
 
     pub fn render_later(self: &Arc<Self>, state: &Arc<AppState>, id: i64, owner: i64, screenshot: bool) {
         if screenshot {
             let (this, state) = (self.clone(), state.clone());
+
             tokio::spawn(async move {
                 let _ = this.shoot(&state, id).await;
             });
@@ -77,14 +80,17 @@ impl Clips {
             let _permit = self.shots.acquire().await?;
             self.render(state, id, &Arc::new(AtomicBool::new(false))).await
         };
+
         if let Err(e) = &result {
             tracing::warn!("taking screenshot #{id} failed: {e:#}");
+
             let _ = sqlx::query("UPDATE clips SET state = 'failed', error = ? WHERE id = ?")
                 .bind(format!("{e:#}"))
                 .bind(id)
                 .execute(&state.db)
                 .await;
         }
+
         changed(state, id).await;
         result
     }
@@ -92,32 +98,42 @@ impl Clips {
     pub fn enqueue(self: &Arc<Self>, state: &Arc<AppState>, clip: i64, owner: i64) {
         {
             let mut q = self.queue.lock().unwrap();
+
             if q.running.contains_key(&clip) || q.waiting.iter().any(|(c, _)| *c == clip) {
                 return;
             }
+
             q.waiting.push_back((clip, owner));
         }
+
         self.kick(state);
     }
 
     fn kick(self: &Arc<Self>, state: &Arc<AppState>) {
         let config = state.config.current();
+
         if !config.clips.enabled {
             return;
         }
+
         let mut q = self.queue.lock().unwrap();
+
         while q.running.len() < config.clips.concurrency as usize {
             let busy: Vec<i64> = q.running.values().map(|r| r.owner).collect();
+
             let Some(pos) = q.waiting.iter().position(|(_, owner)| !busy.contains(owner)) else {
                 break;
             };
+
             let (clip, owner) = q.waiting.remove(pos).unwrap();
             let cancel = Arc::new(AtomicBool::new(false));
             q.running.insert(clip, Running { owner, cancel: cancel.clone(), progress: 0.0 });
             let (this, state) = (self.clone(), state.clone());
+
             tokio::spawn(async move {
                 if let Err(e) = this.render(&state, clip, &cancel).await {
                     let stopped = cancel.load(Ordering::Relaxed);
+
                     let result = if stopped && !state.config.current().clips.enabled {
                         sqlx::query("UPDATE clips SET state = 'queued' WHERE id = ?")
                             .bind(clip)
@@ -127,17 +143,21 @@ impl Clips {
                         if !stopped {
                             tracing::warn!("rendering clip #{clip} failed: {e:#}");
                         }
+
                         let message = if stopped { "Stopped".to_string() } else { format!("{e:#}") };
+
                         sqlx::query("UPDATE clips SET state = 'failed', error = ? WHERE id = ?")
                             .bind(message)
                             .bind(clip)
                             .execute(&state.db)
                             .await
                     };
+
                     if let Err(e) = result {
                         tracing::warn!("{e}");
                     }
                 }
+
                 this.queue.lock().unwrap().running.remove(&clip);
                 changed(&state, clip).await;
                 this.kick(&state);
@@ -149,16 +169,19 @@ impl Clips {
         let mut q = self.queue.lock().unwrap();
         let before = q.waiting.len();
         q.waiting.retain(|(c, _)| *c != clip);
+
         if let Some(r) = q.running.get(&clip) {
             r.cancel.store(true, Ordering::Relaxed);
             return true;
         }
+
         q.waiting.len() != before
     }
 
     pub fn pause_all(&self) {
         let mut q = self.queue.lock().unwrap();
         q.waiting.clear();
+
         for r in q.running.values() {
             r.cancel.store(true, Ordering::Relaxed);
         }
@@ -170,6 +193,7 @@ impl Clips {
 
     async fn render(self: &Arc<Self>, state: &Arc<AppState>, id: i64, cancel: &Arc<AtomicBool>) -> anyhow::Result<()> {
         let _busy = state.media.busy.hold();
+
         let row: Option<(
             i64,
             Option<i64>,
@@ -193,6 +217,7 @@ impl Clips {
         .bind(id)
         .fetch_optional(&state.db)
         .await?;
+
         let Some((
             owner,
             media_id,
@@ -212,16 +237,20 @@ impl Clips {
         else {
             return Ok(());
         };
+
         sqlx::query("UPDATE clips SET state = 'rendering', error = NULL WHERE id = ?")
             .bind(id)
             .execute(&state.db)
             .await?;
+
         changed(state, id).await;
 
         let what = if is_screenshot { "screenshot" } else { "clip" };
+
         let video = source_file(state, media_id, &source)
             .await?
             .with_context(|| format!("the video this {what} came from is gone"))?;
+
         if fingerprint(&video) != Some((size, mtime)) {
             anyhow::bail!(if is_screenshot {
                 "the video this screenshot came from has changed"
@@ -229,10 +258,12 @@ impl Clips {
                 "the video this clip came from has changed; open the clip in the editor to check its range"
             });
         }
+
         let subtitles = match subtitles {
             Some(track) => Some(subtitle_source(state, &video, &track).await?),
             None => None,
         };
+
         let (fonts_dir, default_font) = fonts(state)?;
         let out = rendered_file(state, owner, id, is_screenshot)?;
         std::fs::create_dir_all(out.parent().unwrap())?;
@@ -240,6 +271,7 @@ impl Clips {
 
         let (width, height, fps) = if is_screenshot {
             let o = out.clone();
+
             let shot = tokio::task::spawn_blocking(move || {
                 let fonts = burn::Fonts { dir: fonts_dir.as_deref(), default: &default_font };
                 let shot = screenshot::take(&video, start, subtitles, &fonts)?;
@@ -248,6 +280,7 @@ impl Clips {
                 anyhow::Ok(shot)
             })
             .await??;
+
             tracing::info!(
                 "took screenshot #{id} ({}x{}, {} KB) in {:.1?}",
                 shot.width,
@@ -255,6 +288,7 @@ impl Clips {
                 shot.png.len() / 1024,
                 started.elapsed()
             );
+
             (shot.width, shot.height, None)
         } else {
             let recipe = Recipe {
@@ -266,10 +300,13 @@ impl Clips {
                 half_rate,
                 title: title.clone(),
             };
+
             self.render_clip(state, id, cancel, video, recipe, (fonts_dir, default_font), &out).await?
         };
+
         let bytes = std::fs::metadata(&out)?.len() as i64;
         let t = now();
+
         let updated = sqlx::query(
             "UPDATE clips SET state = 'ready', error = NULL, bytes = ?, width_px = ?, height_px = ?, fps = ?,
                 rendered_at = ?, viewed_at = ? WHERE id = ?",
@@ -284,11 +321,14 @@ impl Clips {
         .execute(&state.db)
         .await?
         .rows_affected();
+
         if updated == 0 {
             remove_files(&out);
             return Ok(());
         }
+
         make_room(state, owner).await?;
+
         if rendered_before.is_none() && !is_screenshot {
             notifications::send(
                 state,
@@ -306,6 +346,7 @@ impl Clips {
             )
             .await;
         }
+
         Ok(())
     }
 
@@ -323,9 +364,11 @@ impl Clips {
         let hw = state.media.hw.device();
         let (this, st, cancel2, out2) = (self.clone(), state.clone(), cancel.clone(), out.to_path_buf());
         let started = Instant::now();
+
         let rendered = tokio::task::spawn_blocking(move || {
             let fonts = burn::Fonts { dir: fonts_dir.as_deref(), default: &default_font };
             let mut last = Instant::now();
+
             let mut progress = |p: f32| {
                 if let Some(r) = this.queue.lock().unwrap().running.get_mut(&id) {
                     r.progress = p;
@@ -336,13 +379,16 @@ impl Clips {
                     tokio::runtime::Handle::current().spawn(async move { changed(&st, id).await });
                 }
             };
+
             clip::render(&video, &recipe, &out2, hw.as_ref(), &fonts, &mut progress, &cancel2)
         })
         .await??;
+
         if cancel.load(Ordering::Relaxed) {
             let _ = std::fs::remove_file(out);
             anyhow::bail!("stopped");
         }
+
         tracing::info!(
             "rendered clip #{id} ({}x{}, {:.0} fps, {} KB) in {:.1?}",
             rendered.width,
@@ -351,11 +397,14 @@ impl Clips {
             std::fs::metadata(out)?.len() / 1024,
             started.elapsed()
         );
+
         let (o, poster) = (out.to_path_buf(), out.with_extension("jpg"));
+
         match tokio::task::spawn_blocking(move || crate::media::thumb::capture(&o, 640)).await? {
             Ok(jpeg) => std::fs::write(&poster, jpeg)?,
             Err(e) => tracing::warn!("no poster for clip #{id}: {e:#}"),
         }
+
         Ok((rendered.width, rendered.height, Some(rendered.fps)))
     }
 }
@@ -367,14 +416,17 @@ pub async fn changed(state: &AppState, id: i64) {
         .await
         .ok()
         .flatten();
+
     let Some((owner, clip_state)) = row else {
         return;
     };
+
     let mut users: Vec<i64> = sqlx::query_scalar("SELECT user_id FROM clip_shares WHERE clip_id = ?")
         .bind(id)
         .fetch_all(&state.db)
         .await
         .unwrap_or_default();
+
     users.push(owner);
     state.events.send(Event::ClipChanged { clip_id: id, users, state: clip_state, progress: state.clips.progress(id) });
 }
@@ -400,21 +452,26 @@ async fn evict(state: &AppState, id: i64, owner: i64) -> sqlx::Result<()> {
     if let Ok(f) = file(state, owner, id) {
         remove_files(&f);
     }
+
     sqlx::query("UPDATE clips SET state = 'evicted', bytes = NULL WHERE id = ? AND state = 'ready'")
         .bind(id)
         .execute(&state.db)
         .await?;
+
     changed(state, id).await;
     Ok(())
 }
 
 pub async fn delete(state: &AppState, id: i64, owner: i64) -> sqlx::Result<()> {
     state.clips.cancel(id);
+
     if let Ok(f) = file(state, owner, id) {
         remove_files(&f);
     }
+
     let users: Vec<i64> =
         sqlx::query_scalar("SELECT user_id FROM clip_shares WHERE clip_id = ?").bind(id).fetch_all(&state.db).await?;
+
     sqlx::query("DELETE FROM clips WHERE id = ?").bind(id).execute(&state.db).await?;
     notifications::withdraw(state, &format!("/clips?clip={id}")).await;
     let mut users = users;
@@ -425,18 +482,23 @@ pub async fn delete(state: &AppState, id: i64, owner: i64) -> sqlx::Result<()> {
 
 pub async fn make_room(state: &AppState, owner: i64) -> anyhow::Result<()> {
     let config = state.config.current();
+
     if let Some(user) = auth::load_user(state, owner).await.map_err(|e| anyhow::anyhow!(e.message))? {
         let p = &user.permissions;
         let rows = ready(state, Some(owner)).await?;
         let pinned_links = config.clips.public_links && p.clip_links;
         let (mut count, mut bytes) = (0u64, 0u64);
+
         for r in rows.iter().filter(|r| r.public && pinned_links) {
             count += !r.screenshot as u64;
             bytes += r.bytes as u64;
         }
+
         let (limit, space) = (p.clip_limit as u64, p.clip_storage as u64 * 1024 * 1024);
+
         for r in rows.iter().filter(|r| !(r.public && pinned_links)) {
             let fits = (limit == 0 || r.screenshot || count < limit) && (space == 0 || bytes + r.bytes as u64 <= space);
+
             if fits {
                 count += !r.screenshot as u64;
                 bytes += r.bytes as u64;
@@ -446,22 +508,27 @@ pub async fn make_room(state: &AppState, owner: i64) -> anyhow::Result<()> {
             }
         }
     }
+
     if config.clips.max_storage > 0 {
         let ceiling = config.clips.max_storage * 1024 * 1024;
         let rows = ready(state, None).await?;
         let mut total: u64 = rows.iter().map(|r| r.bytes as u64).sum();
+
         for r in rows.iter().rev() {
             if total <= ceiling {
                 break;
             }
+
             if r.public && pinned(state, r.owner).await {
                 continue;
             }
+
             tracing::info!("dropping the render of clip #{} to stay within [clips] max-storage", r.id);
             evict(state, r.id, r.owner).await?;
             total -= r.bytes as u64;
         }
     }
+
     Ok(())
 }
 
@@ -481,12 +548,13 @@ struct Ready {
 async fn ready(state: &AppState, owner: Option<i64>) -> sqlx::Result<Vec<Ready>> {
     let rows: Vec<(i64, i64, i64, bool, bool)> = sqlx::query_as(
         "SELECT id, owner_id, COALESCE(bytes, 0), public, screenshot FROM clips
-         WHERE state = 'ready' AND (?1 IS NULL OR owner_id = ?1)
+         WHERE state = 'ready' AND quote IS NULL AND (?1 IS NULL OR owner_id = ?1)
          ORDER BY COALESCE(viewed_at, rendered_at) DESC, id DESC",
     )
     .bind(owner)
     .fetch_all(&state.db)
     .await?;
+
     Ok(rows
         .into_iter()
         .map(|(id, owner, bytes, public, screenshot)| Ready { id, owner, bytes, public, screenshot })
@@ -500,12 +568,14 @@ pub async fn source_file(state: &AppState, media_id: Option<i64>, path: &str) ->
         },
         None => None,
     };
+
     let found = match found {
         Some(p) => Some(p),
         None => {
             sqlx::query_scalar("SELECT path FROM media WHERE path = ?").bind(path).fetch_optional(&state.db).await?
         },
     };
+
     Ok(found.map(PathBuf::from).filter(|p| p.is_file()))
 }
 
@@ -518,15 +588,19 @@ pub fn fingerprint(path: &Path) -> Option<(i64, i64)> {
 pub async fn subtitle_source(state: &AppState, video: &Path, track: &str) -> anyhow::Result<burn::Source> {
     let info = state.media.probe(video).await?;
     let t = info.subtitles.iter().find(|s| s.id == track).context("that subtitle track is gone")?;
+
     if t.supported {
         let ass = state.media.subtitles(video, track).await?;
         let (v, indexes) = (video.to_path_buf(), info.fonts.iter().map(|f| f.index).collect::<Vec<_>>());
+
         let fonts = tokio::task::spawn_blocking(move || {
             indexes.into_iter().filter_map(|i| crate::media::probe::attachment(&v, i).ok()).collect::<Vec<_>>()
         })
         .await?;
+
         return Ok(burn::Source::Text { ass, fonts });
     }
+
     anyhow::ensure!(BITMAP_SUBTITLES.contains(&t.codec.as_str()), "{} subtitles can't be burned in", t.codec);
     let stream = track.strip_prefix('s').and_then(|s| s.parse().ok()).context("bad subtitle track")?;
     Ok(burn::Source::Bitmap { stream })
@@ -535,18 +609,22 @@ pub async fn subtitle_source(state: &AppState, video: &Path, track: &str) -> any
 pub fn fonts(state: &AppState) -> anyhow::Result<(Option<PathBuf>, PathBuf)> {
     let config = state.config.current();
     let dir = config.clips.fonts_dir_path(state.config.config_dir());
+
     let default = match config.clips.default_font_path(state.config.config_dir()) {
         Some(f) => f,
         None => bundled_font(state)?,
     };
+
     Ok((dir, default))
 }
 
 fn bundled_font(state: &AppState) -> anyhow::Result<PathBuf> {
     let path = state.paths.cache_dir().join("fonts").join("NotoSans-Regular.ttf");
+
     if std::fs::metadata(&path).map(|m| m.len() as usize).ok() != Some(DEFAULT_FONT.len()) {
         std::fs::create_dir_all(path.parent().unwrap())?;
         std::fs::write(&path, DEFAULT_FONT)?;
     }
+
     Ok(path)
 }

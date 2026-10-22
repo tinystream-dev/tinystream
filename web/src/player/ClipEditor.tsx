@@ -56,7 +56,7 @@ export const allowanceQuery = {
 }
 import { type Preset, burnable, copyLink, fetchClip, length, presets, space, stamp, worstSize } from '../lib/clips'
 import { bytes } from '../lib/downloads'
-import { language } from '../lib/format'
+import { language } from '@tinystream/shared/format'
 import { onArrival, useMarkRead } from '../lib/notifications'
 import { ClipPlayer } from './ClipPlayer'
 import { StreamEngine, plan } from './engine'

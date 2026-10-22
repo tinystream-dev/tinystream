@@ -1,0 +1,2327 @@
+type Album {
+	id: Int!
+	name: String!
+	artist: String!
+	artists: [ArtistRef!]!
+	library: String!
+	year: Int
+	releaseDate: String
+	originalDate: String
+	genres: [String!]!
+	releaseTypes: [String!]!
+	labels: [String!]!
+	compilation: Boolean!
+	discTitles: [DiscTitle!]!
+	trackCount: Int!
+	duration: Float!
+	size: Int!
+	"""
+	Missing when there's no picture in its folder or its files.
+	"""
+	cover: String
+	"""
+	The most vivid colour of the cover as "r g b", empty until it's been worked out.
+	"""
+	coverTint: String
+	mbid: String
+	addedAt: Int!
+	starred: Boolean!
+	rating: Int
+	playCount: Int!
+	lastPlayed: Int
+	tracks: [Track!]!
+}
+
+enum AlbumSort {
+	NEWEST
+	NAME
+	ARTIST
+	YEAR
+	RANDOM
+	RECENT
+	FREQUENT
+	STARRED
+	RATED
+}
+
+type AppPassword {
+	id: Int!
+	name: String!
+	createdAt: Int!
+	lastUsed: Int
+	client: String
+}
+
+"""
+How tinystream looks for whoever's asking.
+"""
+type Appearance {
+	mode: SchemeMode!
+	"""
+	The scheme for the system's light mode; the only one in single mode.
+	"""
+	light: ColorScheme!
+	dark: ColorScheme!
+	style: ComponentStyle!
+	mediaTint: Boolean!
+}
+
+"""
+What someone picked for themselves; anything left out follows the server.
+"""
+type AppearanceSettings {
+	colors: SchemeChoice
+	style: ComponentStyle
+	"""
+	Let the scheme colour what sits over artwork and video, too.
+	"""
+	mediaTint: Boolean!
+}
+
+"""
+What someone picked for themselves; anything left out follows the server.
+"""
+input AppearanceSettingsInput {
+	colors: SchemeChoiceInput
+	style: ComponentStyle
+	"""
+	Let the scheme colour what sits over artwork and video, too.
+	"""
+	mediaTint: Boolean!
+}
+
+type AppliedRenames {
+	batch: String!
+	renamed: Int!
+	problems: [String!]!
+}
+
+type Artist {
+	id: Int!
+	name: String!
+	sortName: String!
+	library: String!
+	mbid: String
+	albumCount: Int!
+	trackCount: Int!
+	cover: String
+	"""
+	The most vivid colour of the cover as "r g b", empty until it's been worked out.
+	"""
+	coverTint: String
+	starred: Boolean!
+	rating: Int
+	albums: [Album!]!
+	"""
+	Albums by others that this artist is on.
+	"""
+	appearsOn: [Album!]!
+	topTracks(count: Int! = 10): [Track!]!
+}
+
+type ArtistRef {
+	id: Int!
+	name: String!
+}
+
+type AudioTrack {
+	index: Int!
+	codec: String!
+	codecString: String
+	channels: Int!
+	language: String
+	title: String
+	default: Boolean!
+}
+
+type AutomationConfig {
+	defaultMonitor: Monitor!
+	rssInterval: Duration!
+	retry: [RetryStep!]!
+	renameSuggestions: Boolean!
+}
+
+input AutomationConfigInput {
+	defaultMonitor: Monitor!
+	rssInterval: Duration!
+	retry: [RetryStepInput!]!
+	renameSuggestions: Boolean!
+}
+
+type Book {
+	id: Int!
+	library: String!
+	title: String!
+	sortTitle: String!
+	authors: [String!]!
+	"""
+	What the file says, or else what its title (or file name) does.
+	"""
+	series: String
+	seriesIndex: Float
+	"""
+	The book's own, or else what was found online.
+	"""
+	description: String
+	publisher: String
+	"""
+	A date, or just a year.
+	"""
+	published: String
+	year: Int
+	language: String
+	isbn: String
+	genres: [String!]!
+	format: BookFormat!
+	"""
+	Characters of text, which reading positions count in.
+	"""
+	length: Int!
+	chapterCount: Int!
+	"""
+	Pages in print, when that was found online.
+	"""
+	pages: Int
+	"""
+	Out of 10.
+	"""
+	rating: Float
+	size: Int!
+	addedAt: Int!
+	"""
+	Where what the book doesn't say came from: `apple-books` or `open-library`.
+	"""
+	provider: String
+	"""
+	The page about it where its details came from.
+	"""
+	providerUrl: String
+	"""
+	Whether it's been looked up online yet.
+	"""
+	fetched: Boolean!
+	cover: String
+	"""
+	The most vivid colour of the cover as "r g b", empty until it's been worked out.
+	"""
+	coverTint: String
+	"""
+	The text, as the readers show it: JSON, as `packages/shared/src/books.ts` describes it.
+	"""
+	content: String!
+	"""
+	Where the pictures in `content` are, each at this followed by its `src`.
+	"""
+	files: String!
+	"""
+	The file as it is.
+	"""
+	file: String!
+	reading: ReadingState
+	"""
+	Your quotes from it and the ones sent to you, in the order they're in the book.
+	"""
+	quotes: [Clip!]!
+}
+
+enum BookFormat {
+	EPUB
+	FB2
+	TXT
+}
+
+type BookShelf {
+	library: String!
+	books: [Book!]!
+}
+
+type CalendarEntry {
+	seriesId: Int!
+	title: Title
+	library: String!
+	show: String!
+	poster: String
+	backdrop: String
+	monitor: Monitor!
+	season: Int!
+	episode: Int!
+	absolute: Int
+	name: String
+	airAt: Int!
+	state: EpisodeState!
+	video: Video
+	download: EpisodeDownload
+	"""
+	The most vivid colour of the backdrop as "r g b", empty until it's been worked out.
+	"""
+	backdropTint: String
+}
+
+enum ChangedList {
+	DOWNLOADS
+	RENAME_SUGGESTIONS
+	REQUESTS
+	USERS
+	NOTIFICATIONS
+	APPEARANCE
+	PLAYLISTS
+}
+
+type Chapter {
+	start: Float!
+	end: Float!
+	title: String
+}
+
+type Clip {
+	id: Int!
+	screenshot: Boolean!
+	kind: ClipKind!
+	quote: ClipQuote
+	name: String!
+	mine: Boolean!
+	canManage: Boolean!
+	owner: User!
+	source: ClipSource!
+	start: Float!
+	end: Float!
+	audio: Int
+	subtitles: String
+	quality: ClipQuality!
+	state: ClipState!
+	progress: Float
+	error: String
+	bytes: Int
+	width: Int
+	height: Int
+	fps: Float
+	renderedAt: Int
+	createdAt: Int!
+	sharedAt: Int
+	public: Boolean!
+	link: String
+	linkLive: Boolean!
+	recipients: [ClipRecipient!]!
+	file: String!
+	poster: String
+}
+
+type ClipAllowance {
+	canClip: Boolean!
+	canLink: Boolean!
+	maxLength: Int!
+	bytes: Int!
+	rendered: Int!
+	storage: Int!
+	limit: Int!
+	customDefaultFont: Boolean!
+}
+
+type ClipChanged {
+	clipId: Int!
+	state: ClipState
+	progress: Float
+}
+
+enum ClipKind {
+	CLIP
+	SCREENSHOT
+	QUOTE
+}
+
+input ClipPatch {
+	name: String
+	public: Boolean
+	recipe: RecipeInput
+}
+
+type ClipQuality {
+	height: Int!
+	halfRate: Boolean!
+}
+
+type ClipQuote {
+	"""
+	What was quoted, its paragraphs a line apart.
+	"""
+	text: String!
+	author: String
+	"""
+	Where it is in the book as the book is now, in characters; null when the book was changed
+	and the text can't be found in it anymore.
+	"""
+	range: QuoteRange
+}
+
+type ClipRecipient {
+	user: User!
+	sharedAt: Int!
+	hidden: Boolean!
+}
+
+enum ClipScope {
+	MINE
+	RECEIVED
+	SENT
+	RENDERING
+}
+
+type ClipSource {
+	video: Video
+	title: Title
+	name: String!
+	kind: TitleKind!
+	label: String
+	year: Int
+	"""
+	The book a quote is from, while it's there and you can see it.
+	"""
+	book: Book
+	status: SourceStatus!
+}
+
+enum ClipState {
+	QUEUED
+	RENDERING
+	READY
+	FAILED
+	EVICTED
+}
+
+type ClipStorage {
+	usage: [ClipUsage!]!
+	publicClips: [Clip!]!
+	bytes: Int!
+	dir: String
+}
+
+type ClipUsage {
+	user: User!
+	bytes: Int!
+	rendered: Int!
+	clips: Int!
+	storage: Int!
+	limit: Int!
+}
+
+type ClipsConfig {
+	enabled: Boolean!
+	path: String
+	publicLinks: Boolean!
+	concurrency: Int!
+	maxStorage: Int!
+	fontsDir: String
+	defaultFont: String
+}
+
+input ClipsConfigInput {
+	enabled: Boolean!
+	path: String
+	publicLinks: Boolean!
+	concurrency: Int!
+	maxStorage: Int!
+	fontsDir: String
+	defaultFont: String
+}
+
+type ColorScheme {
+	id: String!
+	name: String!
+	builtIn: Boolean!
+	"""
+	Everyone on this server can pick it.
+	"""
+	published: Boolean!
+	editable: Boolean!
+	forkedFrom: SchemeOrigin
+	"""
+	`ts1.<payload>`: the scheme itself. Two schemes with the same code are the same scheme.
+	"""
+	code: String!
+	"""
+	The code with the name attached, for sharing.
+	"""
+	shareCode: String!
+	palette: Palette!
+}
+
+enum ComponentStyle {
+	LAYERED
+	FLAT
+	GLASS
+}
+
+enum Confidence {
+	HIGH
+	LOW
+}
+
+type ConfigChanged {
+	error: String
+}
+
+input ConfigPatch {
+	network: NetworkConfigInput
+	log: LogConfigInput
+	scan: ScanConfigInput
+	metadata: MetadataConfigInput
+	transcode: TranscodeConfigInput
+	clips: ClipsConfigInput
+	music: MusicConfigInput
+	downloads: DownloadsConfigInput
+	automation: AutomationConfigInput
+	requests: RequestsConfigInput
+	signIn: SignInConfigInput
+	smtp: SmtpConfigInput
+}
+
+type ConfiguredLibrary {
+	name: String!
+	path: String!
+	kind: LibraryKind!
+	metadataProvider: Provider
+	managed: Boolean!
+	profile: String
+	downloadPath: String
+	resolvedPath: String
+	exists: Boolean!
+	error: String
+	titleCount: Int!
+	skippedCount: Int!
+}
+
+type ContinueEntry {
+	video: Video!
+	position: Float!
+	upNext: Boolean!
+	newEpisode: Boolean!
+	watchedAt: Int
+}
+
+type ContrastWarning {
+	foreground: String!
+	background: String!
+	ratio: Float!
+	minimum: Float!
+}
+
+type CreatedInvite {
+	invite: Invite!
+	link: String!
+}
+
+type DecodedScheme {
+	name: String
+	code: String!
+	palette: Palette!
+}
+
+type DetectedSource {
+	kind: SourceKind!
+	url: String!
+	feed: String
+	name: String
+	searchable: Boolean!
+	sample: [Release!]!
+}
+
+type DiscTitle {
+	disc: Int!
+	title: String!
+}
+
+type DiscoverResult {
+	category: MediaCategory!
+	provider: Provider!
+	id: String!
+	name: String!
+	romaji: String
+	year: Int
+	poster: String
+	overview: String
+	library: String!
+	titleId: Int
+	seriesId: Int
+	monitor: Monitor
+	requestState: RequestState
+	because: String
+}
+
+type Discovery {
+	library: String!
+	results: [DiscoverResult!]!
+}
+
+type Download {
+	category: MediaCategory!
+	id: Int!
+	name: String!
+	seriesId: Int
+	seriesName: String
+	title: Title
+	poster: String
+	episodes: [EpisodeNumber!]!
+	source: String
+	size: Int
+	savePath: String!
+	state: DownloadState!
+	importState: ImportState!
+	importError: String
+	importMode: String
+	error: String
+	addedAt: Int!
+	finishedAt: Int
+	importedAt: Int
+	requestedBy: User
+	live: TorrentStatus
+	seedGoal: SeedGoal!
+	files: [TorrentFile!]!
+}
+
+type DownloadEngine {
+	version: String!
+	downloadRate: Int!
+	uploadRate: Int!
+	active: Int!
+	killSwitch: String
+	listening: String
+	listenError: String
+	slowHours: Boolean!
+	downloadPath: String!
+}
+
+enum DownloadState {
+	DOWNLOADING
+	SEEDING
+	PAUSED
+	DONE
+	FAILED
+	REMOVED
+}
+
+type DownloadsConfig {
+	path: String
+	import: ImportMode!
+	port: Int!
+	upnp: Boolean!
+	dht: Boolean!
+	maxActive: Int!
+	downloadLimit: Int!
+	uploadLimit: Int!
+	slowDownloadLimit: Int!
+	slowUploadLimit: Int!
+	slowFrom: String
+	slowTo: String
+	bindInterface: String
+	proxy: String
+	seeding: Seeding!
+}
+
+input DownloadsConfigInput {
+	path: String
+	import: ImportMode!
+	port: Int!
+	upnp: Boolean!
+	dht: Boolean!
+	maxActive: Int!
+	downloadLimit: Int!
+	uploadLimit: Int!
+	slowDownloadLimit: Int!
+	slowUploadLimit: Int!
+	slowFrom: String
+	slowTo: String
+	bindInterface: String
+	proxy: String
+	seeding: SeedingInput!
+}
+
+scalar Duration
+
+type EpisodeCounts {
+	have: Int!
+	wanted: Int!
+	missing: Int!
+	grabbed: Int!
+	total: Int!
+	upcoming: Int!
+	skipped: Int!
+}
+
+type EpisodeDownload {
+	stage: TorrentStage!
+	progress: Float!
+	downloadRate: Int!
+	eta: Int
+}
+
+type EpisodeNumber {
+	season: Int!
+	episode: Int!
+}
+
+input EpisodeNumberInput {
+	season: Int!
+	episode: Int!
+}
+
+enum EpisodeState {
+	IDLE
+	WANTED
+	GRABBED
+	MISSING
+	DONE
+	SKIPPED
+}
+
+type EpisodesImported {
+	library: String!
+	show: String!
+	titleId: Int
+	episodes: [EpisodeNumber!]!
+}
+
+union Event = ConfigChanged | ScanStarted | ScanFinished | LibraryChanged | MetadataChanged | ListChanged | SeriesChanged | EpisodesImported | NotificationReceived | ClipChanged | QueueChanged | PlaybackChanged
+
+type FileOperation {
+	kind: String!
+	src: String
+	dst: String!
+}
+
+type Folder {
+	name: String!
+	path: String!
+}
+
+type FolderListing {
+	path: String!
+	parent: String
+	home: String
+	folders: [Folder!]!
+}
+
+type Font {
+	index: Int!
+	filename: String!
+}
+
+type ForYou {
+	library: String!
+	shelves: [ForYouShelf!]!
+}
+
+type ForYouShelf {
+	key: String!
+	name: String!
+	results: [DiscoverResult!]!
+}
+
+type Gains {
+	"""
+	dB to bring the track to ReplayGain's reference loudness.
+	"""
+	trackGain: Float
+	trackPeak: Float
+	albumGain: Float
+	albumPeak: Float
+	"""
+	Neither tagged nor measured yet; `measureLoudness` sorts that out.
+	"""
+	pending: Boolean!
+}
+
+type Genre {
+	name: String!
+	trackCount: Int!
+	albumCount: Int!
+}
+
+enum Hardware {
+	AUTO
+	VAAPI
+	SOFTWARE
+}
+
+type HistoryBatch {
+	batch: String!
+	label: String!
+	at: Int!
+	count: Int!
+	undone: Boolean!
+	operations: [FileOperation!]!
+}
+
+type Home {
+	continueWatching: [ContinueEntry!]!
+	recentlyAdded: [Shelf!]!
+	popularHere: [PopularTitle!]!
+}
+
+enum ImportMode {
+	AUTO
+	HARDLINK
+	COPY
+	MOVE
+}
+
+enum ImportState {
+	PENDING
+	DONE
+	FAILED
+	SKIPPED
+}
+
+type Inbox {
+	items: [Notification!]!
+	unread: Int!
+}
+
+type Invite {
+	id: Int!
+	label: String!
+	createdAt: Int!
+	expiresAt: Int!
+	maxUses: Int!
+	uses: Int!
+	revoked: Boolean!
+}
+
+type InvitePreview {
+	expiresAt: Int!
+	remainingUses: Int!
+}
+
+"""
+A scalar that can represent any JSON value.
+"""
+scalar JSON
+
+type Library {
+	name: String!
+	kind: LibraryKind!
+	albumCount: Int!
+	trackCount: Int!
+	"""
+	A series counting as one, as its books are shown.
+	"""
+	bookCount: Int!
+	showCount: Int!
+	movieCount: Int!
+	titles: [Title!]!
+}
+
+type LibraryChanged {
+	library: String!
+}
+
+input LibraryInput {
+	name: String!
+	path: String!
+	kind: LibraryKind! = VIDEO
+	metadataProvider: Provider
+	managed: Boolean! = false
+	profile: String
+	downloadPath: String
+}
+
+enum LibraryKind {
+	VIDEO
+	MUSIC
+	BOOKS
+}
+
+type ListChanged {
+	list: ChangedList!
+}
+
+type ListenRoom {
+	code: String!
+	"""
+	What's queued, in order; the room's socket says which is playing.
+	"""
+	tracks: [Track!]!
+	hostName: String!
+	signedIn: Boolean!
+	isHost: Boolean!
+	canShare: Boolean!
+	canInvite: Boolean!
+}
+
+type LogConfig {
+	level: String!
+}
+
+input LogConfigInput {
+	level: String!
+}
+
+type LyricLine {
+	"""
+	Milliseconds in; missing for plain lyrics.
+	"""
+	start: Int
+	text: String!
+}
+
+type Lyrics {
+	synced: Boolean!
+	source: LyricsSource!
+	lines: [LyricLine!]!
+}
+
+enum LyricsSource {
+	FILE
+	EMBEDDED
+	ONLINE
+}
+
+type MatchCandidates {
+	provider: Provider!
+	query: String!
+	results: [ProviderTitle!]!
+}
+
+enum MatchState {
+	PENDING
+	MATCHED
+	UNMATCHED
+	MANUAL
+}
+
+enum MediaCategory {
+	EPISODES
+	SPECIALS
+	MOVIES
+	OTHER
+}
+
+type MediaInfo {
+	duration: Float
+	video: VideoTrack
+	audio: [AudioTrack!]!
+	subtitles: [SubtitleTrack!]!
+	fonts: [Font!]!
+	chapters: [Chapter!]!
+}
+
+type MetadataChanged {
+	titleId: Int!
+	status: MetadataStatus!
+}
+
+type MetadataConfig {
+	tmdbApiKey: String
+	language: String!
+}
+
+input MetadataConfigInput {
+	tmdbApiKey: String
+	language: String!
+}
+
+enum MetadataStatus {
+	FETCHING
+	UPDATED
+	FAILED
+}
+
+enum Monitor {
+	NONE
+	FUTURE
+	MISSING
+}
+
+type MusicConfig {
+	onlineLyrics: Boolean!
+	lyricsUrl: String!
+	analyzeLoudness: Boolean!
+}
+
+input MusicConfigInput {
+	onlineLyrics: Boolean!
+	lyricsUrl: String!
+	analyzeLoudness: Boolean!
+}
+
+type MusicHome {
+	recentlyAdded: [Album!]!
+	recentlyPlayed: [Album!]!
+	rediscover: [Album!]!
+}
+
+enum MusicKind {
+	TRACK
+	ALBUM
+	ARTIST
+}
+
+type MusicSearch {
+	artists: [Artist!]!
+	albums: [Album!]!
+	tracks: [Track!]!
+}
+
+type Mutation {
+	setup(username: String!, password: String!): SignedIn!
+	signIn(username: String, profile: String, password: String!): SignedIn!
+	signOut: Boolean!
+	startPasskeySignIn(username: String, profile: String): PasskeyChallenge!
+	finishPasskeySignIn(challenge: String!, credential: JSON!): SignedIn!
+	changePassword(current: String!, new: String!): Boolean!
+	startPasskeyRegistration(name: String): PasskeyChallenge!
+	finishPasskeyRegistration(challenge: String!, credential: JSON!): [Passkey!]!
+	deletePasskey(id: Int!): [Passkey!]!
+	"""
+	With `email`, the link is also sent there; the address isn't kept.
+	"""
+	createInvite(label: String!, maxUses: Int!, expiresInHours: Int!, email: String): CreatedInvite!
+	revokeInvite(id: Int!): Boolean!
+	acceptInvite(token: String!, username: String!, password: String!): SignedIn!
+	"""
+	Emails a reset link to the account `who` (a username or an email address) names. Says the
+	same whether or not there's such an account, and sends in the background so the wait
+	doesn't tell either.
+	"""
+	requestPasswordReset(who: String!): Boolean!
+	resetPassword(token: String!, password: String!): SignedIn!
+	"""
+	The address password resets go to; `None` takes it away.
+	"""
+	setEmail(email: String, password: String!): String
+	sendTestEmail(to: String!): Boolean!
+	createUser(input: NewUser!): User!
+	updateUser(id: Int!, input: UserPatch!): User!
+	deleteUser(id: Int!): Int!
+	setPermissionDefaults(permissions: PermissionsInput!): Permissions!
+	setAvatar(image: Upload!, userId: Int): User!
+	removeAvatar(userId: Int): User!
+	setWatched(videoIds: [Int!]!, watched: Boolean!): [Video!]!
+	setTitleWatched(id: Int!, watched: Boolean!): Title!
+	saveProgress(videoId: Int!, position: Float!, duration: Float!): Video!
+	matchTitle(id: Int!, provider: Provider!, providerId: String!): Title!
+	setTitleArtwork(id: Int!, kind: TitleArtwork!, image: Upload): Title!
+	setVideoArtwork(videoId: Int!, image: Upload): Video!
+	refreshTitle(id: Int!): Title!
+	star(kind: MusicKind!, id: Int!, starred: Boolean!): Boolean!
+	"""
+	1 to 5 stars; 0 takes the rating away.
+	"""
+	rate(kind: MusicKind!, id: Int!, rating: Int!): Boolean!
+	"""
+	Someone listened to (most of) a track.
+	"""
+	played(trackId: Int!): Boolean!
+	"""
+	What's playing in tinystream's own player right now (the web's, or `client`, the app's), so
+	other apps see it; no track means it stopped.
+	"""
+	nowPlaying(trackId: Int, position: Float! = 0.0, paused: Boolean! = false, client: String): Boolean!
+	"""
+	Saves the queue of tinystream's own player: the web's, or `client`, the app's.
+	"""
+	savePlayQueue(input: QueueInput!, client: String): PlayQueue!
+	"""
+	Measures a track's loudness now, if that's still to be done, for whoever's about to hear it.
+	"""
+	measureLoudness(trackId: Int!): Track!
+	createPlaylist(name: String!, tracks: [Int!]! = []): Playlist!
+	updatePlaylist(id: Int!, input: PlaylistInput!): Playlist!
+	addToPlaylist(id: Int!, tracks: [Int!]!): Playlist!
+	deletePlaylist(id: Int!): Boolean!
+	createAppPassword(name: String!): NewAppPassword!
+	deleteAppPassword(id: Int!): Boolean!
+	"""
+	Where someone is in a book, in characters of its `length`; reaching the end finishes it.
+	"""
+	saveReading(id: Int!, position: Int!): Book!
+	"""
+	Marks a book read, or not started (which forgets where it was left).
+	"""
+	setBookFinished(id: Int!, finished: Boolean!): Book!
+	"""
+	Looks the book up online again.
+	"""
+	refreshBook(id: Int!): Book!
+	startRoom(input: NewRoom!): Room!
+	startListenRoom(input: NewListenRoom!): ListenRoom!
+	createClip(input: NewClip!): Clip!
+	takeScreenshot(input: NewScreenshot!): Clip!
+	createQuote(input: NewQuote!): Clip!
+	updateClip(id: Int!, input: ClipPatch!): Clip!
+	deleteClip(id: Int!): Int!
+	renderClip(id: Int!): Clip!
+	cancelClipRender(id: Int!): Clip!
+	shareClip(id: Int!, users: [Int!]!): Clip!
+	unshareClip(id: Int!, userId: Int!): Clip!
+	hideClip(id: Int!): Int!
+	dropClipRenders: Int!
+	markNotificationsRead(ids: [Int!]): Inbox!
+	deleteNotifications(id: Int): Inbox!
+	updateSettings(patch: ConfigPatch!): Settings!
+	replaceConfig(text: String!): Settings!
+	addLibrary(input: LibraryInput!): Settings!
+	updateLibrary(name: String!, input: LibraryInput!): Settings!
+	removeLibrary(name: String!): Settings!
+	scan(library: String): Boolean!
+	"""
+	Creates a scheme, or changes one you may edit.
+	"""
+	saveScheme(id: String, input: SchemeInput!): ColorScheme!
+	"""
+	An editable copy of any scheme you can see.
+	"""
+	forkScheme(id: String!): ColorScheme!
+	importScheme(code: String!, name: String): ColorScheme!
+	deleteScheme(id: String!): String!
+	"""
+	Shares one of your schemes with everyone here, or takes it back.
+	"""
+	publishScheme(id: String!, published: Boolean!): ColorScheme!
+	setAppearance(input: AppearanceSettingsInput!): Appearance!
+	"""
+	What everyone sees unless they pick something else, signed-out pages included.
+	"""
+	setServerAppearance(input: ServerAppearanceInput!): ServerAppearance!
+	grabRelease(release: ReleaseInput!, seriesId: Int, episodes: [EpisodeNumberInput!]! = []): Download!
+	pauseDownloads(ids: [Int!]!): [Download!]!
+	resumeDownloads(ids: [Int!]!): [Download!]!
+	recheckDownloads(ids: [Int!]!): [Download!]!
+	importDownload(id: Int!): Download!
+	removeDownloads(ids: [Int!]!, deleteFiles: Boolean! = false): [Int!]!
+	deleteDownloaded(seriesId: Int!, season: Int): UndoReport!
+	lookForAgain(seriesId: Int!, season: Int, episode: Int): Boolean!
+	addSeries(input: NewSeries!): Series!
+	manageTitle(titleId: Int!): Series!
+	updateSeries(id: Int!, patch: SeriesPatch!): Series!
+	removeSeries(id: Int!): Int!
+	refreshSeriesSchedule(id: Int!): Series!
+	addSource(input: SourceInput!): Settings!
+	updateSource(name: String!, input: SourceInput!): Settings!
+	removeSource(name: String!): Settings!
+	addProfile(input: ProfileInput!): Settings!
+	updateProfile(name: String!, input: ProfileInput!): Settings!
+	removeProfile(name: String!): Settings!
+	refreshRenameSuggestions: Boolean!
+	applyRenames(ids: [Int!]!): AppliedRenames!
+	dismissRenames(ids: [Int!]!): Boolean!
+	undoFileChanges(batch: String!): UndoReport!
+	createRequest(input: NewRequest!): Request!
+	approveRequest(id: Int!, library: String): Request!
+	declineRequest(id: Int!, note: String): Request!
+	deleteRequest(id: Int!): Int!
+}
+
+type NamingPreview {
+	samples: [String!]!
+	error: String
+}
+
+type NamingStyle {
+	file: String!
+	folder: String!
+	agreement: Float
+	samples: Int!
+}
+
+type NetworkConfig {
+	host: String!
+	port: Int!
+	cors: [String!]!
+}
+
+input NetworkConfigInput {
+	host: String!
+	port: Int!
+	cors: [String!]!
+}
+
+type NewAppPassword {
+	password: AppPassword!
+	"""
+	Shown this once.
+	"""
+	secret: String!
+}
+
+input NewClip {
+	videoId: Int!
+	recipe: RecipeInput!
+	name: String! = ""
+	public: Boolean! = false
+	recipients: [Int!]! = []
+	room: String
+}
+
+input NewListenRoom {
+	tracks: [Int!]!
+	current: Int! = 0
+	position: Float! = 0.0
+	paused: Boolean! = false
+	public: Boolean! = false
+}
+
+input NewQuote {
+	bookId: Int!
+	"""
+	Characters into the book, as reading positions count them.
+	"""
+	start: Int!
+	end: Int!
+	"""
+	A note of your own about it.
+	"""
+	name: String! = ""
+	public: Boolean! = false
+	recipients: [Int!]! = []
+}
+
+input NewRequest {
+	library: String!
+	providerId: String!
+	name: String!
+	year: Int
+	poster: String
+	overview: String
+	note: String
+}
+
+input NewRoom {
+	videoId: Int!
+	position: Float! = 0.0
+	paused: Boolean! = false
+	tracks: TracksInput! = {audio: null, audioLanguage: null, audioTitle: null, audioChannels: null, audioCodec: null, subtitle: null, subtitleLanguage: null, subtitleTitle: null, subtitleForced: false, subtitleCodec: null}
+	public: Boolean! = false
+}
+
+input NewScreenshot {
+	videoId: Int!
+	at: Float!
+	subtitles: String
+	room: String
+}
+
+input NewSeries {
+	library: String!
+	provider: Provider!
+	providerId: String!
+	name: String!
+	year: Int
+	poster: String
+	overview: String
+	monitor: Monitor
+	profile: String
+}
+
+input NewUser {
+	username: String!
+	password: String!
+	isAdmin: Boolean! = false
+	permissions: PermissionOverridesInput! = {allLibraries: null, libraries: null, request: null, autoApprove: null, requestLimit: null, manageRequests: null, manageShows: null, downloads: null, editMetadata: null, watchTogether: null, shareLinks: null, clip: null, clipMaxLength: null, clipLimit: null, clipStorage: null, clipLinks: null}
+}
+
+type NextUp {
+	video: Video!
+	resuming: Boolean!
+}
+
+type Notification {
+	id: Int!
+	kind: NotificationKind!
+	priority: Boolean!
+	title: String!
+	body: String
+	image: String
+	link: String
+	actor: User
+	createdAt: Int!
+	expiresAt: Int
+	readAt: Int
+}
+
+enum NotificationKind {
+	AIRED
+	READY
+	INVITE
+	REQUEST
+	REQUEST_APPROVED
+	REQUEST_DECLINED
+	CLIP
+	CLIP_READY
+	OTHER
+}
+
+type NotificationReceived {
+	notification: Notification!
+}
+
+enum Numbering {
+	AUTO
+	SEASONAL
+	ABSOLUTE
+}
+
+type Palette {
+	seeds: [Token!]!
+	overrides: [Token!]!
+	"""
+	Every colour, derived from the seeds with the overrides applied.
+	"""
+	tokens: [Token!]!
+	warnings: [ContrastWarning!]!
+}
+
+type Passkey {
+	id: Int!
+	name: String!
+	createdAt: Int!
+	lastUsed: Int
+}
+
+type PasskeyChallenge {
+	challenge: String!
+	options: JSON!
+}
+
+type PermissionOverrides {
+	allLibraries: Boolean
+	libraries: [String!]
+	request: Boolean
+	autoApprove: Boolean
+	requestLimit: Int
+	manageRequests: Boolean
+	manageShows: Boolean
+	downloads: Boolean
+	editMetadata: Boolean
+	watchTogether: Boolean
+	shareLinks: Boolean
+	clip: Boolean
+	clipMaxLength: Int
+	clipLimit: Int
+	clipStorage: Int
+	clipLinks: Boolean
+}
+
+input PermissionOverridesInput {
+	allLibraries: Boolean
+	libraries: [String!]
+	request: Boolean
+	autoApprove: Boolean
+	requestLimit: Int
+	manageRequests: Boolean
+	manageShows: Boolean
+	downloads: Boolean
+	editMetadata: Boolean
+	watchTogether: Boolean
+	shareLinks: Boolean
+	clip: Boolean
+	clipMaxLength: Int
+	clipLimit: Int
+	clipStorage: Int
+	clipLinks: Boolean
+}
+
+type Permissions {
+	allLibraries: Boolean!
+	libraries: [String!]!
+	request: Boolean!
+	autoApprove: Boolean!
+	requestLimit: Int!
+	manageRequests: Boolean!
+	manageShows: Boolean!
+	downloads: Boolean!
+	editMetadata: Boolean!
+	watchTogether: Boolean!
+	shareLinks: Boolean!
+	clip: Boolean!
+	clipMaxLength: Int!
+	clipLimit: Int!
+	clipStorage: Int!
+	clipLinks: Boolean!
+}
+
+input PermissionsInput {
+	allLibraries: Boolean!
+	libraries: [String!]!
+	request: Boolean!
+	autoApprove: Boolean!
+	requestLimit: Int!
+	manageRequests: Boolean!
+	manageShows: Boolean!
+	downloads: Boolean!
+	editMetadata: Boolean!
+	watchTogether: Boolean!
+	shareLinks: Boolean!
+	clip: Boolean!
+	clipMaxLength: Int!
+	clipLimit: Int!
+	clipStorage: Int!
+	clipLinks: Boolean!
+}
+
+type PlayQueue {
+	tracks: [Track!]!
+	current: Int!
+	position: Float!
+	shuffled: Boolean!
+	repeat: Repeat!
+	changedBy: String
+	updatedAt: Int!
+}
+
+type PlaybackChanged {
+	client: String!
+	trackId: Int
+	"""
+	Seconds in, as of when it was sent.
+	"""
+	position: Float!
+	paused: Boolean!
+}
+
+type Playlist {
+	id: Int!
+	name: String!
+	comment: String
+	public: Boolean!
+	owner: PlaylistOwner!
+	mine: Boolean!
+	trackCount: Int!
+	duration: Float!
+	updatedAt: Int!
+	"""
+	Up to four album covers from it, for a mosaic.
+	"""
+	covers: [String!]!
+	tracks: [Track!]!
+}
+
+input PlaylistInput {
+	name: String
+	comment: String
+	public: Boolean
+	"""
+	Replaces what's in it.
+	"""
+	tracks: [Int!]
+}
+
+type PlaylistOwner {
+	id: Int!
+	username: String!
+}
+
+type PopularTitle {
+	title: Title!
+	people: Int!
+}
+
+type Profile {
+	name: String!
+	resolutions: [String!]!
+	groups: [String!]!
+	require: [String!]!
+	reject: [String!]!
+	minSize: Int
+	maxSize: Int
+	codecs: [String!]!
+	preferDualAudio: Boolean!
+	batches: Boolean!
+	minSeeders: Int!
+}
+
+input ProfileInput {
+	name: String!
+	resolutions: [String!]!
+	groups: [String!]!
+	require: [String!]!
+	reject: [String!]!
+	minSize: Int
+	maxSize: Int
+	codecs: [String!]!
+	preferDualAudio: Boolean!
+	batches: Boolean!
+	minSeeders: Int!
+}
+
+enum Provider {
+	ANILIST
+	TMDB
+}
+
+type ProviderTitle {
+	category: MediaCategory!
+	provider: Provider!
+	id: String!
+	name: String!
+	romaji: String
+	year: Int
+	poster: String
+	overview: String
+}
+
+type Query {
+	viewer: User
+	server: Server!
+	signInProfiles: [SignInProfile!]!
+	invites: [Invite!]!
+	invite(token: String!): InvitePreview
+	"""
+	Whose password a reset link is for, while it still works.
+	"""
+	passwordReset(token: String!): String
+	users: [User!]!
+	user(id: Int!): User
+	permissionDefaults: Permissions!
+	libraries: [Library!]!
+	library(name: String!): Library
+	title(id: Int!): Title
+	"""
+	The titles among `ids` that still exist and are visible, in the given order.
+	"""
+	titles(ids: [Int!]!): [Title!]!
+	video(id: Int!): Video
+	home: Home!
+	search(query: String!): SearchResults!
+	albums(library: String, sort: AlbumSort! = NAME, genre: String, offset: Int! = 0, limit: Int! = 500): [Album!]!
+	album(id: Int!): Album
+	"""
+	Artists with albums of their own.
+	"""
+	artists(library: String): [Artist!]!
+	artist(id: Int!): Artist
+	songs(library: String, query: String! = "", offset: Int! = 0, limit: Int! = 500): [Track!]!
+	track(id: Int!): Track
+	"""
+	The tracks among `ids` that still exist and are visible, in the given order.
+	"""
+	tracks(ids: [Int!]!): [Track!]!
+	genres(library: String): [Genre!]!
+	musicSearch(query: String!, limit: Int! = 8): MusicSearch!
+	lyrics(trackId: Int!): Lyrics
+	playQueue: PlayQueue!
+	playlists: [Playlist!]!
+	playlist(id: Int!): Playlist
+	musicHome: MusicHome!
+	"""
+	More like a track, from what's here: for radio when the queue runs out.
+	"""
+	similarTracks(trackId: Int!, count: Int! = 25, exclude: [Int!]! = []): [Track!]!
+	appPasswords: [AppPassword!]!
+	"""
+	A book library's books, a series' volumes together.
+	"""
+	books(library: String!): [Book!]!
+	book(id: Int!): Book
+	"""
+	Books part read, the latest first.
+	"""
+	readingNow(limit: Int! = 16): [Book!]!
+	"""
+	The books added last to each book library.
+	"""
+	newBooks(limit: Int! = 24): [BookShelf!]!
+	discover(library: String, query: String): Discovery!
+	airedEpisodes(provider: Provider!, id: String!): Int!
+	forYou(library: String): ForYou!
+	room(code: String!): Room!
+	listenRoom(code: String!): ListenRoom!
+	"""
+	`kind` only those of a kind, and `book` only quotes from that book.
+	"""
+	clips(scope: ClipScope! = MINE, kind: ClipKind, book: Int): [Clip!]!
+	clip(id: Int!): Clip
+	clipAllowance: ClipAllowance!
+	clipStorage: ClipStorage!
+	notifications(limit: Int! = 60): Inbox!
+	settings: Settings!
+	folders(path: String): FolderListing!
+	skippedFiles: [SkippedFile!]!
+	"""
+	How tinystream should look right now. Works signed out too, with the server's defaults.
+	"""
+	appearance: Appearance!
+	appearanceSettings: AppearanceSettings!
+	serverAppearance: ServerAppearance!
+	"""
+	Built-ins, then published schemes, then your own.
+	"""
+	colorSchemes: [ColorScheme!]!
+	colorScheme(id: String!): ColorScheme
+	"""
+	What a code holds, to look at before importing it.
+	"""
+	decodeScheme(code: String!): DecodedScheme!
+	downloads: [Download!]!
+	download(id: Int!): Download
+	downloadEngine: DownloadEngine!
+	calendar(from: Int, to: Int): [CalendarEntry!]!
+	wanted: [WantedEpisode!]!
+	allSeries: [Series!]!
+	series(id: Int!): Series
+	detectSource(url: String!, apiKey: String): DetectedSource!
+	renameSuggestions: [RenameSuggestion!]!
+	fileHistory: [HistoryBatch!]!
+	requests: [Request!]!
+}
+
+type QueueChanged {
+	by: String
+}
+
+input QueueInput {
+	tracks: [Int!]!
+	current: Int!
+	position: Float!
+	shuffled: Boolean! = false
+	repeat: Repeat! = OFF
+}
+
+type QuoteRange {
+	start: Int!
+	end: Int!
+}
+
+type ReadingState {
+	"""
+	Characters in, of the book's `length`.
+	"""
+	position: Int!
+	"""
+	From 0 to 1.
+	"""
+	progress: Float!
+	finished: Boolean!
+	updatedAt: Int!
+}
+
+input RecipeInput {
+	start: Float!
+	end: Float!
+	audio: Int
+	subtitles: String
+	height: Int!
+	halfRate: Boolean! = false
+}
+
+type Release {
+	title: String!
+	source: String!
+	link: String!
+	infoHash: String
+	size: Int
+	seeders: Int
+	leechers: Int
+	published: Int
+	page: String
+}
+
+type ReleaseAttributes {
+	group: String
+	resolution: Int
+	codec: String
+	source: String
+	dualAudio: Boolean!
+	version: Int!
+	proper: Boolean!
+	tenBit: Boolean!
+}
+
+type ReleaseCandidate {
+	release: Release!
+	attributes: ReleaseAttributes!
+	episodes: [EpisodeNumber!]!
+	batch: Boolean!
+	verdict: Verdict!
+}
+
+input ReleaseInput {
+	title: String!
+	source: String!
+	link: String!
+	infoHash: String
+	size: Int
+	seeders: Int
+	leechers: Int
+	published: Int
+	page: String
+}
+
+type RenameSuggestion {
+	id: Int!
+	library: String!
+	managed: Boolean!
+	root: String
+	src: String!
+	dst: String!
+	reason: String!
+	confidence: Confidence!
+}
+
+enum Repeat {
+	OFF
+	ALL
+	ONE
+}
+
+type Request {
+	id: Int!
+	user: User
+	provider: Provider!
+	providerId: String!
+	name: String!
+	year: Int
+	poster: String
+	overview: String
+	library: String
+	state: RequestState!
+	seriesId: Int
+	title: Title
+	note: String
+	createdAt: Int!
+	decidedAt: Int
+	have: Int
+	aired: Int
+}
+
+enum RequestState {
+	PENDING
+	APPROVED
+	DECLINED
+}
+
+type RequestsConfig {
+	monitor: Monitor!
+}
+
+input RequestsConfigInput {
+	monitor: Monitor!
+}
+
+type RetryStep {
+	every: Duration!
+	until: Duration!
+}
+
+input RetryStepInput {
+	every: Duration!
+	until: Duration!
+}
+
+type Room {
+	code: String!
+	title: Title!
+	video(id: Int): Video
+	signedIn: Boolean!
+	isHost: Boolean!
+	canShare: Boolean!
+	canInvite: Boolean!
+}
+
+type ScanConfig {
+	watch: Boolean!
+	interval: Duration
+}
+
+input ScanConfigInput {
+	watch: Boolean!
+	interval: Duration
+}
+
+type ScanFinished {
+	library: String!
+	titles: Int!
+	videos: Int!
+	skipped: Int!
+}
+
+type ScanStarted {
+	library: String!
+}
+
+"""
+Which schemes to use, by id: a built-in's name or a saved scheme's number.
+"""
+type SchemeChoice {
+	mode: SchemeMode!
+	single: String!
+	light: String!
+	dark: String!
+}
+
+"""
+Which schemes to use, by id: a built-in's name or a saved scheme's number.
+"""
+input SchemeChoiceInput {
+	mode: SchemeMode!
+	single: String!
+	light: String!
+	dark: String!
+}
+
+input SchemeInput {
+	name: String!
+	"""
+	Every seed, opaque.
+	"""
+	seeds: [TokenInput!]!
+	overrides: [TokenInput!]!
+}
+
+enum SchemeMode {
+	SINGLE
+	"""
+	One scheme for the system's light mode, one for its dark mode.
+	"""
+	SYSTEM
+}
+
+type SchemeOrigin {
+	"""
+	Gone when the parent was deleted or you can't see it any more.
+	"""
+	id: String
+	name: String!
+}
+
+type SearchResults {
+	titles: [Title!]!
+	videos: [Video!]!
+}
+
+type Season {
+	number: Int!
+	name: String!
+	title: String
+	overview: String
+	poster: String
+	episodes: [Video!]!
+}
+
+enum SeedAction {
+	PAUSE
+	REMOVE
+}
+
+type SeedGoal {
+	ratio: Float
+	seconds: Int
+}
+
+type Seeding {
+	ratio: Float
+	time: Duration
+	idle: Duration
+	then: SeedAction!
+}
+
+input SeedingInput {
+	ratio: Float
+	time: Duration
+	idle: Duration
+	then: SeedAction!
+}
+
+type Series {
+	id: Int!
+	monitor: Monitor!
+	status: String
+	next: SeriesEpisode
+	title: Title
+	library: String!
+	managed: Boolean!
+	path: String!
+	name: String!
+	year: Int
+	poster: String
+	overview: String
+	provider: Provider
+	providerId: String
+	profile: String
+	effectiveProfile: String!
+	sources: [String!]!
+	groups: [String!]!
+	aliases: [String!]!
+	knownAs: [String!]!
+	numbering: Numbering!
+	naming: String
+	style: NamingStyle!
+	seeding: Seeding
+	scheduleAt: Int
+	addedAt: Int!
+	counts: EpisodeCounts!
+	episodes: [SeriesEpisode!]!
+	releases(season: Int!, episodes: [Int!]! = [], query: String): [ReleaseCandidate!]!
+	namingPreview(file: String!, folder: String): NamingPreview!
+}
+
+type SeriesChanged {
+	seriesId: Int!
+}
+
+type SeriesEpisode {
+	season: Int!
+	episode: Int!
+	absolute: Int
+	name: String
+	airAt: Int
+	aired: Boolean!
+	state: EpisodeState!
+	attempts: Int!
+	searchedAt: Int
+	nextSearch: Int
+	downloadId: Int
+	video: Video
+}
+
+input SeriesPatch {
+	monitor: Monitor
+	profile: String
+	sources: [String!]
+	groups: [String!]
+	aliases: [String!]
+	numbering: Numbering
+	naming: String
+	seeding: SeedingInput
+}
+
+type Server {
+	setupRequired: Boolean!
+	version: String!
+	signInStyle: SignInStyle!
+	clips: Boolean!
+	downloads: Boolean!
+	smtp: Boolean!
+	email: Boolean!
+	sources: Int!
+	transcoding: Transcoding!
+}
+
+type ServerAppearance {
+	colors: SchemeChoice!
+	style: ComponentStyle!
+}
+
+input ServerAppearanceInput {
+	colors: SchemeChoiceInput!
+	style: ComponentStyle!
+}
+
+type ServerPaths {
+	config: String!
+	data: String!
+	log: String!
+}
+
+type Settings {
+	network: NetworkConfig!
+	log: LogConfig!
+	scan: ScanConfig!
+	metadata: MetadataConfig!
+	transcode: TranscodeConfig!
+	clips: ClipsConfig!
+	music: MusicConfig!
+	downloads: DownloadsConfig!
+	automation: AutomationConfig!
+	requests: RequestsConfig!
+	signIn: SignInConfig!
+	smtp: SmtpConfig!
+	sources: [Source!]!
+	profiles: [Profile!]!
+	libraries: [ConfiguredLibrary!]!
+	raw: String!
+	error: String
+	paths: ServerPaths!
+}
+
+type Shelf {
+	library: String!
+	titles: [Title!]!
+}
+
+type SignInConfig {
+	style: SignInStyle!
+}
+
+input SignInConfigInput {
+	style: SignInStyle!
+}
+
+type SignInProfile {
+	key: String!
+	avatar: String
+	passkey: Boolean!
+}
+
+enum SignInStyle {
+	PROFILES
+	USERNAME
+}
+
+type SignedIn {
+	user: User!
+	token: String!
+}
+
+type Similar {
+	recommendations: [DiscoverResult!]!
+	alsoWatched: [Title!]!
+}
+
+type SkippedFile {
+	library: String!
+	path: String!
+	reason: String!
+}
+
+type SmtpConfig {
+	host: String
+	port: Int
+	security: SmtpSecurity!
+	username: String
+	password: String
+	from: String
+	publicUrl: String
+}
+
+input SmtpConfigInput {
+	host: String
+	port: Int
+	security: SmtpSecurity!
+	username: String
+	password: String
+	from: String
+	publicUrl: String
+}
+
+enum SmtpSecurity {
+	STARTTLS
+	TLS
+	NONE
+}
+
+type Source {
+	name: String!
+	kind: SourceKind!
+	url: String!
+	feed: String
+	apiKey: String
+	categories: [Int!]!
+	enabled: Boolean!
+	downloadPath: String
+	seeding: Seeding
+}
+
+input SourceInput {
+	name: String!
+	kind: SourceKind!
+	url: String!
+	feed: String
+	apiKey: String
+	categories: [Int!]!
+	enabled: Boolean! = true
+	downloadPath: String
+	seeding: SeedingInput
+}
+
+enum SourceKind {
+	TORZNAB
+	RSS
+}
+
+enum SourceStatus {
+	OK
+	CHANGED
+	GONE
+}
+
+type Subscription {
+	events: Event!
+}
+
+type SubtitleTrack {
+	id: String!
+	codec: String!
+	language: String
+	title: String
+	default: Boolean!
+	forced: Boolean!
+	supported: Boolean!
+}
+
+type Title {
+	id: Int!
+	kind: TitleKind!
+	library: String!
+	name: String!
+	year: Int
+	poster: String
+	backdrop: String
+	"""
+	The most vivid colour of the poster as "r g b", empty until it's been worked out.
+	"""
+	posterTint: String
+	"""
+	The same for the backdrop.
+	"""
+	backdropTint: String
+	customPoster: Boolean!
+	customBackdrop: Boolean!
+	overview: String
+	genres: [String!]!
+	rating: Float
+	path: String
+	matchState: MatchState!
+	provider: Provider
+	providerId: String
+	libraryProvider: Provider
+	watchedCount: Int!
+	videoCount: Int!
+	progress: Float
+	freshCount: Int!
+	videos: [Video!]!
+	movie: Video
+	seasons: [Season!]!
+	nextUp: NextUp
+	similar: Similar!
+	matchCandidates(query: String, provider: Provider): MatchCandidates!
+	series: Series
+}
+
+enum TitleArtwork {
+	POSTER
+	BACKDROP
+}
+
+enum TitleKind {
+	SHOW
+	MOVIE
+}
+
+type Token {
+	name: String!
+	value: String!
+}
+
+input TokenInput {
+	name: String!
+	value: String!
+}
+
+type TorrentFile {
+	path: String!
+	size: Int!
+	done: Int!
+}
+
+enum TorrentStage {
+	CHECKING
+	METADATA
+	DOWNLOADING
+	SEEDING
+}
+
+type TorrentStatus {
+	stage: TorrentStage!
+	paused: Boolean!
+	progress: Float!
+	downloadRate: Int!
+	uploadRate: Int!
+	done: Int!
+	uploaded: Int!
+	ratio: Float!
+	peers: Int!
+	seeds: Int!
+	seedingSeconds: Int!
+	eta: Int
+	pieces: [Int!]!
+}
+
+type Track {
+	id: Int!
+	title: String!
+	"""
+	The artists as tagged, for display.
+	"""
+	artist: String!
+	artists: [ArtistRef!]!
+	composers: [ArtistRef!]!
+	album: String!
+	albumId: Int
+	albumArtist: String
+	library: String!
+	disc: Int
+	number: Int
+	year: Int
+	genres: [String!]!
+	duration: Float!
+	"""
+	flac, alac, mp3, aac, opus, vorbis, pcm, ape, wavpack, musepack…
+	"""
+	codec: String!
+	suffix: String!
+	lossless: Boolean!
+	"""
+	kbit/s.
+	"""
+	bitrate: Int
+	sampleRate: Int
+	bitDepth: Int
+	channels: Int
+	size: Int!
+	mbid: String
+	"""
+	The file as it is.
+	"""
+	file: String!
+	"""
+	The same as FLAC, made once and kept, for players that can't read the original.
+	"""
+	flac: String!
+	"""
+	The same, converted; add `?format=flac|opus|mp3|aac&start=`.
+	"""
+	stream: String!
+	cover: String
+	"""
+	The most vivid colour of the cover as "r g b", empty until it's been worked out.
+	"""
+	coverTint: String
+	gains: Gains!
+	starred: Boolean!
+	rating: Int
+	playCount: Int!
+	lastPlayed: Int
+	addedAt: Int!
+}
+
+input TracksInput {
+	audio: Int
+	audioLanguage: String
+	audioTitle: String
+	audioChannels: Int
+	audioCodec: String
+	subtitle: String
+	subtitleLanguage: String
+	subtitleTitle: String
+	subtitleForced: Boolean! = false
+	subtitleCodec: String
+}
+
+type TranscodeConfig {
+	hardware: Hardware!
+	vaapiDevice: String!
+}
+
+input TranscodeConfigInput {
+	hardware: Hardware!
+	vaapiDevice: String!
+}
+
+type Transcoding {
+	vaapi: String
+	vaapiError: String
+	softwareH264: Boolean!
+}
+
+type UndoReport {
+	undone: Int!
+	problems: [String!]!
+}
+
+"""
+A multipart file upload
+"""
+scalar Upload
+
+type User {
+	id: Int!
+	username: String!
+	isAdmin: Boolean!
+	avatar: String
+	permissions: Permissions!
+	overrides: PermissionOverrides!
+	createdAt: Int!
+	lastSeen: Int
+	passkeys: [Passkey!]!
+	email: String
+}
+
+input UserPatch {
+	username: String
+	isAdmin: Boolean
+	password: String
+	permissions: PermissionOverridesInput
+}
+
+type Verdict {
+	accepted: Boolean!
+	score: Int!
+	rejections: [String!]!
+	warnings: [String!]!
+	nonstandard: Boolean!
+}
+
+type Video {
+	id: Int!
+	title: Title!
+	season: Int
+	episode: Int
+	episodeEnd: Int
+	label: String
+	name: String
+	overview: String
+	still: String!
+	customStill: Boolean!
+	airDate: String
+	duration: Float
+	position: Float
+	finished: Boolean
+	watchedAt: Int
+	previous: Video
+	next: Video
+	media: MediaInfo!
+}
+
+type VideoTrack {
+	index: Int!
+	codec: String!
+	codecString: String
+	width: Int!
+	height: Int!
+	fps: Float!
+	bitDepth: Int!
+	hdr: Boolean!
+}
+
+type WantedEpisode {
+	seriesId: Int!
+	title: Title
+	show: String!
+	season: Int!
+	episode: Int!
+	name: String
+	airAt: Int
+	aired: Boolean!
+	state: EpisodeState!
+	attempts: Int!
+	searchedAt: Int
+	nextSearch: Int
+}
+
+"""
+Directs the executor to include this field or fragment only when the `if` argument is true.
+"""
+directive @include(if: Boolean!) on FIELD | FRAGMENT_SPREAD | INLINE_FRAGMENT
+"""
+Directs the executor to skip this field or fragment when the `if` argument is true.
+"""
+directive @skip(if: Boolean!) on FIELD | FRAGMENT_SPREAD | INLINE_FRAGMENT
+"""
+Provides a scalar specification URL for specifying the behavior of custom scalar types.
+"""
+directive @specifiedBy(url: String!) on SCALAR
+schema {
+	query: Query
+	mutation: Mutation
+	subscription: Subscription
+}

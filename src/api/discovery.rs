@@ -70,8 +70,10 @@ pub(super) async fn annotate(
     candidates: Vec<Candidate>,
 ) -> ApiResult<Vec<Found>> {
     let mut out = Vec::with_capacity(candidates.len());
+
     for c in candidates {
         let movie = c.category == MediaCategory::Movies;
+
         let managed: Option<(i64, String, Option<i64>)> = if movie {
             None
         } else {
@@ -87,6 +89,7 @@ pub(super) async fn annotate(
             .fetch_optional(&state.db)
             .await?
         };
+
         let item_id: Option<i64> =
             match managed.as_ref().and_then(|m| m.2) {
                 Some(id) => Some(id),
@@ -101,6 +104,7 @@ pub(super) async fn annotate(
                 .fetch_optional(&state.db)
                 .await?,
             };
+
         let request_state: Option<String> = if movie {
             None
         } else {
@@ -112,6 +116,7 @@ pub(super) async fn annotate(
         .fetch_optional(&state.db)
         .await?
         };
+
         out.push(Found {
             candidate: c,
             library: library.to_string(),
@@ -122,6 +127,7 @@ pub(super) async fn annotate(
             because: None,
         });
     }
+
     Ok(out)
 }
 
@@ -133,20 +139,25 @@ pub(super) async fn pick_library(
     if !user.permissions.request && !user.permissions.manage_shows {
         return Err(ApiError::forbidden());
     }
+
     let config = state.config.current();
     let libraries = user.libraries(state).await?;
+
     let library = library
         .or_else(|| {
             libraries.iter().find(|l| config.library(l).is_some_and(|x| x.metadata_provider.is_some())).cloned()
         })
         .ok_or_else(|| ApiError::bad_request("no library uses AniList or TMDB"))?;
+
     if !libraries.contains(&library) {
         return Err(ApiError::not_found("library"));
     }
+
     let provider =
         config.library(&library).ok_or_else(|| ApiError::not_found("library"))?.metadata_provider.ok_or_else(|| {
             ApiError::bad_request(format!("{library} doesn't use AniList or TMDB, so there's nothing to search"))
         })?;
+
     Ok((library, provider))
 }
 
@@ -173,6 +184,7 @@ async fn taste(state: &AppState, libraries: &[String], provider: Provider, whose
         Whose::Mine(u) => (u, false),
         Whose::Others(u) => (u, true),
     };
+
     let rows: Vec<(String, String, String, i64, f64, i64)> = sqlx::query_as(
         "SELECT i.provider_id, i.title, i.library, p.user_id,
                 CASE WHEN p.finished THEN 1.0 ELSE MIN(p.position / MAX(p.duration, 1.0), 1.0) END, p.updated_at
@@ -187,17 +199,22 @@ async fn taste(state: &AppState, libraries: &[String], provider: Provider, whose
 
     let mut watched: HashMap<(String, i64), f64> = HashMap::new();
     let mut titles: HashMap<String, String> = HashMap::new();
+
     for (id, title, library, person, amount, at) in rows {
         if !libraries.contains(&library) {
             continue;
         }
+
         *watched.entry((id.clone(), person)).or_default() += amount * recency(at);
         titles.entry(id).or_insert(title);
     }
+
     let mut weights: HashMap<String, f64> = HashMap::new();
+
     for ((id, _), amount) in watched {
         *weights.entry(id).or_default() += if others { (amount / 3.0).min(1.0) } else { amount.sqrt() };
     }
+
     if !others {
         let asked: Vec<(String, String, i64)> = sqlx::query_as(
             "SELECT provider_id, title, created_at FROM requests WHERE user_id = ? AND provider = ? AND state != 'declined'",
@@ -206,16 +223,19 @@ async fn taste(state: &AppState, libraries: &[String], provider: Provider, whose
         .bind(provider.as_str())
         .fetch_all(&state.db)
         .await?;
+
         for (id, title, at) in asked {
             *weights.entry(id.clone()).or_default() += 1.5 * recency(at);
             titles.entry(id).or_insert(title);
         }
     }
+
     let mut seeds: Vec<Seed> = weights
         .into_iter()
         .filter(|(_, w)| *w > 0.05)
         .map(|(id, weight)| Seed { title: titles.remove(&id).unwrap_or_default(), id, weight })
         .collect();
+
     seeds.sort_by(|a, b| b.weight.total_cmp(&a.weight));
     seeds.truncate(10);
     Ok(seeds)
@@ -224,20 +244,24 @@ async fn taste(state: &AppState, libraries: &[String], provider: Provider, whose
 fn blend(seeds: &[Seed], recs: &HashMap<String, Vec<Candidate>>) -> Vec<(Candidate, String)> {
     let own: HashSet<&str> = seeds.iter().map(|s| s.id.as_str()).collect();
     let mut scored: HashMap<String, (f64, f64, String, Candidate)> = HashMap::new();
+
     for seed in seeds {
         for (rank, c) in recs.get(&seed.id).into_iter().flatten().enumerate() {
             if own.contains(c.id.as_str()) {
                 continue;
             }
+
             let add = seed.weight / (1.0 + rank as f64 * 0.25);
             let e = scored.entry(c.id.clone()).or_insert_with(|| (0.0, 0.0, seed.title.clone(), c.clone()));
             e.0 += add;
+
             if add > e.1 {
                 e.1 = add;
                 e.2 = seed.title.clone();
             }
         }
     }
+
     let mut list: Vec<_> = scored.into_values().collect();
     list.sort_by(|a, b| b.0.total_cmp(&a.0));
     list.into_iter().map(|(_, _, because, c)| (c, because)).collect()
@@ -253,8 +277,10 @@ async fn fresh(
 ) -> ApiResult<Vec<Found>> {
     let candidates: Vec<Candidate> =
         candidates.into_iter().filter(|c| !shown.contains(&c.id)).take(limit * 2).collect();
+
     let mut found: Vec<Found> =
         annotate(state, provider, library, candidates).await?.into_iter().filter(|f| !f.here()).collect();
+
     found.truncate(limit);
     shown.extend(found.iter().map(|f| f.candidate.id.clone()));
     Ok(found)
@@ -280,11 +306,14 @@ async fn for_you(state: &AppState, user: &User, library: Option<String>) -> ApiR
     let libraries = user.libraries(state).await?;
     let mine = taste(state, &libraries, provider, Whose::Mine(user.id)).await?;
     let others = taste(state, &libraries, provider, Whose::Others(user.id)).await?;
+
     let ids: Vec<String> =
         mine.iter().chain(&others).map(|s| s.id.clone()).collect::<HashSet<_>>().into_iter().collect();
+
     if ids.is_empty() {
         return Ok(ForYou { library, shelves: Vec::new() });
     }
+
     let recs = match state.metadata.recommendations(state, provider, ItemKind::Show, &ids).await {
         Ok(recs) => recs,
         Err(e) => {
@@ -295,14 +324,18 @@ async fn for_you(state: &AppState, user: &User, library: Option<String>) -> ApiR
 
     let mut shown = HashSet::new();
     let mut shelves = Vec::new();
+
     if !mine.is_empty() {
         let blended = blend(&mine, &recs);
         let because: HashMap<String, String> = blended.iter().map(|(c, b)| (c.id.clone(), b.clone())).collect();
+
         let mut found =
             fresh(state, provider, &library, blended.into_iter().map(|(c, _)| c).collect(), &mut shown, ROW).await?;
+
         for f in &mut found {
             f.because = because.get(&f.candidate.id).cloned();
         }
+
         if !found.is_empty() {
             shelves.push(ForYouShelf { key: "mine".into(), name: "For you".into(), results: found });
         }
@@ -310,6 +343,7 @@ async fn for_you(state: &AppState, user: &User, library: Option<String>) -> ApiR
         for seed in mine.iter().take(2) {
             let list = recs.get(&seed.id).cloned().unwrap_or_default();
             let found = fresh(state, provider, &library, list, &mut shown, ROW).await?;
+
             if found.len() >= 4 {
                 shelves.push(ForYouShelf {
                     key: format!("seed-{}", seed.id),
@@ -319,9 +353,11 @@ async fn for_you(state: &AppState, user: &User, library: Option<String>) -> ApiR
             }
         }
     }
+
     if !others.is_empty() {
         let list = blend(&others, &recs).into_iter().map(|(c, _)| c).collect();
         let found = fresh(state, provider, &library, list, &mut shown, ROW).await?;
+
         if !found.is_empty() {
             shelves.push(ForYouShelf {
                 key: "others".into(),
@@ -330,6 +366,7 @@ async fn for_you(state: &AppState, user: &User, library: Option<String>) -> ApiR
             });
         }
     }
+
     Ok(ForYou { library, shelves })
 }
 
@@ -345,11 +382,14 @@ pub(super) async fn similar(ctx: &Context<'_>, title: &Title) -> ApiResult<Simil
     let access = ctx.access()?;
     let user = access.person();
     let id = title.row.id;
+
     let (provider, provider_id): (Option<String>, Option<String>) =
         sqlx::query_as("SELECT provider, provider_id FROM items WHERE id = ?").bind(id).fetch_one(&state.db).await?;
+
     let kind = if title.row.kind == "show" { ItemKind::Show } else { ItemKind::Movie };
 
     let mut recommendations = Vec::new();
+
     if let (Some(provider), Some(pid)) = (parse_provider(provider.as_deref()), provider_id) {
         match state.metadata.recommendations(state, provider, kind, std::slice::from_ref(&pid)).await {
             Ok(mut recs) => {
@@ -377,6 +417,7 @@ pub(super) async fn similar(ctx: &Context<'_>, title: &Title) -> ApiResult<Simil
     .bind(user.id)
     .fetch_all(&state.db)
     .await?;
+
     let also_watched = Title::load_many(state, &access, also, 16).await?;
     Ok(Similar { recommendations, also_watched })
 }
@@ -392,8 +433,10 @@ pub(super) async fn popular_here(state: &AppState, access: &Arc<Access>) -> ApiR
     .bind(now() - 30 * 86400)
     .fetch_all(&state.db)
     .await?;
+
     let people: HashMap<i64, i64> = rows.iter().copied().collect();
     let titles = Title::load_many(state, access, rows.into_iter().map(|r| r.0), 20).await?;
+
     Ok(titles
         .into_iter()
         .map(|title| PopularTitle { people: people.get(&title.row.id).copied().unwrap_or(1), title })
@@ -424,32 +467,39 @@ impl DiscoveryQuery {
         let trending = query.trim().is_empty();
         let bad = |e: anyhow::Error| ApiError::bad_request(format!("{e:#}"));
         let mut results = Vec::new();
+
         for kind in [ItemKind::Show, ItemKind::Movie] {
             let found = if trending {
                 state.metadata.trending(state, provider, kind).await.map_err(bad)?
             } else {
                 state.metadata.search(state, provider, kind, query.trim(), None).await.map_err(bad)?
             };
+
             results.extend(found);
         }
+
         let mut results = annotate(state, provider, &library, results).await?;
 
         if trending {
             results.retain(|f| !f.here());
         }
+
         Ok(Discovery { library, results })
     }
 
     async fn aired_episodes(&self, ctx: &Context<'_>, provider: Provider, id: String) -> ApiResult<i64> {
         let state = ctx.state();
+
         if !ctx.user()?.permissions.manage_shows {
             return Err(ApiError::forbidden());
         }
+
         let schedule = state
             .metadata
             .schedule(state, provider, &id, &Default::default())
             .await
             .map_err(|e| ApiError::bad_request(format!("{e:#}")))?;
+
         let aired = schedule.seasons.iter().filter(|s| s.number > 0).flat_map(|s| &s.airing).filter(|e| e.aired);
         Ok(aired.count() as i64)
     }
@@ -483,10 +533,12 @@ mod tests {
     #[test]
     fn shows_several_seeds_agree_on_come_first() {
         let seeds = [seed("a", 1.0), seed("b", 1.0)];
+
         let recs = HashMap::from([
             ("a".to_string(), vec![show("x"), show("shared"), show("b")]),
             ("b".to_string(), vec![show("y"), show("shared")]),
         ]);
+
         let ids: Vec<String> = blend(&seeds, &recs).into_iter().map(|(c, _)| c.id).collect();
         assert_eq!(ids[0], "shared");
 

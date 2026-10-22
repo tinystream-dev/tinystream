@@ -55,6 +55,7 @@ pub async fn load(db: &SqlitePool, user_id: i64) -> sqlx::Result<Queue> {
     .bind(user_id)
     .fetch_optional(db)
     .await?;
+
     Ok(match row {
         Some((tracks, current, position, shuffled, repeat, changed_by, updated_at)) => Queue {
             tracks: serde_json::from_str(&tracks).unwrap_or_default(),
@@ -73,6 +74,7 @@ pub async fn save(state: &AppState, user_id: i64, mut q: Queue) -> sqlx::Result<
     q.current = q.current.min(q.tracks.len().saturating_sub(1));
     q.position = if q.position.is_finite() { q.position.max(0.0) } else { 0.0 };
     q.updated_at = now();
+
     sqlx::query(
         "INSERT INTO play_queues (user_id, tracks, current, position, shuffled, repeat, changed_by, updated_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
@@ -90,6 +92,7 @@ pub async fn save(state: &AppState, user_id: i64, mut q: Queue) -> sqlx::Result<
     .bind(q.updated_at)
     .execute(&state.db)
     .await?;
+
     state.events.send(Event::QueueChanged { user_id, by: q.changed_by.clone() });
     Ok(q)
 }
@@ -111,6 +114,7 @@ pub struct NowPlaying(Mutex<HashMap<i64, Playing>>);
 impl NowPlaying {
     pub fn set(&self, user_id: i64, playing: Option<Playing>) {
         let mut map = self.0.lock().unwrap();
+
         match playing {
             Some(p) => map.insert(user_id, p),
             None => map.remove(&user_id),

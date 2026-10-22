@@ -291,6 +291,11 @@ export class StreamEngine {
     }
   }
 
+  /** Whether the stream has run out for good: it reached the file's end and nothing's left to play here. */
+  exhausted() {
+    return this.endReached && !this.isBuffered(this.video.currentTime)
+  }
+
   /** Called when the video stalls; restarts the stream if ours has ended early. */
   recover() {
     const t = this.video.currentTime

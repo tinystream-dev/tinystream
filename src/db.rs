@@ -14,6 +14,7 @@ pub async fn open(path: &Path) -> anyhow::Result<SqlitePool> {
         .synchronous(SqliteSynchronous::Normal)
         .foreign_keys(true)
         .busy_timeout(std::time::Duration::from_secs(10));
+
     let pool = SqlitePoolOptions::new().max_connections(8).connect_with(options).await?;
     sqlx::migrate!("./migrations").run(&pool).await?;
     Ok(pool)

@@ -9,7 +9,9 @@ fn main() {
         env!("CARGO_PKG_VERSION_MINOR"),
         env!("CARGO_PKG_VERSION_PATCH").parse::<u32>().unwrap(),
     );
+
     let b = Build::new("nasm", &version, &[]);
+
     b.once("", |b| {
         b.fetch(&format!("https://www.nasm.us/pub/nasm/releasebuilds/{version}/nasm-{version}.tar.gz"), &[]);
         b.configure(&[]);

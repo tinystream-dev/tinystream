@@ -36,6 +36,7 @@ async fn account(
         (None, Some(_)) => return Ok(None),
         _ => return Err(ApiError::bad_request("sign in with either a username or a profile")),
     };
+
     Ok(sqlx::query_as(sqlx::AssertSqlSafe(format!("SELECT id, password_hash FROM users WHERE {column} = ?")))
         .bind(value)
         .fetch_optional(&state.db)
@@ -47,6 +48,7 @@ async fn keys_of(state: &AppState, user_id: i64) -> ApiResult<Vec<(i64, Security
         .bind(user_id)
         .fetch_all(&state.db)
         .await?;
+
     Ok(rows.into_iter().filter_map(|(id, c)| Some((id, serde_json::from_str(&c).ok()?))).collect())
 }
 
@@ -119,6 +121,14 @@ impl Server {
         cfg!(feature = "torrent")
     }
 
+    async fn smtp(&self) -> bool {
+        cfg!(feature = "smtp")
+    }
+
+    async fn email(&self, ctx: &Context<'_>) -> bool {
+        crate::mail::available(&ctx.state().config.current().smtp)
+    }
+
     async fn sources(&self, ctx: &Context<'_>) -> usize {
         ctx.state().config.current().sources.iter().filter(|s| s.enabled).count()
     }
@@ -143,9 +153,11 @@ impl AuthQuery {
 
     async fn sign_in_profiles(&self, ctx: &Context<'_>) -> ApiResult<Vec<SignInProfile>> {
         let state = ctx.state();
+
         if !profiles_on(state) {
             return Ok(Vec::new());
         }
+
         Ok(sqlx::query_as(
             "SELECT u.handle AS key,
                     CASE WHEN a.updated_at IS NULL THEN NULL
@@ -166,6 +178,7 @@ pub async fn profile_avatar(
         true => sqlx::query_scalar("SELECT id FROM users WHERE handle = ?").bind(key).fetch_optional(&state.db).await?,
         false => None,
     };
+
     super::users::avatar_image(&state, id.ok_or_else(|| ApiError::not_found("picture"))?).await
 }
 
@@ -180,9 +193,11 @@ impl AuthMutation {
         let hash = auth::hash_password(password).await?;
         let mut tx = state.db.begin().await?;
         let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users").fetch_one(&mut *tx).await?;
+
         if count > 0 {
             return Err(ApiError::conflict("this server is already set up; sign in instead"));
         }
+
         let id: i64 = sqlx::query_scalar(
             "INSERT INTO users (handle, username, password_hash, is_admin, created_at) VALUES (?, ?, ?, 1, ?) RETURNING id",
         )
@@ -192,6 +207,7 @@ impl AuthMutation {
         .bind(now())
         .fetch_one(&mut *tx)
         .await?;
+
         tx.commit().await?;
         tracing::info!("created the admin account {:?}", username.trim());
         sign_in(ctx, id).await
@@ -206,12 +222,15 @@ impl AuthMutation {
     ) -> ApiResult<SignedIn> {
         let message = if profile.is_some() { "wrong password" } else { "wrong username or password" };
         let wrong = || ApiError::new(axum::http::StatusCode::UNAUTHORIZED, message);
+
         let Some((id, hash)) = account(ctx.state(), username, profile).await? else {
             return Err(wrong());
         };
+
         if !auth::verify_password(password, hash).await {
             return Err(wrong());
         }
+
         sign_in(ctx, id).await
     }
 
@@ -219,6 +238,7 @@ impl AuthMutation {
         if let Some(t) = &ctx.session().token {
             auth::delete_session(ctx.state(), t).await?;
         }
+
         ctx.append_http_header(header::SET_COOKIE, auth::clear_cookie());
         Ok(true)
     }
@@ -232,13 +252,16 @@ impl AuthMutation {
         let state = ctx.state();
         let wa = passkeys::webauthn_for(&ctx.session().headers)?;
         let user_id = account(state, username, profile).await?.map(|(id, _)| id);
+
         let keys = match user_id {
             Some(id) => keys_of(state, id).await?,
             None => Vec::new(),
         };
+
         let (Some(user_id), false) = (user_id, keys.is_empty()) else {
             return Err(ApiError::bad_request("no passkeys on this account; sign in with your password"));
         };
+
         let keys: Vec<SecurityKey> = keys.into_iter().map(|(_, k)| k).collect();
         let (challenge, options) = passkeys::start_login(&state.passkeys, &wa, user_id, &keys)?;
         Ok(PasskeyChallenge { challenge, options: Json(serde_json::to_value(options).unwrap_or_default()) })
@@ -253,9 +276,11 @@ impl AuthMutation {
         let state = ctx.state();
         let wa = passkeys::webauthn_for(&ctx.session().headers)?;
         let (user_id, result) = passkeys::finish_login(&state.passkeys, &wa, &challenge, &credential)?;
+
         for (id, mut key) in keys_of(state, user_id).await? {
             if key.cred_id() == result.cred_id() {
                 key.update_credential(&result);
+
                 sqlx::query("UPDATE passkeys SET credential = ?, last_used = ? WHERE id = ?")
                     .bind(serde_json::to_string(&key).unwrap_or_default())
                     .bind(now())
@@ -264,25 +289,31 @@ impl AuthMutation {
                     .await?;
             }
         }
+
         sign_in(ctx, user_id).await
     }
 
     async fn change_password(&self, ctx: &Context<'_>, current: String, new: String) -> ApiResult<bool> {
         let (state, user) = (ctx.state(), ctx.user()?);
         auth::validate_credentials(&user.username, &new)?;
+
         let hash: String = sqlx::query_scalar("SELECT password_hash FROM users WHERE id = ?")
             .bind(user.id)
             .fetch_one(&state.db)
             .await?;
+
         if !auth::verify_password(current, hash).await {
             return Err(ApiError::bad_request("your current password isn't right"));
         }
+
         let hash = auth::hash_password(new).await?;
+
         sqlx::query("UPDATE users SET password_hash = ? WHERE id = ?")
             .bind(hash)
             .bind(user.id)
             .execute(&state.db)
             .await?;
+
         Ok(true)
     }
 
@@ -292,8 +323,10 @@ impl AuthMutation {
         let existing = keys_of(state, user.id).await?.into_iter().map(|(_, k)| k).collect();
         let handle = Uuid::parse_str(&user.handle).map_err(|e| ApiError::from(anyhow::anyhow!(e)))?;
         let name = name.filter(|n| !n.trim().is_empty()).unwrap_or_else(|| "Passkey".into());
+
         let (challenge, options) =
             passkeys::start_registration(&state.passkeys, &wa, user.id, handle, &user.username, name, existing)?;
+
         Ok(PasskeyChallenge { challenge, options: Json(serde_json::to_value(options).unwrap_or_default()) })
     }
 
@@ -306,6 +339,7 @@ impl AuthMutation {
         let (state, user) = (ctx.state(), ctx.user()?);
         let wa = passkeys::webauthn_for(&ctx.session().headers)?;
         let (name, key) = passkeys::finish_registration(&state.passkeys, &wa, user.id, &challenge, &credential)?;
+
         sqlx::query("INSERT INTO passkeys (user_id, name, credential, created_at) VALUES (?, ?, ?, ?)")
             .bind(user.id)
             .bind(&name)
@@ -313,17 +347,20 @@ impl AuthMutation {
             .bind(now())
             .execute(&state.db)
             .await?;
+
         tracing::info!("{} added a passkey ({name})", user.username);
         passkeys(state, user.id).await
     }
 
     async fn delete_passkey(&self, ctx: &Context<'_>, id: i64) -> ApiResult<Vec<Passkey>> {
         let (state, user) = (ctx.state(), ctx.user()?);
+
         sqlx::query("DELETE FROM passkeys WHERE id = ? AND user_id = ?")
             .bind(id)
             .bind(user.id)
             .execute(&state.db)
             .await?;
+
         passkeys(state, user.id).await
     }
 }

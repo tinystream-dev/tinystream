@@ -85,25 +85,30 @@ pub async fn show_search(state: &AppState, series_id: i64) -> anyhow::Result<Sho
     let row = series::get(state, series_id).await?;
     let matcher = Matcher::load(&state.db, series_id).await?;
     let profile_name = row.profile.clone().or_else(|| config.library(&row.library).and_then(|l| l.profile.clone()));
+
     let profile = profile_name
         .as_deref()
         .and_then(|p| config.profile(p))
         .or(config.profiles.first())
         .cloned()
         .unwrap_or_default();
+
     let rules = Rules::new(&profile, &series::list(&row.groups));
     let pinned = series::list(&row.sources);
+
     let sources: Vec<_> = if pinned.is_empty() {
         config.sources.iter().filter(|s| s.enabled).cloned().collect()
     } else {
         pinned.iter().filter_map(|n| config.source(n)).cloned().collect()
     };
+
     Ok(ShowSearch { matcher, rules, sources, pinned: !pinned.is_empty() })
 }
 
 impl ShowSearch {
     pub fn judge(&self, release: Release) -> Candidate {
         let attributes = release::attributes(&release.title);
+
         match self.matcher.matches(&release.title) {
             Some(Match { episodes, batch, nonstandard }) => {
                 let mut verdict = self.rules.judge(&release, &attributes, episodes.len() as u32, batch);
@@ -114,6 +119,7 @@ impl ShowSearch {
                 {
                     verdict.score += (self.sources.len() - i) as i64 * 500;
                 }
+
                 Candidate { release, attributes, episodes, batch, verdict }
             },
             None => Candidate {
@@ -143,50 +149,63 @@ pub async fn search(
     query: Option<&str>,
 ) -> anyhow::Result<Vec<Candidate>> {
     let show = show_search(state, series_id).await?;
+
     if show.sources.is_empty() {
         bail!("there are no sources to search; add one in Settings → Sources");
     }
+
     let mut queries: Vec<String> = Vec::new();
 
     if let Some(q) = query.map(str::trim).filter(|q| !q.is_empty()) {
         queries.push(q.to_string());
     } else {
         let titles = show.matcher.search_titles(Some(season));
+
         for t in titles.iter().take(2) {
             queries.push(t.clone());
+
             if let [e] = episodes {
                 queries.push(format!("{t} {e:02}"));
             }
         }
+
         if let (Some(t), [e]) = (titles.first(), episodes) {
             queries.push(format!("{t} s{season:02}e{e:02}"));
         }
+
         queries.dedup();
     }
 
     let mut tasks = Vec::new();
+
     for source in &show.sources {
         let asks: Vec<Option<String>> =
             if Sources::can_search(source) { queries.iter().cloned().map(Some).collect() } else { vec![None] };
+
         for q in asks {
             let source = source.clone();
+
             tasks.push(async move {
                 let result = match &q {
                     Some(q) => state.automation.sources.search(&source, q).await,
                     None => state.automation.sources.feed(&source).await,
                 };
+
                 (source.name.clone(), result)
             });
         }
     }
+
     let mut seen = HashSet::new();
     let mut out = Vec::new();
     let mut errors = Vec::new();
+
     for (name, result) in futures::future::join_all(tasks).await {
         match result {
             Ok(releases) => {
                 for r in releases {
                     let key = r.info_hash.clone().unwrap_or_else(|| r.title.to_lowercase());
+
                     if seen.insert(key) {
                         out.push(show.judge(r));
                     }
@@ -195,12 +214,15 @@ pub async fn search(
             Err(e) => errors.push(format!("{name}: {e:#}")),
         }
     }
+
     if out.is_empty() && !errors.is_empty() {
         bail!("{}", errors.join("; "));
     }
+
     for e in errors {
         tracing::warn!("search: {e}");
     }
+
     sort(&mut out);
     Ok(out)
 }
@@ -219,12 +241,15 @@ pub fn sort(c: &mut [Candidate]) {
 pub fn choose(candidates: &[Candidate], wanted: &HashSet<(u32, u32)>) -> Vec<(Candidate, Vec<(u32, u32)>)> {
     let covers =
         |c: &Candidate| -> Vec<(u32, u32)> { c.episodes.iter().filter(|e| wanted.contains(e)).copied().collect() };
+
     let ok: Vec<&Candidate> = candidates
         .iter()
         .filter(|c| c.verdict.accepted && c.verdict.warnings.is_empty() && !covers(c).is_empty())
         .collect();
+
     let mut picks: Vec<(Candidate, Vec<(u32, u32)>)> = Vec::new();
     let mut left = wanted.clone();
+
     if wanted.len() >= 2
         && let Some(pack) = ok
             .iter()
@@ -232,25 +257,32 @@ pub fn choose(candidates: &[Candidate], wanted: &HashSet<(u32, u32)>) -> Vec<(Ca
             .max_by_key(|c| (covers(c).len(), c.verdict.score))
     {
         let got = covers(pack);
+
         for e in &got {
             left.remove(e);
         }
+
         picks.push(((*pack).clone(), got));
     }
+
     let mut remaining: Vec<(u32, u32)> = left.into_iter().collect();
     remaining.sort();
+
     for e in remaining {
         if picks.iter().any(|(_, got)| got.contains(&e)) {
             continue;
         }
+
         let best = ok
             .iter()
             .filter(|c| c.episodes.contains(&e))
             .max_by_key(|c| (!c.verdict.nonstandard, !c.batch, c.verdict.score));
+
         if let Some(c) = best {
             picks.push(((*c).clone(), covers(c)));
         }
     }
+
     picks
 }
 
@@ -267,17 +299,21 @@ pub struct Grab {
 
 pub async fn grab(state: &Arc<AppState>, g: Grab) -> anyhow::Result<i64> {
     let config = state.config.current();
+
     let series = match g.series_id {
         Some(id) => Some(series::get(state, id).await?),
         None => None,
     };
+
     let source = config.source(&g.release.source);
     let library = series.as_ref().and_then(|s| config.library(&s.library));
+
     let save_path = source
         .and_then(|s| s.download_path.clone())
         .or_else(|| library.and_then(|l| l.download_path.clone()))
         .and_then(|p| crate::paths::resolve_config_path(&p, state.config.config_dir()).ok())
         .unwrap_or_else(|| engine::download_root(state, &config));
+
     engine::ensure_dir(&save_path)?;
 
     let seeding: Seeding = series
@@ -296,15 +332,19 @@ pub async fn grab(state: &Arc<AppState>, g: Grab) -> anyhow::Result<i64> {
         .bind(&g.release.info_hash)
         .fetch_one(&state.db)
         .await?;
+
         if removed > 0 {
             bail!("it was removed by hand before");
         }
     }
+
     let torrent = state.automation.sources.fetch(&g.release.link).await?;
+
     let (magnet, bytes) = match torrent {
         Torrent::Magnet(m) => (m, Vec::new()),
         Torrent::File(b) => (String::new(), b),
     };
+
     let params = libtorrent_sys::AddParams {
         magnet,
         torrent: bytes.clone(),
@@ -312,11 +352,13 @@ pub async fn grab(state: &Arc<AppState>, g: Grab) -> anyhow::Result<i64> {
         save_path: save_path.to_string_lossy().to_string(),
         paused: false,
     };
+
     let hash = match state.automation.engine.add(&params) {
         Ok(h) => h,
         Err(e) if e.to_string().contains("exist") => bail!("that release is already downloading"),
         Err(e) => return Err(e).context("the torrent engine didn't take it"),
     };
+
     if let Some(existing) =
         sqlx::query_scalar::<_, i64>("SELECT id FROM downloads WHERE hash = ? AND state NOT IN ('removed', 'failed')")
             .bind(&hash)
@@ -325,7 +367,9 @@ pub async fn grab(state: &Arc<AppState>, g: Grab) -> anyhow::Result<i64> {
     {
         return Ok(existing);
     }
+
     sqlx::query("DELETE FROM downloads WHERE hash = ?").bind(&hash).execute(&state.db).await?;
+
     let id: i64 = sqlx::query_scalar(
         "INSERT INTO downloads (hash, name, series_id, episodes, source, link, size, save_path, torrent, seeding, requested_by, added_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
@@ -344,6 +388,7 @@ pub async fn grab(state: &Arc<AppState>, g: Grab) -> anyhow::Result<i64> {
     .bind(now())
     .fetch_one(&state.db)
     .await?;
+
     if let Some(series_id) = g.series_id {
         for (s, e) in &g.episodes {
             sqlx::query(
@@ -357,8 +402,10 @@ pub async fn grab(state: &Arc<AppState>, g: Grab) -> anyhow::Result<i64> {
             .execute(&state.db)
             .await?;
         }
+
         state.events.send(Event::SeriesChanged { series_id });
     }
+
     tracing::info!("downloading {} from {}", g.release.title, g.release.source);
     state.events.send(Event::DownloadsChanged);
     Ok(id)
@@ -419,8 +466,10 @@ mod tests {
         let search = search();
         let pack = search.judge(release("Show 4th_18-19 1080p"));
         let wanted = HashSet::from([(4, 18), (4, 19)]);
+
         let candidates =
             vec![pack.clone(), search.judge(release("Show S04E18 720p")), search.judge(release("Show S04E19 720p"))];
+
         let picked = choose(&candidates, &wanted);
         assert_eq!(picked.len(), 2);
         assert!(picked.iter().all(|(c, _)| !c.verdict.nonstandard));

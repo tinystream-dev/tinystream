@@ -1,0 +1,15 @@
+[package]
+name = "tinystream-about"
+description = "The Android app's smallest Rust crate: what it was built from, through uniffi"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+uniffi = "0.32"

@@ -54,23 +54,28 @@ impl<'a> Batch<'a> {
             .bind(now())
             .execute(self.db)
             .await?;
+
         Ok(())
     }
 
     pub async fn mkdirs(&self, dir: &Path) -> anyhow::Result<()> {
         let mut missing = Vec::new();
         let mut at = Some(dir);
+
         while let Some(d) = at {
             if d.exists() {
                 break;
             }
+
             missing.push(d.to_path_buf());
             at = d.parent();
         }
+
         for d in missing.into_iter().rev() {
             std::fs::create_dir(&d).with_context(|| format!("can't create {}", d.display()))?;
             self.record("mkdir", None, &d).await?;
         }
+
         Ok(())
     }
 
@@ -80,12 +85,15 @@ impl<'a> Batch<'a> {
         }
 
         let same_file = dst.exists() && same_inode(src, dst);
+
         if dst.exists() && !same_file {
             bail!("{} already exists; not overwriting it", dst.display());
         }
+
         if let Some(parent) = dst.parent() {
             self.mkdirs(parent).await?;
         }
+
         move_file(src, dst).await?;
         self.record("rename", Some(src), dst).await
     }
@@ -94,16 +102,20 @@ impl<'a> Batch<'a> {
         if dst.exists() {
             bail!("{} already exists; not overwriting it", dst.display());
         }
+
         if let Some(parent) = dst.parent() {
             self.mkdirs(parent).await?;
         }
+
         let mut last_error = None;
+
         for &t in how {
             let result = match t {
                 Transfer::Hardlink => std::fs::hard_link(src, dst).map_err(anyhow::Error::from),
                 Transfer::Copy => copy_into_place(src, dst).await,
                 Transfer::Move => move_file(src, dst).await,
             };
+
             match result {
                 Ok(()) => {
                     self.record(t.as_str(), Some(src), dst).await?;
@@ -115,6 +127,7 @@ impl<'a> Batch<'a> {
                 },
             }
         }
+
         Err(last_error.unwrap_or_else(|| anyhow::anyhow!("no way to import was allowed")))
             .with_context(|| format!("can't put {} into the library", src.display()))
     }
@@ -122,6 +135,7 @@ impl<'a> Batch<'a> {
 
 fn same_inode(a: &Path, b: &Path) -> bool {
     use std::os::unix::fs::MetadataExt;
+
     match (std::fs::metadata(a), std::fs::metadata(b)) {
         (Ok(a), Ok(b)) => a.ino() == b.ino() && a.dev() == b.dev(),
         _ => false,
@@ -133,14 +147,17 @@ async fn copy_into_place(src: &Path, dst: &Path) -> anyhow::Result<()> {
     let (s, p) = (src.to_path_buf(), part.clone());
 
     let copied = tokio::task::spawn_blocking(move || std::fs::copy(&s, &p)).await?;
+
     if let Err(e) = copied {
         let _ = std::fs::remove_file(&part);
         return Err(e.into());
     }
+
     if dst.exists() {
         let _ = std::fs::remove_file(&part);
         bail!("{} appeared while copying; not overwriting it", dst.display());
     }
+
     std::fs::rename(&part, dst)?;
     Ok(())
 }
@@ -172,22 +189,29 @@ pub async fn undo(db: &SqlitePool, batch: &str) -> anyhow::Result<UndoReport> {
     .bind(batch)
     .fetch_all(db)
     .await?;
+
     let mut report = UndoReport::default();
+
     for (id, kind, src, dst) in ops {
         let dst = PathBuf::from(dst);
+
         let result: anyhow::Result<()> = async {
             match kind.as_str() {
                 "rename" | "move" => {
                     let src = PathBuf::from(src.context("no source recorded")?);
+
                     if src.exists() {
                         bail!("{} exists again; leaving {} where it is", src.display(), dst.display());
                     }
+
                     if !dst.exists() {
                         bail!("{} is gone", dst.display());
                     }
+
                     if let Some(parent) = src.parent() {
                         std::fs::create_dir_all(parent)?;
                     }
+
                     move_file(&dst, &src).await
                 },
                 "hardlink" | "copy" => {
@@ -204,6 +228,7 @@ pub async fn undo(db: &SqlitePool, batch: &str) -> anyhow::Result<UndoReport> {
             }
         }
         .await;
+
         match result {
             Ok(()) => {
                 report.undone += 1;
@@ -212,12 +237,14 @@ pub async fn undo(db: &SqlitePool, batch: &str) -> anyhow::Result<UndoReport> {
             Err(e) => report.problems.push(format!("{e:#}")),
         }
     }
+
     Ok(report)
 }
 
 /// Where `path` is now, following any renames made after it was put there.
 async fn current_path(db: &SqlitePool, path: String) -> anyhow::Result<String> {
     let mut at = path;
+
     for _ in 0..32 {
         let next: Option<String> = sqlx::query_scalar(
             "SELECT dst FROM file_ops WHERE kind = 'rename' AND src = ? AND undone_at IS NULL ORDER BY id DESC LIMIT 1",
@@ -225,11 +252,13 @@ async fn current_path(db: &SqlitePool, path: String) -> anyhow::Result<String> {
         .bind(&at)
         .fetch_optional(db)
         .await?;
+
         match next {
             Some(n) => at = n,
             None => break,
         }
     }
+
     Ok(at)
 }
 
@@ -239,10 +268,13 @@ async fn season_of(db: &SqlitePool, path: &Path) -> anyhow::Result<Option<u32>> 
         .bind(path.to_string_lossy().to_string())
         .fetch_optional(db)
         .await?;
+
     if let Some(Some(season)) = scanned {
         return Ok(Some(season as u32));
     }
+
     let named = path.file_stem().and_then(|s| parse::episode_number(&s.to_string_lossy())).map(|n| n.season);
+
     Ok(named.or_else(|| {
         let folder = path.parent()?.file_name()?.to_string_lossy().to_string();
         parse::season_number(&folder)
@@ -258,38 +290,44 @@ pub async fn delete_placed(db: &SqlitePool, batch: &str, season: Option<u32>) ->
             .bind(batch)
             .fetch_all(db)
             .await?;
+
     let mut report = UndoReport::default();
+
     for (id, kind, dst) in ops {
         let result: anyhow::Result<()> = match kind.as_str() {
             "hardlink" | "copy" | "move" => {
                 let at = PathBuf::from(current_path(db, dst).await?);
+
                 if season.is_some() && season_of(db, &at).await? != season {
                     continue;
                 }
+
                 match std::fs::remove_file(&at) {
                     Err(e) if e.kind() != ErrorKind::NotFound => {
                         Err(anyhow::Error::from(e).context(format!("can't delete {}", at.display())))
                     },
                     _ => {
-                        // Gone from the library now, not at the next scan, so it isn't counted as
-                        // had meanwhile.
                         sqlx::query("DELETE FROM media WHERE path = ?")
                             .bind(at.to_string_lossy().to_string())
                             .execute(db)
                             .await?;
+
                         Ok(())
                     },
                 }
             },
             "mkdir" => {
                 let _ = std::fs::remove_dir(&dst);
+
                 if Path::new(&dst).exists() {
                     continue;
                 }
+
                 Ok(())
             },
             _ => continue,
         };
+
         match result {
             Ok(()) => {
                 report.undone += 1;
@@ -298,6 +336,7 @@ pub async fn delete_placed(db: &SqlitePool, batch: &str, season: Option<u32>) ->
             Err(e) => report.problems.push(format!("{e:#}")),
         }
     }
+
     Ok(report)
 }
 
@@ -370,6 +409,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("ts-fsops-files-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
         let batch = Batch::new(&db, "import-2", "test");
+
         for (src, dst) in [("a.mkv", "lib/Season 01/Show S01E01.mkv"), ("b.mkv", "lib/Season 02/Show S02E01.mkv")] {
             std::fs::write(dir.join(src), b"x").unwrap();
             batch.transfer(&dir.join(src), &dir.join(dst), &[Transfer::Move]).await.unwrap();

@@ -7,7 +7,6 @@ description = "The nasm assembler, for the libraries with hand-written assembly"
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
-rust-version.workspace = true
 publish = false
 links = "nasm"
 

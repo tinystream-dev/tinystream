@@ -23,6 +23,7 @@ async fn media_path(state: &AppState, user: &User, id: i64) -> ApiResult<(PathBu
     .bind(id)
     .fetch_optional(&state.db)
     .await?;
+
     let (path, item_id, library) = row.ok_or_else(|| ApiError::not_found("video"))?;
     user.can_access(state, &library).await?;
     Ok((PathBuf::from(path), item_id, library))
@@ -57,10 +58,12 @@ pub(super) fn stream_file(state: &AppState, who: &str, path: PathBuf, q: StreamQ
         Some("transcode") => VideoMode::Transcode { max_height: q.height.unwrap_or(1080) },
         _ => VideoMode::Copy,
     };
+
     let audio = match q.audio_mode.as_deref() {
         Some("aac") => AudioMode::Aac,
         _ => AudioMode::Copy,
     };
+
     tracing::info!(
         "{who} is playing {} from {:.0}s ({})",
         path.file_name().unwrap_or_default().to_string_lossy(),
@@ -71,16 +74,20 @@ pub(super) fn stream_file(state: &AppState, who: &str, path: PathBuf, q: StreamQ
             (VideoMode::Transcode { max_height }, _) => format!("transcode to {max_height}p"),
         }
     );
+
     let hw = match video {
         VideoMode::Transcode { .. } => state.media.hw.device(),
         VideoMode::Copy => None,
     };
+
     let hold = (video != VideoMode::Copy || audio != AudioMode::Copy).then(|| state.media.busy.hold());
     let rx = stream::spawn(StreamRequest { path, start: q.start.max(0.0), video, audio_stream: q.audio, audio }, hw);
+
     let chunks = ReceiverStream(rx).map(move |c| {
         let _ = &hold;
         c
     });
+
     let mut res = Body::from_stream(chunks).into_response();
     let h = res.headers_mut();
     h.insert(header::CONTENT_TYPE, HeaderValue::from_static("video/mp4"));
@@ -101,6 +108,7 @@ pub async fn subtitles(
 
 pub(super) async fn subtitle_file(state: &AppState, path: &FsPath, track: &str) -> ApiResult<Response> {
     let text = state.media.subtitles(path, track).await.map_err(|e| ApiError::bad_request(format!("{e:#}")))?;
+
     Ok(([(header::CONTENT_TYPE, "text/x-ssa; charset=utf-8"), (header::CACHE_CONTROL, "private, max-age=3600")], text)
         .into_response())
 }
@@ -119,6 +127,7 @@ pub(super) async fn font_file(path: PathBuf, index: usize) -> ApiResult<Response
         .await
         .map_err(|e| ApiError::from(anyhow::anyhow!(e)))?
         .map_err(|e| ApiError::bad_request(format!("{e:#}")))?;
+
     let mime = mime_guess::from_path(&name).first_or_octet_stream().to_string();
     Ok(([(header::CONTENT_TYPE, mime), (header::CACHE_CONTROL, "private, max-age=86400".into())], data).into_response())
 }
@@ -154,7 +163,9 @@ pub(super) async fn preview_frame(state: &AppState, path: &FsPath, at: u32) -> A
         tracing::debug!("preview for {}: {e:#}", path.display());
         ApiError::not_found("frame")
     })?;
+
     let data = tokio::fs::read(&file).await.map_err(|_| ApiError::not_found("frame"))?;
+
     Ok(([(header::CONTENT_TYPE, "image/jpeg"), (header::CACHE_CONTROL, "private, max-age=604800, immutable")], data)
         .into_response())
 }

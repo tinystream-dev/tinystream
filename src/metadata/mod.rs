@@ -168,6 +168,10 @@ impl MetadataService {
         unavailable()
     }
 
+    pub async fn first_season(&self, _provider: Provider, _id: &str) -> anyhow::Result<Option<Candidate>> {
+        Ok(None)
+    }
+
     pub async fn search(
         &self,
         _state: &AppState,
@@ -235,6 +239,7 @@ impl MetadataService {
             Provider::Tmdb => {
                 let config = state.config.current();
                 let (mut schedule, external) = self.tmdb.schedule(&config.metadata, id).await?;
+
                 match self.tvmaze.air_times(&external).await {
                     Ok(times) if !times.is_empty() => {
                         for season in &mut schedule.seasons {
@@ -248,8 +253,16 @@ impl MetadataService {
                     Ok(_) => {},
                     Err(e) => tracing::debug!("TVmaze doesn't know TMDB show {id}: {e:#}"),
                 }
+
                 Ok(schedule)
             },
+        }
+    }
+
+    pub async fn first_season(&self, provider: Provider, id: &str) -> anyhow::Result<Option<Candidate>> {
+        match provider {
+            Provider::Anilist => Ok(Some(self.anilist.first_season(id).await?)),
+            Provider::Tmdb => Ok(None),
         }
     }
 
@@ -312,9 +325,11 @@ impl MetadataService {
         match provider {
             Provider::Anilist => {
                 let mut details = self.anilist.details(kind, id, library).await?;
+
                 if let Err(e) = self.fill_titles(&mut details, library).await {
                     tracing::debug!("TVmaze episode titles for AniList show {id}: {e:#}");
                 }
+
                 Ok(details)
             },
             Provider::Tmdb => {
@@ -330,36 +345,48 @@ impl MetadataService {
             let have: Vec<i64> = s.episodes.iter().map(|e| e.number).collect();
             (1..=library.get(&s.number).copied().unwrap_or(0)).any(|n| !have.contains(&n))
         };
+
         if !details.seasons.iter().any(incomplete) {
             return Ok(());
         }
+
         let Some(year) = details.year else {
             return Ok(());
         };
+
         let Some(episodes) = self.tvmaze.episodes_by_title(&details.aliases, year).await? else {
             return Ok(());
         };
+
         let placeholder = |t: &str| t.strip_prefix("Episode ").is_some_and(|n| n.trim().parse::<i64>().is_ok());
+
         for season in details.seasons.iter_mut().filter(|s| incomplete(s)) {
             let theirs: BTreeMap<i64, &tvmaze::Episode> =
                 episodes.iter().filter(|e| e.season == season.number).filter_map(|e| Some((e.number?, e))).collect();
+
             let Some(&last) = theirs.keys().last() else {
                 continue;
             };
+
             let fits = match season.length {
                 Some(length) => last == length,
                 None => last >= library.get(&season.number).copied().unwrap_or(0),
             };
+
             if !fits {
                 continue;
             }
+
             let mut ours: BTreeMap<i64, EpisodeDetails> = season.episodes.drain(..).map(|e| (e.number, e)).collect();
+
             for (&number, e) in &theirs {
                 let Some(title) = e.name.clone().filter(|t| !t.trim().is_empty() && !placeholder(t)) else {
                     continue;
                 };
+
                 let old = ours.remove(&number).unwrap_or_default();
                 let image = e.image.as_ref().and_then(|i| i.medium.clone().or_else(|| i.original.clone()));
+
                 ours.insert(
                     number,
                     EpisodeDetails {
@@ -371,8 +398,10 @@ impl MetadataService {
                     },
                 );
             }
+
             season.episodes = ours.into_values().collect();
         }
+
         Ok(())
     }
 }
@@ -391,8 +420,10 @@ impl MetadataService {
     ) -> anyhow::Result<HashMap<String, Vec<Candidate>>> {
         let mut out = HashMap::new();
         let mut missing = Vec::new();
+
         {
             let cache = self.recommended.lock().unwrap();
+
             for id in ids {
                 match cache.get(&(provider, kind, id.clone())) {
                     Some((at, list)) if at.elapsed() < RECOMMENDED_FOR => {
@@ -402,17 +433,21 @@ impl MetadataService {
                 }
             }
         }
+
         if missing.is_empty() {
             return Ok(out);
         }
+
         let fetched = self.fetch_recommendations(state, provider, kind, &missing).await?;
         let mut cache = self.recommended.lock().unwrap();
         cache.retain(|_, (at, _)| at.elapsed() < RECOMMENDED_FOR);
+
         for id in missing {
             let list = fetched.get(&id).cloned().unwrap_or_default();
             cache.insert((provider, kind, id.clone()), (Instant::now(), list.clone()));
             out.insert(id, list);
         }
+
         Ok(out)
     }
 
@@ -426,10 +461,12 @@ impl MetadataService {
     ) -> anyhow::Result<()> {
         state.events.send(Event::MetadataFetching { item_id });
         let result = self.fetch_and_store(state, item_id, provider, provider_id, manual).await;
+
         state.events.send(match result {
             Ok(()) => Event::MetadataUpdated { item_id },
             Err(_) => Event::MetadataFailed { item_id },
         });
+
         result
     }
 
@@ -443,11 +480,13 @@ impl MetadataService {
     ) -> anyhow::Result<()> {
         let (kind,): (String,) =
             sqlx::query_as("SELECT kind FROM items WHERE id = ?").bind(item_id).fetch_one(&state.db).await?;
+
         let kind = if kind == "show" { ItemKind::Show } else { ItemKind::Movie };
         let library = library_seasons(&state.db, item_id).await?;
         let d = self.details(state, provider, kind, provider_id, &library).await?;
 
         let mut tx = state.db.begin().await?;
+
         sqlx::query(
             "UPDATE items SET title = ?, sort_title = ?, year = COALESCE(?, year), overview = ?, genres = ?,
                 rating = ?, poster = ?, backdrop = ?, provider = ?, provider_id = ?, match_state = ?, updated_at = ?
@@ -468,16 +507,20 @@ impl MetadataService {
         .bind(item_id)
         .execute(&mut *tx)
         .await?;
+
         let numbers = serde_json::to_string(&d.seasons.iter().map(|s| s.number).collect::<Vec<_>>())?;
+
         sqlx::query("DELETE FROM seasons WHERE item_id = ? AND number NOT IN (SELECT value FROM json_each(?))")
             .bind(item_id)
             .bind(&numbers)
             .execute(&mut *tx)
             .await?;
+
         sqlx::query("UPDATE media SET title = NULL, overview = NULL, still = NULL, air_date = NULL WHERE item_id = ? AND season IS NOT NULL")
             .bind(item_id)
             .execute(&mut *tx)
             .await?;
+
         for s in &d.seasons {
             sqlx::query(
                 "INSERT INTO seasons (item_id, number, title, overview, poster, provider_ids) VALUES (?, ?, ?, ?, ?, ?)
@@ -492,6 +535,7 @@ impl MetadataService {
             .bind(serde_json::to_string(&s.provider_ids)?)
             .execute(&mut *tx)
             .await?;
+
             for e in &s.episodes {
                 sqlx::query(
                     "UPDATE media SET title = ?, overview = ?, still = ?, air_date = ?
@@ -508,6 +552,7 @@ impl MetadataService {
                 .await?;
             }
         }
+
         tx.commit().await?;
         Ok(())
     }
@@ -515,6 +560,7 @@ impl MetadataService {
     async fn auto_match(&self, state: &AppState, item: &PendingItem, provider: Provider) -> anyhow::Result<()> {
         let kind = if item.kind == "show" { ItemKind::Show } else { ItemKind::Movie };
         state.events.send(Event::MetadataFetching { item_id: item.id });
+
         let results = match self.search(state, provider, kind, &item.folder_title, item.folder_year).await {
             Ok(results) => results,
             Err(e) => {
@@ -522,7 +568,9 @@ impl MetadataService {
                 return Err(e);
             },
         };
+
         let best = pick_best(&results, &item.folder_title, item.folder_year);
+
         match best {
             Some(c) => {
                 tracing::info!("matched {:?} → {:?} ({} {})", item.folder_title, c.title, provider.as_str(), c.id);
@@ -534,11 +582,13 @@ impl MetadataService {
                     provider.as_str(),
                     item.folder_title
                 );
+
                 sqlx::query("UPDATE items SET match_state = 'unmatched', provider = ? WHERE id = ?")
                     .bind(provider.as_str())
                     .bind(item.id)
                     .execute(&state.db)
                     .await?;
+
                 state.events.send(Event::MetadataUpdated { item_id: item.id });
                 Ok(())
             },
@@ -553,6 +603,7 @@ pub async fn library_seasons(db: &sqlx::SqlitePool, item_id: i64) -> anyhow::Res
     .bind(item_id)
     .fetch_all(db)
     .await?;
+
     Ok(rows.into_iter().collect())
 }
 
@@ -564,6 +615,7 @@ fn pick_best<'a>(results: &'a [Candidate], title: &str, year: Option<i64>) -> Op
     let want = normalize(title);
     let exact = |c: &&Candidate| normalize(&c.title) == want;
     let same_year = |c: &&Candidate| year.is_some() && c.year == year;
+
     results
         .iter()
         .find(|c| exact(c) && same_year(c))
@@ -587,13 +639,16 @@ pub fn spawn_worker(state: Arc<AppState>) {
     #[cfg(not(feature = "metadata"))]
     {
         let config = state.config.current();
+
         if config.libraries.iter().any(|l| l.metadata_provider.is_some()) {
             tracing::warn!(
                 "libraries have a metadata-provider, but this build has no metadata providers; titles keep their folder names"
             );
         }
+
         return;
     }
+
     #[cfg(feature = "metadata")]
     tokio::spawn(async move {
         loop {
@@ -618,13 +673,16 @@ async fn run_once(state: &Arc<AppState>) -> anyhow::Result<()> {
     )
     .fetch_all(&state.db)
     .await?;
+
     for item in pending {
         let Some(provider) = provider_of(&item.library) else {
             continue;
         };
+
         if item.match_state == "unmatched" && item.provider.as_deref() == Some(provider.as_str()) {
             continue;
         }
+
         if let Err(e) = state.metadata.auto_match(state, &item, provider).await {
             tracing::warn!("metadata for {:?}: {e:#}", item.folder_title);
         }
@@ -636,24 +694,31 @@ async fn run_once(state: &Arc<AppState>) -> anyhow::Result<()> {
     )
     .fetch_all(&state.db)
     .await?;
+
     for (id, library, provider, provider_id) in stale {
         let Some(p) = provider_of(&library) else {
             continue;
         };
+
         if p.as_str() != provider {
             continue;
         }
+
         {
             let mut backoff = state.metadata.backoff.lock().unwrap();
+
             if backoff.get(&id).is_some_and(|t| t.elapsed() < Duration::from_secs(12 * 3600)) {
                 continue;
             }
+
             backoff.insert(id, Instant::now());
         }
+
         if let Err(e) = state.metadata.apply(state, id, p, &provider_id, false).await {
             tracing::debug!("refreshing episodes of item {id}: {e:#}");
         }
     }
+
     Ok(())
 }
 
@@ -662,6 +727,7 @@ pub(crate) fn strip_html(s: &str) -> String {
     let s = s.replace("<br>", "\n").replace("<br/>", "\n").replace("<br />", "\n");
     let mut out = String::with_capacity(s.len());
     let mut in_tag = false;
+
     for c in s.chars() {
         match c {
             '<' => in_tag = true,
@@ -670,21 +736,27 @@ pub(crate) fn strip_html(s: &str) -> String {
             _ => {},
         }
     }
+
     let out = out
         .replace("&amp;", "&")
         .replace("&quot;", "\"")
         .replace("&#039;", "'")
         .replace("&lt;", "<")
         .replace("&gt;", ">");
+
     let mut collapsed = String::new();
+
     for line in out.lines() {
         let line = line.trim();
+
         if line.is_empty() && collapsed.ends_with("\n\n") {
             continue;
         }
+
         collapsed.push_str(line);
         collapsed.push('\n');
     }
+
     collapsed.trim().to_string()
 }
 
@@ -697,9 +769,11 @@ mod category_tests {
         for format in ["TV", "TV_SHORT", "ONA"] {
             assert_eq!(MediaCategory::anilist(Some(format)), MediaCategory::Episodes);
         }
+
         for format in ["OVA", "SPECIAL"] {
             assert_eq!(MediaCategory::anilist(Some(format)), MediaCategory::Specials);
         }
+
         assert_eq!(MediaCategory::anilist(Some("MOVIE")), MediaCategory::Movies);
         assert_eq!(MediaCategory::anilist(Some("MUSIC")), MediaCategory::Other);
         assert_eq!(MediaCategory::anilist(None), MediaCategory::Other);

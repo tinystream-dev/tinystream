@@ -62,17 +62,21 @@ impl io::Write for SharedFileGuard<'_> {
 pub fn init(paths: &Paths, initial_level: &str) -> anyhow::Result<LogHandle> {
     fs::create_dir_all(&paths.data_dir)?;
     let current = paths.current_log();
+
     if current.exists() {
         fs::rename(&current, paths.previous_log())?;
     }
+
     let file = File::create(&current)?;
 
     let env_override = std::env::var("RUST_LOG").is_ok_and(|v| !v.is_empty());
+
     let filter = if env_override {
         EnvFilter::from_default_env()
     } else {
         build_filter(initial_level).unwrap_or_else(|_| build_filter("info").unwrap())
     };
+
     let (filter, reload) = reload::Layer::new(filter);
 
     tracing_subscriber::registry()

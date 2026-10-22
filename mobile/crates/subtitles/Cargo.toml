@@ -1,0 +1,16 @@
+[package]
+name = "tinystream-subtitles"
+description = "The video player's subtitles: rustyass drawing into Android bitmaps, through JNI"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+jni = "0.21"
+rustyass = { path = "../../../rustyass" }

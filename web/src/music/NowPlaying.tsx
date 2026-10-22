@@ -7,7 +7,6 @@ import { Link } from '@tanstack/react-router'
 import { ChevronDown, Trash2, X } from 'lucide-react'
 import { type CSSProperties, useEffect, useLayoutEffect, useRef } from 'react'
 import { Segmented } from '../components/ui'
-import { useAmbient } from '../lib/ambient'
 import { request } from '../lib/api'
 import { LyricsQuery, cover, duration, hiRes, quality } from './api'
 import { Artists, Cover, Playing, QualityBadge, StarButton } from './components'
@@ -202,7 +201,7 @@ function Details() {
 
 export function NowPlaying({ tab, onTab, onClose }: { tab: Tab; onTab: (t: Tab) => void; onClose: () => void }) {
   const entry = usePlayer(current)
-  const tint = useAmbient(entry ? cover(entry.track.cover, 32) : null)
+  const tint = entry?.track.coverTint ?? null
   useEffect(() => {
     const key = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement) return

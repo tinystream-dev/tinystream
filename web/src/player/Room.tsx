@@ -4,13 +4,13 @@
 
 import { Check, Copy, Crown, Link2, Play } from 'lucide-react'
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
+import { clock } from '@tinystream/shared/format'
 import { Avatar } from '../components/Avatar'
 import { Squircle } from '../components/Squircle'
 import { Button, Panel, Popover, Segmented, Toggle } from '../components/ui'
 import { graphql } from '../gql'
 import type { RoomQuery } from '../gql/graphql'
 import { usePeople } from '../lib/hooks'
-import { clock } from '../lib/format'
 import { type Member, type RoomState, type Status, type SyncSnapshot, type SyncClient, canControl } from './sync'
 
 /** What a room is, and what you may do in it. */

@@ -1,0 +1,65 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+//
+// Builds a crate from the app's Cargo workspace (mobile/Cargo.toml) into the
+// Android module that applies this: the library for every ABI the app is
+// built for (cargo-ndk, with the NDK pinned in app.config.ts), and its Kotlin
+// bindings (uniffi). In the module's build.gradle:
+//
+//   apply from: '../../../gradle/rust.gradle'
+//   rust.crate('tinystream-about')
+//
+// or `rust.jni('tinystream-subtitles')` for a crate with JNI functions of its
+// own, without bindings.
+
+def workspace = buildscript.sourceFile.parentFile.parentFile
+def targetDir = new File(workspace, 'target')
+def jniLibs = layout.buildDirectory.dir('rust/jniLibs')
+def kotlin = layout.buildDirectory.dir('rust/kotlin')
+def abis = (findProperty('reactNativeArchitectures') ?: 'arm64-v8a').split(',').collect { it.trim() }.findAll()
+
+android.ndkVersion = rootProject.ext.ndkVersion
+
+def cargoNdk = { String crate ->
+    def build = tasks.register('cargoNdk', Exec) {
+        description = "Builds $crate for ${abis.join(', ')}."
+        workingDir workspace
+        doFirst { environment 'ANDROID_NDK_HOME', android.ndkDirectory.absolutePath }
+        environment 'CARGO_TARGET_DIR', targetDir.absolutePath
+        // The NDK's default already, but the Play Store and Android 15+ devices with 16 KB pages need it.
+        environment 'RUSTFLAGS', '-C link-arg=-Wl,-z,max-page-size=16384'
+        commandLine(['cargo', 'ndk', '--platform', '34', '--output-dir', jniLibs.get().asFile.absolutePath]
+            + abis.collectMany { ['--target', it] }
+            + ['build', '--release', '--locked', '--package', crate])
+        outputs.dir jniLibs
+        outputs.upToDateWhen { false }
+    }
+
+    android.sourceSets.main.jniLibs.srcDirs += jniLibs.get().asFile
+    build
+}
+
+ext.rust = [crate: { String crate ->
+    def lib = "lib${crate.replace('-', '_')}.so"
+    def build = cargoNdk(crate)
+
+    def bindgen = tasks.register('uniffiBindgen', Exec) {
+        description = "Generates the Kotlin bindings of $crate."
+        dependsOn build
+        workingDir workspace
+        environment 'CARGO_TARGET_DIR', targetDir.absolutePath
+        commandLine 'cargo', 'run', '--quiet', '--locked', '--package', 'uniffi-bindgen', '--',
+            'generate', '--library', jniLibs.get().file("${abis[0]}/$lib").asFile.absolutePath,
+            '--language', 'kotlin', '--no-format', '--out-dir', kotlin.get().asFile.absolutePath
+        outputs.dir kotlin
+        outputs.upToDateWhen { false }
+    }
+
+    android.sourceSets.main.java.srcDirs += kotlin.get().asFile
+    tasks.named('preBuild') { dependsOn bindgen }
+    dependencies {
+        implementation 'net.java.dev.jna:jna:5.17.0@aar'
+    }
+}, jni: { String crate ->
+    def build = cargoNdk(crate)
+    tasks.named('preBuild') { dependsOn build }
+}]

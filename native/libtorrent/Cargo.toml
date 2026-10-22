@@ -7,7 +7,6 @@ description = "A static libtorrent-rasterbar"
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
-rust-version.workspace = true
 publish = false
 links = "torrent-rasterbar"
 
@@ -16,4 +15,5 @@ boost-src = { path = "../boost" }
 
 [build-dependencies]
 cc = { version = "1", features = ["parallel"] }
+pkg-config = "0.3"
 native-support = { path = "../support" }

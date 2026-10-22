@@ -37,17 +37,21 @@ impl Paths {
             None => {
                 let base = dirs::config_local_dir()
                     .context("can't find a config directory: set $HOME (or $XDG_CONFIG_HOME), or pass --config")?;
+
                 (base.join("tinystream").join("config.toml"), Source::Default)
             },
         };
+
         let (data_dir, data_source) = match &cli.data_dir {
             Some(p) => (absolute(p)?, Source::Flag),
             None => {
                 let base = dirs::data_local_dir()
                     .context("can't find a data directory: set $HOME (or $XDG_DATA_HOME), or pass --data-dir")?;
+
                 (base.join("tinystream"), Source::Default)
             },
         };
+
         Ok(Self { config_file, config_source, data_dir, data_source })
     }
 
@@ -81,6 +85,7 @@ pub fn expand_tilde(p: &Path) -> anyhow::Result<PathBuf> {
     let Ok(rest) = p.strip_prefix("~") else {
         return Ok(p.to_path_buf());
     };
+
     match std::env::var_os("HOME").filter(|h| !h.is_empty()) {
         Some(home) => Ok(PathBuf::from(home).join(rest)),
         None => bail!(

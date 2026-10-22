@@ -121,6 +121,7 @@ pub struct NotificationMutation;
 impl NotificationMutation {
     async fn mark_notifications_read(&self, ctx: &Context<'_>, ids: Option<Vec<i64>>) -> ApiResult<Inbox> {
         let (state, user) = (ctx.state(), ctx.user()?);
+
         match ids {
             Some(ids) => {
                 for id in ids {
@@ -142,12 +143,14 @@ impl NotificationMutation {
                     .await?;
             },
         }
+
         state.events.send(Event::NotificationsChanged { user_id: user.id });
         inbox(ctx, 60).await
     }
 
     async fn delete_notifications(&self, ctx: &Context<'_>, id: Option<i64>) -> ApiResult<Inbox> {
         let (state, user) = (ctx.state(), ctx.user()?);
+
         match id {
             Some(id) => {
                 sqlx::query("DELETE FROM notifications WHERE id = ? AND user_id = ?")
@@ -160,6 +163,7 @@ impl NotificationMutation {
                 sqlx::query("DELETE FROM notifications WHERE user_id = ?").bind(user.id).execute(&state.db).await?;
             },
         }
+
         state.events.send(Event::NotificationsChanged { user_id: user.id });
         inbox(ctx, 60).await
     }

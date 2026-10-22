@@ -6,7 +6,6 @@ import { Link } from '@tanstack/react-router'
 import { Captions, ListMusic, Maximize2, SkipForward, X } from 'lucide-react'
 import { type CSSProperties, type PointerEvent, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { createPortal, flushSync } from 'react-dom'
-import { useAmbient } from '../lib/ambient'
 import { cover } from './api'
 import { Artists, Cover, QualityBadge, StarButton } from './components'
 import { Elsewhere, PlayButton, Scrubber, Transport, Volume } from './controls'
@@ -78,7 +77,7 @@ export function MusicPill() {
   const remote = usePlayer((s) => s.remote)
   const { open, tab } = useView()
   const track = entry?.track ?? null
-  const tint = useAmbient(track ? cover(track.cover, 32) : null)
+  const tint = track?.coverTint ?? null
   const inner = useRef<HTMLDivElement>(null)
   const root = useRef<HTMLDivElement>(null)
   const [size, setSize] = useState<{ w: number; h: number } | null>(null)

@@ -16,16 +16,20 @@ import { Route as DiscoverRouteImport } from './routes/discover'
 import { Route as DownloadsRouteImport } from './routes/downloads'
 import { Route as InviteRouteImport } from './routes/invite'
 import { Route as RequestsRouteImport } from './routes/requests'
+import { Route as ResetRouteImport } from './routes/reset'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as WantedRouteImport } from './routes/wanted'
 import { Route as AlbumIdRouteImport } from './routes/album.$id'
 import { Route as ArtistIdRouteImport } from './routes/artist.$id'
+import { Route as BookIdRouteImport } from './routes/book.$id'
 import { Route as LibraryNameRouteImport } from './routes/library.$name'
 import { Route as ListenCodeRouteImport } from './routes/listen.$code'
 import { Route as PlaylistIdRouteImport } from './routes/playlist.$id'
+import { Route as ReadIdRouteImport } from './routes/read.$id'
 import { Route as TitleIdRouteImport } from './routes/title.$id'
 import { Route as TogetherCodeRouteImport } from './routes/together.$code'
 import { Route as WatchIdRouteImport } from './routes/watch.$id'
+import { Route as LibraryNameSeriesSeriesRouteImport } from './routes/library_.$name.series.$series'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -62,6 +66,11 @@ const RequestsRoute = RequestsRouteImport.update({
   path: '/requests',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ResetRoute = ResetRouteImport.update({
+  id: '/reset',
+  path: '/reset',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const SettingsRoute = SettingsRouteImport.update({
   id: '/settings',
   path: '/settings',
@@ -82,6 +91,11 @@ const ArtistIdRoute = ArtistIdRouteImport.update({
   path: '/artist/$id',
   getParentRoute: () => rootRouteImport,
 } as any)
+const BookIdRoute = BookIdRouteImport.update({
+  id: '/book/$id',
+  path: '/book/$id',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const LibraryNameRoute = LibraryNameRouteImport.update({
   id: '/library/$name',
   path: '/library/$name',
@@ -95,6 +109,11 @@ const ListenCodeRoute = ListenCodeRouteImport.update({
 const PlaylistIdRoute = PlaylistIdRouteImport.update({
   id: '/playlist/$id',
   path: '/playlist/$id',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ReadIdRoute = ReadIdRouteImport.update({
+  id: '/read/$id',
+  path: '/read/$id',
   getParentRoute: () => rootRouteImport,
 } as any)
 const TitleIdRoute = TitleIdRouteImport.update({
@@ -112,6 +131,11 @@ const WatchIdRoute = WatchIdRouteImport.update({
   path: '/watch/$id',
   getParentRoute: () => rootRouteImport,
 } as any)
+const LibraryNameSeriesSeriesRoute = LibraryNameSeriesSeriesRouteImport.update({
+  id: '/library_/$name/series/$series',
+  path: '/library/$name/series/$series',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -121,16 +145,20 @@ export interface FileRoutesByFullPath {
   '/downloads': typeof DownloadsRoute
   '/invite': typeof InviteRoute
   '/requests': typeof RequestsRoute
+  '/reset': typeof ResetRoute
   '/settings': typeof SettingsRoute
   '/wanted': typeof WantedRoute
   '/album/$id': typeof AlbumIdRoute
   '/artist/$id': typeof ArtistIdRoute
+  '/book/$id': typeof BookIdRoute
   '/library/$name': typeof LibraryNameRoute
   '/listen/$code': typeof ListenCodeRoute
   '/playlist/$id': typeof PlaylistIdRoute
+  '/read/$id': typeof ReadIdRoute
   '/title/$id': typeof TitleIdRoute
   '/together/$code': typeof TogetherCodeRoute
   '/watch/$id': typeof WatchIdRoute
+  '/library/$name/series/$series': typeof LibraryNameSeriesSeriesRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -140,16 +168,20 @@ export interface FileRoutesByTo {
   '/downloads': typeof DownloadsRoute
   '/invite': typeof InviteRoute
   '/requests': typeof RequestsRoute
+  '/reset': typeof ResetRoute
   '/settings': typeof SettingsRoute
   '/wanted': typeof WantedRoute
   '/album/$id': typeof AlbumIdRoute
   '/artist/$id': typeof ArtistIdRoute
+  '/book/$id': typeof BookIdRoute
   '/library/$name': typeof LibraryNameRoute
   '/listen/$code': typeof ListenCodeRoute
   '/playlist/$id': typeof PlaylistIdRoute
+  '/read/$id': typeof ReadIdRoute
   '/title/$id': typeof TitleIdRoute
   '/together/$code': typeof TogetherCodeRoute
   '/watch/$id': typeof WatchIdRoute
+  '/library/$name/series/$series': typeof LibraryNameSeriesSeriesRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -160,16 +192,20 @@ export interface FileRoutesById {
   '/downloads': typeof DownloadsRoute
   '/invite': typeof InviteRoute
   '/requests': typeof RequestsRoute
+  '/reset': typeof ResetRoute
   '/settings': typeof SettingsRoute
   '/wanted': typeof WantedRoute
   '/album/$id': typeof AlbumIdRoute
   '/artist/$id': typeof ArtistIdRoute
+  '/book/$id': typeof BookIdRoute
   '/library/$name': typeof LibraryNameRoute
   '/listen/$code': typeof ListenCodeRoute
   '/playlist/$id': typeof PlaylistIdRoute
+  '/read/$id': typeof ReadIdRoute
   '/title/$id': typeof TitleIdRoute
   '/together/$code': typeof TogetherCodeRoute
   '/watch/$id': typeof WatchIdRoute
+  '/library_/$name/series/$series': typeof LibraryNameSeriesSeriesRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -181,16 +217,20 @@ export interface FileRouteTypes {
     | '/downloads'
     | '/invite'
     | '/requests'
+    | '/reset'
     | '/settings'
     | '/wanted'
     | '/album/$id'
     | '/artist/$id'
+    | '/book/$id'
     | '/library/$name'
     | '/listen/$code'
     | '/playlist/$id'
+    | '/read/$id'
     | '/title/$id'
     | '/together/$code'
     | '/watch/$id'
+    | '/library/$name/series/$series'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -200,16 +240,20 @@ export interface FileRouteTypes {
     | '/downloads'
     | '/invite'
     | '/requests'
+    | '/reset'
     | '/settings'
     | '/wanted'
     | '/album/$id'
     | '/artist/$id'
+    | '/book/$id'
     | '/library/$name'
     | '/listen/$code'
     | '/playlist/$id'
+    | '/read/$id'
     | '/title/$id'
     | '/together/$code'
     | '/watch/$id'
+    | '/library/$name/series/$series'
   id:
     | '__root__'
     | '/'
@@ -219,16 +263,20 @@ export interface FileRouteTypes {
     | '/downloads'
     | '/invite'
     | '/requests'
+    | '/reset'
     | '/settings'
     | '/wanted'
     | '/album/$id'
     | '/artist/$id'
+    | '/book/$id'
     | '/library/$name'
     | '/listen/$code'
     | '/playlist/$id'
+    | '/read/$id'
     | '/title/$id'
     | '/together/$code'
     | '/watch/$id'
+    | '/library_/$name/series/$series'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -239,16 +287,20 @@ export interface RootRouteChildren {
   DownloadsRoute: typeof DownloadsRoute
   InviteRoute: typeof InviteRoute
   RequestsRoute: typeof RequestsRoute
+  ResetRoute: typeof ResetRoute
   SettingsRoute: typeof SettingsRoute
   WantedRoute: typeof WantedRoute
   AlbumIdRoute: typeof AlbumIdRoute
   ArtistIdRoute: typeof ArtistIdRoute
+  BookIdRoute: typeof BookIdRoute
   LibraryNameRoute: typeof LibraryNameRoute
   ListenCodeRoute: typeof ListenCodeRoute
   PlaylistIdRoute: typeof PlaylistIdRoute
+  ReadIdRoute: typeof ReadIdRoute
   TitleIdRoute: typeof TitleIdRoute
   TogetherCodeRoute: typeof TogetherCodeRoute
   WatchIdRoute: typeof WatchIdRoute
+  LibraryNameSeriesSeriesRoute: typeof LibraryNameSeriesSeriesRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -302,6 +354,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof RequestsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/reset': {
+      id: '/reset'
+      path: '/reset'
+      fullPath: '/reset'
+      preLoaderRoute: typeof ResetRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/settings': {
       id: '/settings'
       path: '/settings'
@@ -330,6 +389,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ArtistIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/book/$id': {
+      id: '/book/$id'
+      path: '/book/$id'
+      fullPath: '/book/$id'
+      preLoaderRoute: typeof BookIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/library/$name': {
       id: '/library/$name'
       path: '/library/$name'
@@ -349,6 +415,13 @@ declare module '@tanstack/react-router' {
       path: '/playlist/$id'
       fullPath: '/playlist/$id'
       preLoaderRoute: typeof PlaylistIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/read/$id': {
+      id: '/read/$id'
+      path: '/read/$id'
+      fullPath: '/read/$id'
+      preLoaderRoute: typeof ReadIdRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/title/$id': {
@@ -372,6 +445,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof WatchIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/library_/$name/series/$series': {
+      id: '/library_/$name/series/$series'
+      path: '/library/$name/series/$series'
+      fullPath: '/library/$name/series/$series'
+      preLoaderRoute: typeof LibraryNameSeriesSeriesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -383,29 +463,30 @@ const rootRouteChildren: RootRouteChildren = {
   DownloadsRoute: DownloadsRoute,
   InviteRoute: InviteRoute,
   RequestsRoute: RequestsRoute,
+  ResetRoute: ResetRoute,
   SettingsRoute: SettingsRoute,
   WantedRoute: WantedRoute,
   AlbumIdRoute: AlbumIdRoute,
   ArtistIdRoute: ArtistIdRoute,
+  BookIdRoute: BookIdRoute,
   LibraryNameRoute: LibraryNameRoute,
   ListenCodeRoute: ListenCodeRoute,
   PlaylistIdRoute: PlaylistIdRoute,
+  ReadIdRoute: ReadIdRoute,
   TitleIdRoute: TitleIdRoute,
   TogetherCodeRoute: TogetherCodeRoute,
   WatchIdRoute: WatchIdRoute,
+  LibraryNameSeriesSeriesRoute: LibraryNameSeriesSeriesRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
 
 import type { getRouter } from './router.tsx'
-
 import type { createStart } from '@tanstack/react-start'
-
 declare module '@tanstack/react-start' {
   interface Register {
     ssr: true
-
     router: Awaited<ReturnType<typeof getRouter>>
   }
 }

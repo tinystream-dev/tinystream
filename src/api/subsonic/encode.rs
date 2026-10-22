@@ -30,6 +30,7 @@ fn scalar(v: &Value) -> Option<String> {
 fn element(name: &str, fields: &Map<String, Value>, out: &mut String) {
     out.push('<');
     out.push_str(name);
+
     for (k, v) in fields {
         if k == "value" {
             continue;
@@ -42,17 +43,23 @@ fn element(name: &str, fields: &Map<String, Value>, out: &mut String) {
             out.push('"');
         }
     }
+
     let text = fields.get("value").and_then(scalar);
+
     let children: Vec<(&String, &Value)> =
         fields.iter().filter(|(k, v)| *k != "value" && matches!(v, Value::Object(_) | Value::Array(_))).collect();
+
     if text.is_none() && children.is_empty() {
         out.push_str("/>");
         return;
     }
+
     out.push('>');
+
     if let Some(t) = text {
         escape(&t, out);
     }
+
     for (k, v) in children {
         match v {
             Value::Object(m) => element(k, m, out),
@@ -77,6 +84,7 @@ fn element(name: &str, fields: &Map<String, Value>, out: &mut String) {
             _ => {},
         }
     }
+
     out.push_str("</");
     out.push_str(name);
     out.push('>');
@@ -103,6 +111,7 @@ mod tests {
             "genres": { "genre": [{ "value": "Rock & Roll", "songCount": 3 }] },
             "song": { "id": "tr-1", "replayGain": { "trackGain": -6.5 }, "releaseTypes": ["Album"] },
         });
+
         let out = xml("r", v.as_object().unwrap());
         assert!(out.contains(r#"<genre songCount="3">Rock &amp; Roll</genre>"#), "{out}");
         assert!(out.contains(r#"<replayGain trackGain="-6.5"/>"#), "{out}");

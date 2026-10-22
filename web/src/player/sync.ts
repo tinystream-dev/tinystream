@@ -21,9 +21,55 @@ export type SharedTracks = {
   mediaId: number
   audio: number | null
   audioLanguage: string | null
+  audioTitle: string | null
+  audioChannels: number | null
+  audioCodec: string | null
   /** null is off. */
   subtitle: string | null
   subtitleLanguage: string | null
+  subtitleTitle: string | null
+  subtitleForced: boolean
+  subtitleCodec: string | null
+}
+
+type SubtitleTrack = Playback['media']['subtitles'][number]
+/** What a picked subtitle track was, to find the same one in other files. */
+export type SubtitleChoice = { language: string | null; title: string | null; forced: boolean; codec: string | null }
+
+export function subtitleChoice(t: SubtitleTrack): SubtitleChoice {
+  return { language: t.language, title: t.title, forced: t.forced, codec: t.codec }
+}
+
+/** How the room's tracks describe a subtitle track. */
+export function roomSubtitle(t: SubtitleTrack | undefined) {
+  return { subtitleLanguage: t?.language ?? null, subtitleTitle: t?.title ?? null, subtitleForced: t?.forced ?? false, subtitleCodec: t?.codec ?? null }
+}
+
+/** The track most like the one picked before: same language first, then name, then the rest. */
+export function sameSubtitle(usable: SubtitleTrack[], want: SubtitleChoice) {
+  const candidates = usable.filter((s) => (want.language ? s.language === want.language : !!want.title && s.title === want.title))
+  const score = (s: SubtitleTrack) => (s.title === want.title ? 4 : 0) + (s.forced === want.forced ? 2 : 0) + (s.codec === want.codec ? 1 : 0)
+  return candidates.reduce<SubtitleTrack | undefined>((best, s) => (!best || score(s) > score(best) ? s : best), undefined)?.id
+}
+
+type AudioTrack = Playback['media']['audio'][number]
+/** What a picked audio track was, to find the same one in other files. */
+export type AudioChoice = { language: string | null; title: string | null; channels: number | null; codec: string | null }
+
+export function audioChoice(t: AudioTrack): AudioChoice {
+  return { language: t.language, title: t.title, channels: t.channels, codec: t.codec }
+}
+
+/** How the room's tracks describe an audio track. */
+export function roomAudio(t: AudioTrack | undefined) {
+  return { audioLanguage: t?.language ?? null, audioTitle: t?.title ?? null, audioChannels: t?.channels ?? null, audioCodec: t?.codec ?? null }
+}
+
+/** The track most like the one picked before: same language first, then name, then the rest. */
+export function sameAudio(audio: AudioTrack[], want: AudioChoice) {
+  const candidates = audio.filter((a) => (want.language ? a.language === want.language : !!want.title && a.title === want.title))
+  const score = (a: AudioTrack) => (a.title === want.title ? 4 : 0) + (a.channels === want.channels ? 2 : 0) + (a.codec === want.codec ? 1 : 0)
+  return candidates.reduce<AudioTrack | undefined>((best, a) => (!best || score(a) > score(best) ? a : best), undefined)
 }
 
 export type RoomState = {
@@ -85,7 +131,7 @@ export function pickShared(pb: Playback, t: SharedTracks): { audio: number | nul
   const same = t.mediaId === pb.id
   const audio =
     (same && pb.media.audio.find((a) => a.index === t.audio)) ||
-    (t.audioLanguage && pb.media.audio.find((a) => a.language === t.audioLanguage)) ||
+    sameAudio(pb.media.audio, { language: t.audioLanguage, title: t.audioTitle, channels: t.audioChannels, codec: t.audioCodec }) ||
     pb.media.audio.find((a) => a.default) ||
     pb.media.audio[0]
   const usable = pb.media.subtitles.filter((s) => s.supported)
@@ -93,8 +139,7 @@ export function pickShared(pb: Playback, t: SharedTracks): { audio: number | nul
   if (t.subtitle !== null) {
     subtitle =
       (same && usable.find((s) => s.id === t.subtitle)?.id) ||
-      (t.subtitleLanguage && usable.find((s) => s.language === t.subtitleLanguage && !s.forced)?.id) ||
-      (t.subtitleLanguage && usable.find((s) => s.language === t.subtitleLanguage)?.id) ||
+      sameSubtitle(usable, { language: t.subtitleLanguage, title: t.subtitleTitle, forced: t.subtitleForced, codec: t.subtitleCodec }) ||
       usable.find((s) => s.default)?.id ||
       usable.find((s) => !s.forced)?.id ||
       null

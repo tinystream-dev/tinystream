@@ -58,11 +58,15 @@ impl Client {
         } else {
             bail!("no TVDB or IMDb id to look the show up by");
         };
+
         let res = self.http.get(lookup).send().await?;
+
         if res.status() == reqwest::StatusCode::NOT_FOUND {
             bail!("not on TVmaze");
         }
+
         let show: Show = res.error_for_status()?.json().await?;
+
         Ok(self
             .episodes(show.id)
             .await?
@@ -71,6 +75,7 @@ impl Client {
                 let at =
                     time::OffsetDateTime::parse(e.airstamp.as_deref()?, &time::format_description::well_known::Rfc3339)
                         .ok()?;
+
                 Some(((e.season, e.number?), at.unix_timestamp()))
             })
             .collect())
@@ -87,7 +92,9 @@ impl Client {
                 .error_for_status()?
                 .json()
                 .await?;
+
             let premiered = |s: &Show| s.premiered.as_deref()?.get(..4)?.parse::<i64>().ok();
+
             if let Some(r) = results.iter().find(|r| premiered(&r.show).is_some_and(|y| (y - year).abs() <= 1)) {
                 return Ok(Some(self.episodes(r.show.id).await?));
             }

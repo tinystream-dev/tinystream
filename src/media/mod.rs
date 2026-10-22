@@ -43,9 +43,11 @@ impl Busy {
     pub async fn until_idle(&self) {
         loop {
             let idle = self.idle.notified();
+
             if !self.is_busy() {
                 return;
             }
+
             idle.await;
         }
     }
@@ -83,6 +85,7 @@ fn mtime(path: &Path) -> i64 {
 impl MediaService {
     pub fn new(cache_dir: PathBuf) -> Self {
         unsafe { ff::ffi::av_log_set_level(ff::ffi::AV_LOG_ERROR as i32) };
+
         Self {
             hw: hw::Hw::new(),
             busy: Default::default(),
@@ -96,15 +99,19 @@ impl MediaService {
 
     pub async fn probe(&self, path: &Path) -> anyhow::Result<Arc<MediaInfo>> {
         let key = (path.to_path_buf(), mtime(path));
+
         if let Some(info) = self.probes.lock().unwrap().get(&key) {
             return Ok(info.clone());
         }
+
         let p = path.to_path_buf();
         let info = Arc::new(tokio::task::spawn_blocking(move || probe::probe(&p)).await??);
         let mut probes = self.probes.lock().unwrap();
+
         if probes.len() > 512 {
             probes.clear();
         }
+
         probes.insert(key, info.clone());
         Ok(info)
     }
@@ -113,13 +120,17 @@ impl MediaService {
         use sha2::{Digest, Sha256};
         let key = hex::encode(&Sha256::digest(format!("{}\0{}", path.display(), mtime(path)))[..12]);
         let file = self.cache_dir.join("thumbnails").join(format!("{key}.jpg"));
+
         if file.exists() {
             return Ok(file);
         }
+
         let _permit = self.thumbs.acquire().await?;
+
         if file.exists() {
             return Ok(file);
         }
+
         let p = path.to_path_buf();
         let jpeg = tokio::task::spawn_blocking(move || thumb::capture(&p, 640)).await??;
         std::fs::create_dir_all(file.parent().unwrap())?;
@@ -133,13 +144,17 @@ impl MediaService {
         use sha2::{Digest, Sha256};
         let key = hex::encode(&Sha256::digest(format!("{}\0{}", path.display(), mtime(path)))[..12]);
         let file = self.cache_dir.join("previews").join(&key).join(format!("{at}.jpg"));
+
         if file.exists() {
             return Ok(file);
         }
+
         let _permit = self.previews.acquire().await?;
+
         if file.exists() {
             return Ok(file);
         }
+
         let p = path.to_path_buf();
         let jpeg = tokio::task::spawn_blocking(move || thumb::preview(&p, at as f64, 256)).await??;
         std::fs::create_dir_all(file.parent().unwrap())?;
@@ -153,12 +168,14 @@ impl MediaService {
         if track.starts_with('s') {
             self.ensure_extracted(path).await?;
         }
+
         let (p, t, cache) = (path.to_path_buf(), track.to_string(), self.cache_dir.clone());
         tokio::task::spawn_blocking(move || subs::load(&p, &t, &cache)).await?
     }
 
     pub fn prefetch_subtitles(self: &Arc<Self>, path: PathBuf) {
         let this = self.clone();
+
         tokio::spawn(async move {
             if let Err(e) = this.ensure_extracted(&path).await {
                 tracing::debug!("prefetching subtitles of {}: {e:#}", path.display());
@@ -168,21 +185,27 @@ impl MediaService {
 
     async fn ensure_extracted(&self, path: &Path) -> anyhow::Result<()> {
         let info = self.probe(path).await?;
+
         let embedded: Vec<usize> = info
             .subtitles
             .iter()
             .filter(|s| s.supported)
             .filter_map(|s| s.id.strip_prefix('s')?.parse().ok())
             .collect();
+
         if embedded.iter().all(|&i| subs::is_cached(path, i, &self.cache_dir)) {
             return Ok(());
         }
+
         let cell = self.extractions.lock().unwrap().entry(path.to_path_buf()).or_default().clone();
+
         let result = cell
             .get_or_init(|| {
                 let (p, cache) = (path.to_path_buf(), self.cache_dir.clone());
+
                 async move {
                     let first = embedded.first().copied().unwrap_or(0);
+
                     tokio::task::spawn_blocking(move || subs::load(&p, &format!("s{first}"), &cache).map(|_| ()))
                         .await
                         .map_err(|e| e.to_string())?
@@ -191,6 +214,7 @@ impl MediaService {
             })
             .await
             .clone();
+
         self.extractions.lock().unwrap().remove(path);
         result.map_err(anyhow::Error::msg)
     }

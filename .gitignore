@@ -1,6 +1,7 @@
 /target
 /.native
 /.native-musl
+/node_modules
 /web/node_modules
 /web/dist
 /web/.output
@@ -8,3 +9,10 @@
 /.ffmpeg
 /.libtorrent
 /dev
+/packages/*/node_modules
+/mobile/node_modules
+/mobile/target
+/mobile/android
+/mobile/ios
+/mobile/.expo
+/mobile/modules/*/android/build

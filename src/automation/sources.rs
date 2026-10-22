@@ -63,17 +63,20 @@ impl Sources {
                 attempt.follow()
             }
         });
+
         let http = reqwest::Client::builder()
             .user_agent(concat!("tinystream/", env!("CARGO_PKG_VERSION")))
             .timeout(Duration::from_secs(25))
             .redirect(policy)
             .build()
             .expect("http client");
+
         Self { http, last_request: Mutex::new(HashMap::new()) }
     }
 
     async fn pace(&self, url: &str) {
         let host = url::Url::parse(url).ok().and_then(|u| u.host_str().map(str::to_string)).unwrap_or_default();
+
         let wait = {
             let mut last = self.last_request.lock().unwrap();
             let now = Instant::now();
@@ -81,6 +84,7 @@ impl Sources {
             last.insert(host, next);
             next - now
         };
+
         tokio::time::sleep(wait).await;
     }
 
@@ -89,9 +93,11 @@ impl Sources {
         let res = self.http.get(url).send().await.with_context(|| format!("can't reach {}", redact(url)))?;
         let status = res.status();
         let text = res.text().await?;
+
         if !status.is_success() {
             bail!("{} answered {status}", redact(url));
         }
+
         Ok(text)
     }
 
@@ -109,6 +115,7 @@ impl Sources {
                 source.url.replace("{query}", &urlencode(query))
             },
         };
+
         parse_feed(&self.get_text(&url).await?, &source.name)
     }
 
@@ -117,6 +124,7 @@ impl Sources {
             SourceKind::Torznab => torznab_url(source, "search", None)?,
             SourceKind::Rss => source.feed.clone().unwrap_or_else(|| source.url.replace("{query}", "")),
         };
+
         parse_feed(&self.get_text(&url).await?, &source.name)
     }
 
@@ -124,36 +132,45 @@ impl Sources {
         if link.starts_with("magnet:") {
             return Ok(Torrent::Magnet(link.to_string()));
         }
+
         self.pace(link).await;
         let res = self.http.get(link).send().await.with_context(|| format!("can't download {}", redact(link)))?;
+
         if res.status().is_redirection()
             && let Some(location) = res.headers().get(reqwest::header::LOCATION).and_then(|v| v.to_str().ok())
             && location.starts_with("magnet:")
         {
             return Ok(Torrent::Magnet(location.to_string()));
         }
+
         let status = res.status();
+
         if !status.is_success() {
             bail!("{} answered {status}", redact(link));
         }
+
         let bytes = res.bytes().await?;
 
         if bytes.first() != Some(&b'd') {
             bail!("{} didn't return a .torrent file", redact(link));
         }
+
         Ok(Torrent::File(bytes.to_vec()))
     }
 
     pub async fn detect(&self, url: &str, api_key: Option<&str>) -> anyhow::Result<Detected> {
         let url = url.trim();
         let parsed = url::Url::parse(&url.replace("{query}", "x")).context("that isn't a URL")?;
+
         if !matches!(parsed.scheme(), "http" | "https") {
             bail!("sources are http:// or https:// URLs");
         }
+
         if url.contains("{query}") {
             let text = self.get_text(&url.replace("{query}", "")).await?;
             let name = channel_title(&text);
             let sample = parse_feed(&text, "test")?;
+
             return Ok(Detected {
                 kind: SourceKind::Rss,
                 url: url.to_string(),
@@ -175,6 +192,7 @@ impl Sources {
             download_path: None,
             seeding: None,
         };
+
         if let Ok(caps_url) = torznab_url(&probe, "caps", None)
             && let Ok(text) = self.get_text(&caps_url).await
         {
@@ -183,11 +201,14 @@ impl Sources {
             }
             if root_element(&text).as_deref() == Some("caps") {
                 let text = self.get_text(&torznab_url(&probe, "search", None)?).await?;
+
                 if let Some(error) = torznab_error(&text) {
                     bail!("{error}");
                 }
+
                 let sample = parse_feed(&text, "test")?;
                 let name = caps_title(&text).or_else(|| channel_title(&text));
+
                 return Ok(Detected {
                     kind: SourceKind::Torznab,
                     url: url.to_string(),
@@ -200,24 +221,31 @@ impl Sources {
         }
 
         let text = self.get_text(url).await?;
+
         if !matches!(root_element(&text).as_deref(), Some("rss" | "feed" | "RDF")) {
             bail!("that page isn't an RSS feed or a Torznab API");
         }
+
         let sample = parse_feed(&text, "test")?;
         let name = channel_title(&text);
 
         let mut template = parsed.clone();
+
         let search_param = parsed
             .query_pairs()
             .map(|(k, _)| k.to_string())
             .find(|k| matches!(k.as_str(), "q" | "query" | "search" | "term" | "s" | "keywords"));
+
         if let Some(param) = search_param {
             let pairs: Vec<(String, String)> =
                 parsed.query_pairs().map(|(k, v)| (k.to_string(), v.to_string())).collect();
+
             template.query_pairs_mut().clear();
+
             for (k, v) in pairs {
                 template.query_pairs_mut().append_pair(&k, if k == param { "QUERYHERE" } else { &v });
             }
+
             let search = template.to_string().replace("QUERYHERE", "{query}");
 
             return Ok(Detected {
@@ -229,6 +257,7 @@ impl Sources {
                 sample,
             });
         }
+
         Ok(Detected {
             kind: SourceKind::Rss,
             url: url.to_string(),
@@ -252,12 +281,15 @@ pub fn redact(url: &str) -> String {
                 .map(|(k, v)| {
                     let secret =
                         matches!(k.to_ascii_lowercase().as_str(), "apikey" | "api_key" | "passkey" | "key" | "token");
+
                     (k.to_string(), if secret { "…".to_string() } else { v.to_string() })
                 })
                 .collect();
+
             if !pairs.is_empty() {
                 u.query_pairs_mut().clear().extend_pairs(pairs);
             }
+
             u.to_string()
         },
         Err(_) => url.to_string(),
@@ -266,23 +298,29 @@ pub fn redact(url: &str) -> String {
 
 fn torznab_url(source: &Source, t: &str, q: Option<&str>) -> anyhow::Result<String> {
     let mut url = url::Url::parse(&source.url).with_context(|| format!("{:?} isn't a URL", source.url))?;
+
     {
         let mut pairs = url.query_pairs_mut();
         pairs.append_pair("t", t);
+
         if let Some(q) = q {
             pairs.append_pair("q", q);
         }
+
         if let Some(key) = source.api_key.as_deref().filter(|k| !k.is_empty()) {
             pairs.append_pair("apikey", key);
         }
+
         if t == "search" {
             if !source.categories.is_empty() {
                 let cats: Vec<String> = source.categories.iter().map(u32::to_string).collect();
                 pairs.append_pair("cat", &cats.join(","));
             }
+
             pairs.append_pair("limit", "100");
         }
     }
+
     Ok(url.to_string())
 }
 
@@ -294,6 +332,7 @@ fn reader(text: &str) -> quick_xml::Reader<&[u8]> {
 
 fn root_element(text: &str) -> Option<String> {
     let mut r = reader(text);
+
     loop {
         match r.read_event().ok()? {
             Xml::Start(e) | Xml::Empty(e) => {
@@ -314,12 +353,14 @@ fn attr(e: &quick_xml::events::BytesStart, name: &str) -> Option<String> {
 
 fn torznab_error(text: &str) -> Option<String> {
     let mut r = reader(text);
+
     loop {
         match r.read_event().ok()? {
             Xml::Start(e) | Xml::Empty(e) => {
                 if e.local_name().as_ref() == b"error" {
                     return Some(attr(&e, "description").unwrap_or_else(|| "the source returned an error".into()));
                 }
+
                 return None;
             },
             Xml::Eof => return None,
@@ -330,6 +371,7 @@ fn torznab_error(text: &str) -> Option<String> {
 
 fn caps_title(text: &str) -> Option<String> {
     let mut r = reader(text);
+
     loop {
         match r.read_event().ok()? {
             Xml::Start(e) | Xml::Empty(e) if e.local_name().as_ref() == b"server" => return attr(&e, "title"),
@@ -342,6 +384,7 @@ fn caps_title(text: &str) -> Option<String> {
 fn channel_title(text: &str) -> Option<String> {
     let mut r = reader(text);
     let mut path: Vec<Vec<u8>> = Vec::new();
+
     loop {
         match r.read_event().ok()? {
             Xml::Start(e) => path.push(e.local_name().as_ref().to_vec()),
@@ -368,13 +411,16 @@ pub fn parse_feed(text: &str, source: &str) -> anyhow::Result<Vec<Release>> {
     if let Some(error) = torznab_error(text) {
         bail!("{error}");
     }
+
     let mut r = reader(text);
     let mut out = Vec::new();
     let mut item: Option<Item> = None;
     let mut field: Option<String> = None;
     let mut buf = String::new();
+
     loop {
         let event = r.read_event().map_err(|e| anyhow::anyhow!("the feed isn't valid XML: {e}"))?;
+
         match event {
             Xml::Start(e) if matches!(e.local_name().as_ref(), b"item" | b"entry") => {
                 item = Some(Item::default());
@@ -382,11 +428,13 @@ pub fn parse_feed(text: &str, source: &str) -> anyhow::Result<Vec<Release>> {
             Xml::Start(e) => {
                 if let Some(it) = item.as_mut() {
                     let name = String::from_utf8_lossy(e.local_name().as_ref()).into_owned();
+
                     if name == "link"
                         && let Some(href) = attr(&e, "href")
                     {
                         it.fields.entry("link".into()).or_insert(href);
                     }
+
                     field = Some(name);
                     buf.clear();
                 }
@@ -426,13 +474,16 @@ pub fn parse_feed(text: &str, source: &str) -> anyhow::Result<Vec<Release>> {
             Xml::GeneralRef(r) => {
                 if field.is_some() {
                     let name = r.decode().unwrap_or_default();
+
                     let resolved =
                         quick_xml::escape::unescape(&format!("&{name};")).map(Cow::into_owned).unwrap_or_default();
+
                     buf.push_str(&resolved);
                 }
             },
             Xml::End(e) => {
                 let name = e.local_name();
+
                 if matches!(name.as_ref(), b"item" | b"entry") {
                     if let Some(it) = item.take()
                         && let Some(release) = to_release(it, source)
@@ -441,9 +492,11 @@ pub fn parse_feed(text: &str, source: &str) -> anyhow::Result<Vec<Release>> {
                     }
                 } else if let (Some(it), Some(f)) = (item.as_mut(), field.take()) {
                     let value = buf.trim().to_string();
+
                     if !value.is_empty() {
                         it.fields.entry(f).or_insert(value);
                     }
+
                     buf.clear();
                 }
             },
@@ -451,6 +504,7 @@ pub fn parse_feed(text: &str, source: &str) -> anyhow::Result<Vec<Release>> {
             _ => {},
         }
     }
+
     Ok(out)
 }
 
@@ -472,16 +526,20 @@ fn to_release(it: Item, source: &str) -> Option<Release> {
         .or_else(|| f("link").filter(|l| l.starts_with("magnet:")).map(str::to_string))
         .or_else(|| f("magnetURI").or(f("magnetUri")).map(str::to_string))
         .or_else(|| info_hash.as_ref().map(|h| format!("magnet:?xt=urn:btih:{h}&dn={}", urlencode(&title))))?;
+
     let size = a("size")
         .and_then(|s| s.parse().ok())
         .or_else(|| f("size").and_then(parse_size))
         .or_else(|| f("contentLength").and_then(|s| s.parse().ok()))
         .or_else(|| it.enclosure.as_ref().and_then(|(_, l)| *l).filter(|l| *l > 0));
+
     let seeders = a("seeders").or(f("seeders")).and_then(|s| s.parse().ok());
+
     let leechers = a("peers")
         .and_then(|p| p.parse::<u32>().ok())
         .map(|p| p.saturating_sub(seeders.unwrap_or(0)))
         .or_else(|| a("leechers").or(f("leechers")).and_then(|s| s.parse().ok()));
+
     let published = f("pubDate")
         .or(f("published"))
         .or(f("updated"))
@@ -491,6 +549,7 @@ fn to_release(it: Item, source: &str) -> Option<Release> {
                 .ok()
         })
         .map(|t| t.unix_timestamp());
+
     let page = f("comments").or(f("guid").filter(is_http)).filter(|p| !p.ends_with(".torrent")).map(str::to_string);
     Some(Release { title, source: source.to_string(), link, info_hash, size, seeders, leechers, published, page })
 }
@@ -562,6 +621,7 @@ mod tests {
             torznab_error(r#"<error code="100" description="Invalid API Key"/>"#).as_deref(),
             Some("Invalid API Key")
         );
+
         assert!(parse_feed(r#"<error code="100" description="Invalid API Key"/>"#, "x").is_err());
     }
 }

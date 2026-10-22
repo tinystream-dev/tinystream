@@ -126,6 +126,7 @@ pub enum ServerEvent {
 fn translate(event: Event, me: i64, libraries: &[String]) -> Option<ServerEvent> {
     let list = |list| Some(ServerEvent::ListChanged(ListChanged { list }));
     let metadata = |title_id, status| Some(ServerEvent::MetadataChanged(MetadataChanged { title_id, status }));
+
     match event {
         Event::ConfigChanged => Some(ServerEvent::ConfigChanged(ConfigChanged { error: None })),
         Event::ConfigError { message } => Some(ServerEvent::ConfigChanged(ConfigChanged { error: Some(message) })),
@@ -181,6 +182,7 @@ impl EventSubscription {
         let mut rx = state.events.subscribe();
         let libraries = user.libraries(state).await?;
         let me = user.id;
+
         Ok(async_stream::stream! {
             loop {
                 match rx.recv().await {

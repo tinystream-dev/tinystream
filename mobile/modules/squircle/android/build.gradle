@@ -1,0 +1,14 @@
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+
+group = 'dev.tinystream.squircle'
+
+android {
+  namespace 'dev.tinystream.squircle'
+  defaultConfig {
+    versionCode 1
+    versionName '1.0'
+  }
+}

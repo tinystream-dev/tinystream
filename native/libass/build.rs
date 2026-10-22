@@ -16,10 +16,13 @@ fn main() {
         "--disable-libunibreak".into(),
         format!("CFLAGS={}", b.cflags()),
     ];
+
     let url = format!("https://github.com/libass/libass/releases/download/{VERSION}/libass-{VERSION}.tar.gz");
+
     b.once(&args.join(" "), |b| {
         b.fetch(&url, &[]);
         b.configure(&args.each_ref().map(String::as_str));
     });
+
     b.licenses(&url, &["COPYING"]);
 }
