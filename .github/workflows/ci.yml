@@ -22,6 +22,8 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
+  # Nothing debugs CI's builds; without debug info they link faster and cache smaller.
+  CARGO_PROFILE_DEV_DEBUG: "0"
 
 jobs:
   # The server (Rust), web UI and app build independently: each only when its own files change. The
@@ -29,7 +31,7 @@ jobs:
   # rebuild the server.
   changes:
     name: Changes
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     outputs:
       server: ${{ steps.filter.outputs.server }}
       web: ${{ steps.filter.outputs.web }}
@@ -64,10 +66,10 @@ jobs:
     name: Format
     needs: changes
     if: needs.changes.outputs.server == 'true' || needs.changes.outputs.mobile == 'true'
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     steps:
       - uses: useblacksmith/checkout@v1
-      - uses: dtolnay/rust-toolchain@nightly
+      - uses: ./.github/actions/rust
         with:
           components: rustfmt
       - run: cargo fmt --check
@@ -85,7 +87,7 @@ jobs:
       - uses: useblacksmith/checkout@v1
       - uses: oven-sh/setup-bun@v2
       # The music player's decoder and the video player's subtitles (rustyass, on nightly) are Rust, built for the browser.
-      - uses: dtolnay/rust-toolchain@nightly
+      - uses: ./.github/actions/rust
         with:
           targets: wasm32-unknown-unknown
       - uses: taiki-e/install-action@v2
@@ -108,7 +110,7 @@ jobs:
     name: Mobile app
     needs: changes
     if: needs.changes.outputs.mobile == 'true'
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     steps:
       - uses: useblacksmith/checkout@v1
       - uses: oven-sh/setup-bun@v2
@@ -144,6 +146,8 @@ jobs:
       - name: Check 16 KB alignment
         run: "$ANDROID_HOME/build-tools/36.0.0/zipalign -c -P 16 -v 4 mobile/android/app/build/outputs/apk/debug/app-debug.apk > /dev/null"
 
+  # One job for the server: the feature sets share the build's dependencies, native libraries and
+  # cache, so checking each alone after it costs little more than the server itself.
   rust:
     name: Build and test
     needs: [changes, web]
@@ -154,39 +158,18 @@ jobs:
     steps:
       - uses: useblacksmith/checkout@v1
       - uses: ./.github/actions/native-deps
-      - uses: dtolnay/rust-toolchain@nightly
+      - uses: ./.github/actions/rust
+      # Only main saves: pull requests restore its cache, and their own copies would push it out.
       - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - uses: actions/download-artifact@v4
         with:
           name: web-dist
           path: web/dist
       - run: cargo build --locked
       - run: cargo test --locked
-
-  features:
-    name: Features (${{ matrix.features.name }})
-    needs: [changes, web]
-    if: needs.changes.outputs.server == 'true'
-    runs-on: blacksmith-4vcpu-ubuntu-2404
-    strategy:
-      fail-fast: false
-      matrix:
-        features:
-          - { name: none, flags: --no-default-features }
-          - { name: web-ui, flags: --no-default-features --features web-ui }
-          - { name: metadata, flags: --no-default-features --features metadata }
-          - { name: web-ui + metadata, flags: --no-default-features --features web-ui,metadata }
-    env:
-      TINYSTREAM_SKIP_WEB_BUILD: "1"
-    steps:
-      - uses: useblacksmith/checkout@v1
-      - uses: ./.github/actions/native-deps
-      - uses: dtolnay/rust-toolchain@nightly
-      - uses: Swatinem/rust-cache@v2
-        with:
-          key: ${{ matrix.features.name }}
-      - uses: actions/download-artifact@v4
-        with:
-          name: web-dist
-          path: web/dist
-      - run: cargo check --locked ${{ matrix.features.flags }}
+      - run: cargo check --locked --no-default-features
+      - run: cargo check --locked --no-default-features --features web-ui
+      - run: cargo check --locked --no-default-features --features metadata
+      - run: cargo check --locked --no-default-features --features web-ui,metadata

@@ -1,3 +1,4 @@
 [toolchain]
-channel = "nightly"
+# Pinned so CI's caches survive from one day to the next; bump it on purpose.
+channel = "nightly-2026-10-15"
 components = ["rustfmt"]

@@ -19,7 +19,7 @@ runs:
         sdkmanager --install "ndk;$ndk" "build-tools;36.0.0" "platforms;android-36" "cmake;3.31.6" > /dev/null
         echo "$ANDROID_HOME/cmake/3.31.6/bin" >> "$GITHUB_PATH"
     # The player's subtitles are rustyass, on nightly.
-    - uses: dtolnay/rust-toolchain@nightly
+    - uses: ./.github/actions/rust
       with:
         targets: aarch64-linux-android,x86_64-linux-android
     - uses: taiki-e/install-action@v2
@@ -29,6 +29,7 @@ runs:
       with:
         key: android
         workspaces: "mobile -> target"
+        save-if: ${{ github.ref == 'refs/heads/main' }}
     - uses: actions/cache@v4
       with:
         path: |
