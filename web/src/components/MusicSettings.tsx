@@ -5,7 +5,7 @@ import { Copy, Trash2 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { graphql } from '../gql'
 import { type MusicConfig, request } from '../lib/api'
-import { useMe } from '../lib/hooks'
+import { useMe, useOrigin } from '../lib/hooks'
 import { ask, toast, toastError } from './feedback'
 import { Card, Row, useSave, useSettings } from './SettingsKit'
 import { Squircle } from './Squircle'
@@ -107,6 +107,7 @@ export function Copyable({ label, value }: { label: string; value: string }) {
 /** Account → Music apps: a password per app, for Subsonic apps like Feishin or Symfonium. */
 export function AppPasswords() {
   const me = useMe()
+  const origin = useOrigin()
   const qc = useQueryClient()
   const { data } = useQuery({ queryKey: ['app-passwords'], queryFn: async () => (await request(AppPasswordsQuery)).appPasswords })
   const [name, setName] = useState('')
@@ -133,7 +134,7 @@ export function AppPasswords() {
       {made && (
         <Squircle radius={12} edge className="mb-4 space-y-1.5 bg-panel p-4">
           <p className="mb-2 text-sm font-medium">Sign in to {made.name} with:</p>
-          <Copyable label="Server" value={location.origin} />
+          <Copyable label="Server" value={origin} />
           <Copyable label="Username" value={me?.username ?? ''} />
           <Copyable label="Password" value={made.secret} />
           <p className="pt-2 text-xs text-ink-3">This is the only time the password is shown.</p>

@@ -52,12 +52,15 @@ impl EmailMutation {
                     Err(e) => return tracing::warn!("can't make a password reset: {}", e.message),
                 };
 
+                let Some(link) = state.link(&format!("reset#{token}")) else {
+                    return tracing::warn!("can't send {} a password reset: {}", r.username, mail::NO_PUBLIC_URL);
+                };
+
                 let body = format!(
                     "Someone, hopefully you, asked to reset the password of {} on tinystream.\n\n\
-                     Pick a new one here:\n{}\n\n\
+                     Pick a new one here:\n{link}\n\n\
                      The link works for an hour. If it wasn't you, ignore this email and your password stays as it is.\n",
                     r.username,
-                    config.smtp.link(&format!("reset#{token}")).unwrap_or_default(),
                 );
 
                 match mail::send(&config.smtp, &r.email, "Reset your tinystream password", body).await {
@@ -119,10 +122,14 @@ impl EmailMutation {
             return Err(no_email());
         }
 
+        let links = match state.public_url() {
+            Some(url) => format!("Links in emails go to {url}"),
+            None => format!("Links in emails won't work yet: {}.", mail::NO_PUBLIC_URL),
+        };
+
         let body = format!(
-            "{} sent this from tinystream's settings to check that email works. It does.\n\nLinks in emails go to {}\n",
+            "{} sent this from tinystream's settings to check that email works. It does.\n\n{links}\n",
             admin.username,
-            config.smtp.link("").unwrap_or_default(),
         );
 
         mail::send(&config.smtp, &to, "tinystream can send email", body).await?;

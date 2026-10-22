@@ -78,6 +78,8 @@ pub struct Config {
     pub sign_in: SignIn,
     #[serde(default)]
     pub smtp: Smtp,
+    #[serde(default)]
+    pub tailscale: Tailscale,
     #[serde(default, rename = "source")]
     pub sources: Vec<Source>,
     #[serde(default, rename = "profile")]
@@ -92,11 +94,20 @@ pub struct Network {
     pub port: u16,
 
     pub cors: Vec<String>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub public_url: Option<String>,
 }
 
 impl Default for Network {
     fn default() -> Self {
-        Self { host: "0.0.0.0".into(), port: 3000, cors: Vec::new() }
+        Self { host: "0.0.0.0".into(), port: 3000, cors: Vec::new(), public_url: None }
+    }
+}
+
+impl Network {
+    pub fn public_base(&self) -> Option<&str> {
+        self.public_url.as_deref().map(|u| u.trim().trim_end_matches('/')).filter(|u| !u.is_empty())
     }
 }
 
@@ -534,7 +545,8 @@ pub struct Smtp {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub from: Option<String>,
 
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing)]
+    #[graphql(skip)]
     pub public_url: Option<String>,
 }
 
@@ -551,12 +563,44 @@ impl Smtp {
             SmtpSecurity::None => 25,
         })
     }
+}
 
-    pub fn link(&self, path: &str) -> Option<String> {
-        let base = self.public_url.as_deref()?.trim().trim_end_matches('/');
-        Some(format!("{base}/{}", path.trim_start_matches('/')))
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, Default, async_graphql::Enum)]
+#[serde(rename_all = "kebab-case")]
+pub enum Expose {
+    /// Tailscale Serve is left as it is.
+    #[default]
+    Manual,
+
+    /// Serve puts tinystream behind HTTPS on the tailnet.
+    Tailnet,
+
+    /// Serve and Funnel put it on the internet too.
+    Public,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize, async_graphql::SimpleObject, async_graphql::InputObject)]
+#[graphql(name = "TailscaleConfig", input_name = "TailscaleConfigInput")]
+#[serde(rename_all = "kebab-case", deny_unknown_fields, default)]
+pub struct Tailscale {
+    pub detect: bool,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub socket: Option<String>,
+
+    pub expose: Expose,
+
+    pub https_port: u16,
+}
+
+impl Default for Tailscale {
+    fn default() -> Self {
+        Self { detect: true, socket: None, expose: Expose::Manual, https_port: 443 }
     }
 }
+
+/// The ports Funnel can open to the internet.
+pub const FUNNEL_PORTS: [u16; 3] = [443, 8443, 10000];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, async_graphql::Enum)]
 #[serde(rename_all = "kebab-case")]
@@ -646,7 +690,12 @@ impl Default for Profile {
 
 impl Config {
     pub fn parse(text: &str) -> Result<Self, String> {
-        let config: Config = toml::from_str(text).map_err(|e| e.to_string())?;
+        let mut config: Config = toml::from_str(text).map_err(|e| e.to_string())?;
+
+        if config.network.public_url.is_none() {
+            config.network.public_url = config.smtp.public_url.take();
+        }
+
         config.validate()?;
         Ok(config)
     }
@@ -761,18 +810,31 @@ impl Config {
             return Err("every [automation] retry step needs a non-zero `every`".into());
         }
 
-        if self.smtp.relay_host().is_some() {
-            if !self.smtp.from.as_deref().is_some_and(|f| f.contains('@')) {
-                return Err("[smtp] needs a `from` address, like \"tinystream <tinystream@example.com>\"".into());
-            }
+        if self.smtp.relay_host().is_some() && !self.smtp.from.as_deref().is_some_and(|f| f.contains('@')) {
+            return Err("[smtp] needs a `from` address, like \"tinystream <tinystream@example.com>\"".into());
+        }
 
-            let url = self.smtp.public_url.as_deref().map(str::trim).unwrap_or_default();
+        if self.tailscale.expose != Expose::Manual && !self.tailscale.detect {
+            return Err("[tailscale] `expose` needs `detect = true`".into());
+        }
 
-            if !url::Url::parse(url).is_ok_and(|u| matches!(u.scheme(), "http" | "https")) {
-                return Err(format!(
-                    "`[smtp] public-url = {url:?}` isn't the address people open tinystream at, like https://tv.example.com"
-                ));
-            }
+        if self.tailscale.https_port == 0 {
+            return Err("`[tailscale] https-port` can't be 0".into());
+        }
+
+        if self.tailscale.expose == Expose::Public && !FUNNEL_PORTS.contains(&self.tailscale.https_port) {
+            return Err(format!(
+                "Funnel only opens ports 443, 8443 and 10000 to the internet, so `[tailscale] https-port = {}` can't be public",
+                self.tailscale.https_port
+            ));
+        }
+
+        if let Some(url) = self.network.public_base()
+            && !url::Url::parse(url).is_ok_and(|u| matches!(u.scheme(), "http" | "https") && u.host().is_some())
+        {
+            return Err(format!(
+                "`[network] public-url = {url:?}` isn't the address people open tinystream at, like https://tv.example.com"
+            ));
         }
 
         if self.log.level.parse::<tracing::Level>().is_err() {
@@ -783,6 +845,14 @@ impl Config {
         }
 
         Ok(())
+    }
+
+    /// Profile pictures would show everyone's username to the whole internet.
+    pub fn sign_in_style(&self) -> SignInStyle {
+        match self.tailscale.expose {
+            Expose::Public => SignInStyle::Username,
+            _ => self.sign_in.style,
+        }
     }
 
     pub fn library(&self, name: &str) -> Option<&Library> {
@@ -813,6 +883,20 @@ pub const TEMPLATE: &str = r#"# tinystream
 [network]
 host = "0.0.0.0"
 port = 3000
+# public-url = "https://tv.example.com"   # where links in invites and emails point
+#
+# On a tailnet, tinystream finds its own address through tailscaled, so links
+# work without public-url. Turn that off with [tailscale] detect = false, or
+# point it at a socket that isn't in the usual place (like in Docker):
+#
+# [tailscale]
+# socket = "/var/run/tailscale/tailscaled.sock"
+#
+# tinystream can also set up Tailscale Serve for you, for HTTPS on the tailnet
+# ("tailnet"), or Serve and Funnel to open it to the internet ("public"):
+#
+# expose = "tailnet"
+# https-port = 443   # Funnel only takes 443, 8443 or 10000
 
 # Add one [[library]] per folder. tinystream figures out on its own whether a
 # folder holds a show (it has season folders) or a movie (a video right inside).
@@ -865,5 +949,4 @@ port = 3000
 # username = "me@example.com"
 # password = "…"
 # from = "tinystream <me@example.com>"
-# public-url = "https://tv.example.com"   # where links in emails point
 "#;

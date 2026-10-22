@@ -486,6 +486,7 @@ fragment SettingsFields on Settings {
     host
     port
     cors
+    publicUrl
   }
   log {
     level
@@ -557,8 +558,24 @@ fragment SettingsFields on Settings {
     username
     password
     from
-    publicUrl
   }
+  tailscale {
+    detect
+    socket
+    expose
+    httpsPort
+  }
+  tailscaleStatus {
+    state
+    dnsName
+    ips
+    https
+    funnel
+    url
+    warning
+    serveError
+  }
+  publicUrl
   sources {
     name
     kind

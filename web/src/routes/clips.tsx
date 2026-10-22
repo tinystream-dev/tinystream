@@ -76,7 +76,7 @@ const HideClip = graphql(`
 const SCOPES: Record<Scope, ClipScope> = { mine: 'MINE', received: 'RECEIVED', sent: 'SENT' }
 import { clipName, clipSource, copyLink, fetchClip, length, space, stamp, tint } from '../lib/clips'
 import { bytes, relative } from '../lib/downloads'
-import { useCanClip } from '../lib/hooks'
+import { useCanClip, useOrigin } from '../lib/hooks'
 import { useTitle } from '../lib/title'
 import { SendTo } from '../player/ClipEditor'
 
@@ -617,6 +617,7 @@ function Title({ clip: c, onSaved }: { clip: Clip; onSaved: (c: Clip) => void })
 
 function PublicLink({ clip: c, copied, onCopied, onChange }: { clip: Clip; copied: boolean; onCopied: () => void; onChange: (v: boolean) => void }) {
   const { data: you } = useQuery(allowanceQuery)
+  const origin = useOrigin()
   const can = !!you?.canLink || c.public
   if (!can) return null
   return (
@@ -630,9 +631,9 @@ function PublicLink({ clip: c, copied, onCopied, onChange }: { clip: Clip; copie
         <Button
           size="sm"
           onClick={() =>
-            void copyLink(c.link!).then(() => {
+            void copyLink(c.link!, origin).then((url) => {
               onCopied()
-              toast({ title: 'Link copied', tone: 'ok' })
+              toast({ title: 'Link copied', body: url, tone: 'ok' })
             })
           }
         >

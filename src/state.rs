@@ -32,4 +32,16 @@ pub struct AppState {
     pub music: crate::music::Music,
     pub books: crate::books::Books,
     pub tints: crate::tint::Tints,
+    pub tailscale: crate::tailscale::Tailscale,
+}
+
+impl AppState {
+    /// Where people open tinystream: `[network] public-url`, or else where the tailnet reaches it.
+    pub fn public_url(&self) -> Option<String> {
+        self.config.current().network.public_base().map(str::to_string).or_else(|| self.tailscale.url())
+    }
+
+    pub fn link(&self, path: &str) -> Option<String> {
+        Some(format!("{}/{}", self.public_url()?, path.trim_start_matches('/')))
+    }
 }

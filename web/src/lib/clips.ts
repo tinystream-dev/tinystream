@@ -100,9 +100,9 @@ export const clipSource = (c: Clip) =>
 /** A cover tint ("r g b") as a colour, `alpha` see-through. */
 export const tint = (rgb: string | null | undefined, alpha: number) => (rgb ? `rgb(${rgb} / ${alpha})` : undefined)
 
-/** Copies a public link, made absolute. */
-export async function copyLink(path: string) {
-  const url = new URL(path, location.origin).toString()
+/** Copies a public link, made absolute against `origin` (see useOrigin). */
+export async function copyLink(path: string, origin: string) {
+  const url = `${origin}/${path.replace(/^\//, '')}`
   await navigator.clipboard.writeText(url)
   return url
 }

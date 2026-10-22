@@ -473,6 +473,7 @@ input ConfigPatch {
 	requests: RequestsConfigInput
 	signIn: SignInConfigInput
 	smtp: SmtpConfigInput
+	tailscale: TailscaleConfigInput
 }
 
 type ConfiguredLibrary {
@@ -681,6 +682,21 @@ type EpisodesImported {
 }
 
 union Event = ConfigChanged | ScanStarted | ScanFinished | LibraryChanged | MetadataChanged | ListChanged | SeriesChanged | EpisodesImported | NotificationReceived | ClipChanged | QueueChanged | PlaybackChanged
+
+enum Expose {
+	"""
+	Tailscale Serve is left as it is.
+	"""
+	MANUAL
+	"""
+	Serve puts tinystream behind HTTPS on the tailnet.
+	"""
+	TAILNET
+	"""
+	Serve and Funnel put it on the internet too.
+	"""
+	PUBLIC
+}
 
 type FileOperation {
 	kind: String!
@@ -1127,12 +1143,14 @@ type NetworkConfig {
 	host: String!
 	port: Int!
 	cors: [String!]!
+	publicUrl: String
 }
 
 input NetworkConfigInput {
 	host: String!
 	port: Int!
 	cors: [String!]!
+	publicUrl: String
 }
 
 type NewAppPassword {
@@ -1892,6 +1910,11 @@ type Server {
 	downloads: Boolean!
 	smtp: Boolean!
 	email: Boolean!
+	"""
+	Where links to this server should point, for whoever's signed in; `None` means wherever
+	they opened it.
+	"""
+	publicUrl: String
 	sources: Int!
 	transcoding: Transcoding!
 }
@@ -1925,6 +1948,12 @@ type Settings {
 	requests: RequestsConfig!
 	signIn: SignInConfig!
 	smtp: SmtpConfig!
+	tailscale: TailscaleConfig!
+	tailscaleStatus: TailscaleStatus!
+	"""
+	Where links point: `[network] public-url`, or else the tailnet's address for this machine.
+	"""
+	publicUrl: String
 	sources: [Source!]!
 	profiles: [Profile!]!
 	libraries: [ConfiguredLibrary!]!
@@ -1980,7 +2009,6 @@ type SmtpConfig {
 	username: String
 	password: String
 	from: String
-	publicUrl: String
 }
 
 input SmtpConfigInput {
@@ -1990,7 +2018,6 @@ input SmtpConfigInput {
 	username: String
 	password: String
 	from: String
-	publicUrl: String
 }
 
 enum SmtpSecurity {
@@ -2046,6 +2073,60 @@ type SubtitleTrack {
 	default: Boolean!
 	forced: Boolean!
 	supported: Boolean!
+}
+
+type TailscaleConfig {
+	detect: Boolean!
+	socket: String
+	expose: Expose!
+	httpsPort: Int!
+}
+
+input TailscaleConfigInput {
+	detect: Boolean!
+	socket: String
+	expose: Expose!
+	httpsPort: Int!
+}
+
+enum TailscaleState {
+	"""
+	`[tailscale] detect` is off.
+	"""
+	OFF
+	MISSING
+	"""
+	There's a tailnet interface, but tailscaled's socket can't be reached.
+	"""
+	UNREACHABLE
+	"""
+	tailscaled is there but not connected to a tailnet.
+	"""
+	STOPPED
+	RUNNING
+}
+
+type TailscaleStatus {
+	state: TailscaleState!
+	dnsName: String
+	ips: [String!]!
+	"""
+	Tailscale Serve puts tinystream behind HTTPS.
+	"""
+	https: Boolean!
+	"""
+	Funnel opens that to the internet.
+	"""
+	funnel: Boolean!
+	"""
+	Where the tailnet reaches tinystream, when it can.
+	"""
+	url: String
+	warning: String
+	"""
+	Why `[tailscale] expose` couldn't be set up.
+	"""
+	serveError: String
 }
 
 type Title {

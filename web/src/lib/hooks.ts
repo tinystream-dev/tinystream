@@ -13,6 +13,7 @@ const StatusQuery = graphql(`
       sources
       smtp
       email
+      publicUrl
     }
     viewer {
       ...Viewer
@@ -41,6 +42,11 @@ export function useClipsOn(): boolean {
 /** Whether this server can send email: invite links, and password resets for people who gave an address. */
 export function useEmailOn(): boolean {
   return !!useStatus().data?.server.email
+}
+
+/** Where links to this server should point: its public address, or else wherever you opened it. */
+export function useOrigin(): string {
+  return useStatus().data?.server.publicUrl ?? location.origin
 }
 
 const PeopleQuery = graphql(`

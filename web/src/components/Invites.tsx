@@ -6,7 +6,7 @@ import { useState } from 'react'
 import { graphql } from '../gql'
 import { request } from '../lib/api'
 import { relative } from '../lib/downloads'
-import { useEmailOn } from '../lib/hooks'
+import { useEmailOn, useOrigin } from '../lib/hooks'
 import { ask, toastError } from './feedback'
 import { Copyable } from './MusicSettings'
 import { Card } from './SettingsKit'
@@ -107,13 +107,14 @@ function NewInvite({ onClose }: { onClose: () => void }) {
   const [email, setEmail] = useState('')
   const [link, setLink] = useState<string | null>(null)
   const emailOn = useEmailOn()
+  const origin = useOrigin()
   const maxUses = Number(uses)
   const valid = !!label.trim() && Number.isInteger(maxUses) && maxUses >= 1 && maxUses <= 1000
   const create = useMutation({
     mutationFn: async () =>
       (await request(CreateInvite, { label: label.trim(), maxUses, expiresInHours: Number(lifetime), email: email.trim() || null })).createInvite,
     onSuccess: (r) => {
-      setLink(new URL(r.link, location.origin).href)
+      setLink(`${origin}${r.link}`)
       void qc.invalidateQueries({ queryKey: ['invites'] })
     },
   })
@@ -158,6 +159,7 @@ function NewInvite({ onClose }: { onClose: () => void }) {
               <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="someone@example.com" />
             </Field>
           )}
+          <p className="text-xs text-ink-3">The link will point to {origin.replace(/^https?:\/\//, '')}.</p>
           {create.error && <p className="text-sm text-danger">{(create.error as Error).message}</p>}
           <div className="flex justify-end gap-2 pt-2">
             <Button type="button" variant="plain" onClick={onClose}>
