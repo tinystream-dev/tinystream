@@ -957,8 +957,9 @@ export type Mutation = {
   renderClip: Clip;
   replaceConfig: Settings;
   /**
-   * Emails a reset link to the account `who` (a username or an email address) names. Says the same
-   * whether or not there's such an account, and sends in the background so the wait doesn't tell either.
+   * Emails a reset link to the account `who` (a username or an email address) names. Says the
+   * same whether or not there's such an account, and sends in the background so the wait
+   * doesn't tell either.
    */
   requestPasswordReset: Scalars['Boolean']['output'];
   resetPassword: SignedIn;
