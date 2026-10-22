@@ -7,7 +7,6 @@ description = "A static x264, the software H.264 encoder used when VA-API is una
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
-rust-version.workspace = true
 publish = false
 links = "x264"
 

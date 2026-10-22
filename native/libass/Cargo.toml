@@ -7,7 +7,6 @@ description = "A static libass, the reference rustyass is compared against"
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
-rust-version.workspace = true
 publish = false
 links = "ass"
 

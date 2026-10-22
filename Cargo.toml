@@ -3,7 +3,6 @@ name = "tinystream"
 description = "A small self-hosted media server"
 version.workspace = true
 edition.workspace = true
-rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
@@ -34,7 +33,6 @@ exclude = ["mobile"]
 [workspace.package]
 version = "0.37.2"
 edition = "2024"
-rust-version = "1.94"
 license = "AGPL-3.0-or-later"
 authors = ["Phrolova <me@phrolova.moe>"]
 repository = "https://github.com/phrolova/tinystream"

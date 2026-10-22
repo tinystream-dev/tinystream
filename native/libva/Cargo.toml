@@ -7,7 +7,6 @@ description = "libva's headers and a shim that loads the system's libva at runti
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
-rust-version.workspace = true
 publish = false
 links = "va"
 
