@@ -597,7 +597,7 @@ async fn write_serve(socket: &Path, serve: &Value, etag: &str) -> Result<(), Str
     match response.status() {
         s if s.is_success() => Ok(()),
         reqwest::StatusCode::FORBIDDEN => {
-            let user = std::env::var("USER").unwrap_or_else(|_| "<the user tinystream runs as>".into());
+            let user = user_name().unwrap_or_else(|| "<the user tinystream runs as>".into());
             Err(format!(
                 "tinystream isn't allowed to change Tailscale's settings. Run `sudo tailscale set --operator={user}` once."
             ))
@@ -607,6 +607,25 @@ async fn write_serve(socket: &Path, serve: &Value, etag: &str) -> Result<(), Str
         },
         s => Err(format!("tailscaled said {s}: {}", response.text().await.unwrap_or_default().trim())),
     }
+}
+
+/// Who tinystream runs as, for `tailscale set --operator`; services often don't get a $USER.
+#[cfg(unix)]
+fn user_name() -> Option<String> {
+    use std::os::unix::fs::MetadataExt;
+
+    let uid = std::fs::metadata("/proc/self").ok().map(|m| m.uid().to_string());
+    let passwd = std::fs::read_to_string("/etc/passwd").unwrap_or_default();
+
+    let found = uid.and_then(|uid| {
+        passwd.lines().find_map(|line| {
+            let mut fields = line.split(':');
+            let name = fields.next()?;
+            (fields.nth(1)? == uid).then(|| name.to_string())
+        })
+    });
+
+    found.or_else(|| std::env::var("USER").ok())
 }
 
 #[cfg(not(unix))]
