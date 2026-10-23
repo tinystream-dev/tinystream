@@ -31,7 +31,7 @@ members = ["ffmpeg-sys", "libtorrent-sys", "native/*", "rustyass", "rustyass/com
 exclude = ["mobile"]
 
 [workspace.package]
-version = "0.37.2"
+version = "0.38.0"
 edition = "2024"
 license = "AGPL-3.0-or-later"
 authors = ["Phrolova <me@phrolova.moe>"]
