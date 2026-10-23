@@ -5,7 +5,7 @@ use std::sync::Arc;
 use sqlx::SqlitePool;
 
 use crate::auth::passkeys::Challenges;
-use crate::config::ConfigStore;
+use crate::config::{ConfigStore, SignInStyle};
 use crate::events::Events;
 use crate::library::Scanner;
 use crate::logging::LogHandle;
@@ -40,6 +40,10 @@ impl AppState {
     /// Where people open tinystream: `[network] public-url`, or else where the tailnet reaches it.
     pub fn public_url(&self) -> Option<String> {
         self.config.current().network.public_base().map(str::to_string).or_else(|| self.tailscale.url())
+    }
+
+    pub fn sign_in_style(&self) -> SignInStyle {
+        self.config.current().sign_in_style(self.tailscale.funnel())
     }
 
     pub fn link(&self, path: &str) -> Option<String> {

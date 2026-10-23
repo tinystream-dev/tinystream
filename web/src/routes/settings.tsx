@@ -591,7 +591,9 @@ function Server() {
     if (v === 'PUBLIC' && draft.tailscale.expose !== 'PUBLIC') {
       const ok = await ask({
         title: 'Open tinystream to the internet?',
-        body: 'Funnel lets anyone reach the sign-in page, not just your tailnet. While it’s on, the sign-in page asks for a username instead of showing everyone’s profile picture.',
+        body: draft.signIn.publicProfiles
+          ? 'Funnel lets anyone reach the sign-in page, not just your tailnet, and it keeps showing everyone’s profile picture.'
+          : 'Funnel lets anyone reach the sign-in page, not just your tailnet. While it’s on, the sign-in page asks for a username instead of showing everyone’s profile picture.',
         confirm: 'Open it',
         danger: true,
       })
@@ -599,6 +601,19 @@ function Server() {
     }
     set((c) => void (c.tailscale.expose = v))
   }
+  const publicProfiles = async (v: boolean) => {
+    if (v) {
+      const ok = await ask({
+        title: 'Show profiles to the internet?',
+        body: 'Anyone who finds this address sees every account’s name and picture, and only needs a password to sign in as one.',
+        confirm: 'Show them',
+        danger: true,
+      })
+      if (!ok) return
+    }
+    set((c) => void (c.signIn.publicProfiles = v))
+  }
+  const onInternet = draft.tailscale.expose === 'PUBLIC' || data.tailscaleStatus.funnel
 
   return (
     <>
@@ -696,8 +711,17 @@ function Server() {
               onChange={(v) => set((c) => void (c.signIn.style = v))}
             />
           </Field>
-          {draft.tailscale.expose === 'PUBLIC' && <p className="mt-1.5 text-xs text-ink-3">It asks for a username while Funnel has tinystream open to the internet.</p>}
         </div>
+        {onInternet && draft.signIn.style === 'PROFILES' && (
+          <div className="mt-4">
+            <Row label="Keep profile pictures while open to the internet" hint={draft.signIn.publicProfiles ? undefined : 'It asks for a username while Funnel has tinystream open to the internet.'}>
+              <Toggle label="Keep profile pictures" checked={draft.signIn.publicProfiles} onChange={(v) => void publicProfiles(v)} />
+            </Row>
+            {draft.signIn.publicProfiles && (
+              <p className="mt-1.5 text-xs leading-relaxed text-warn">Anyone who finds this address sees every account’s name and picture, and only needs a password to sign in as one.</p>
+            )}
+          </div>
+        )}
       </Card>
 
       {smtp && (

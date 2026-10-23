@@ -2563,10 +2563,14 @@ export type Shelf = {
 };
 
 export type SignInConfig = {
+  /** Keeps showing profile pictures while Funnel has tinystream open to the internet. */
+  publicProfiles: Scalars['Boolean']['output'];
   style: SignInStyle;
 };
 
 export type SignInConfigInput = {
+  /** Keeps showing profile pictures while Funnel has tinystream open to the internet. */
+  publicProfiles: Scalars['Boolean']['input'];
   style: SignInStyle;
 };
 

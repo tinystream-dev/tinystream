@@ -619,7 +619,10 @@ mod tests {
     #[test]
     fn exposing_rules() {
         let public = Config::parse("[tailscale]\nexpose = \"public\"\n").unwrap();
-        assert_eq!(public.sign_in_style(), super::super::SignInStyle::Username);
+        assert_eq!(public.sign_in_style(false), super::super::SignInStyle::Username);
+        let shown = Config::parse("[tailscale]\nexpose = \"public\"\n\n[sign-in]\npublic-profiles = true\n").unwrap();
+        assert_eq!(shown.sign_in_style(false), super::super::SignInStyle::Profiles);
+        assert_eq!(Config::default().sign_in_style(true), super::super::SignInStyle::Username);
         assert!(Config::parse("[tailscale]\nexpose = \"public\"\nhttps-port = 444\n").is_err());
         assert!(Config::parse("[tailscale]\nexpose = \"tailnet\"\nhttps-port = 444\n").is_ok());
         assert!(Config::parse("[tailscale]\nexpose = \"tailnet\"\ndetect = false\n").is_err());

@@ -22,7 +22,7 @@ async fn user_count(state: &AppState) -> ApiResult<i64> {
 }
 
 fn profiles_on(state: &AppState) -> bool {
-    state.config.current().sign_in_style() == SignInStyle::Profiles
+    state.sign_in_style() == SignInStyle::Profiles
 }
 
 async fn account(
@@ -119,7 +119,7 @@ impl Server {
     }
 
     async fn sign_in_style(&self, ctx: &Context<'_>) -> SignInStyle {
-        ctx.state().config.current().sign_in_style()
+        ctx.state().sign_in_style()
     }
 
     async fn clips(&self, ctx: &Context<'_>) -> bool {

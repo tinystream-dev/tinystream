@@ -516,6 +516,9 @@ pub enum SignInStyle {
 #[serde(rename_all = "kebab-case", deny_unknown_fields, default)]
 pub struct SignIn {
     pub style: SignInStyle,
+
+    /// Keeps showing profile pictures while Funnel has tinystream open to the internet.
+    pub public_profiles: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, Default, async_graphql::Enum)]
@@ -847,11 +850,14 @@ impl Config {
         Ok(())
     }
 
-    /// Profile pictures would show everyone's username to the whole internet.
-    pub fn sign_in_style(&self) -> SignInStyle {
-        match self.tailscale.expose {
-            Expose::Public => SignInStyle::Username,
-            _ => self.sign_in.style,
+    /// Profile pictures would show everyone's username to the whole internet, unless that's what
+    /// they want. `funnel` is whether Tailscale says Funnel is on, set up by tinystream or not.
+    pub fn sign_in_style(&self, funnel: bool) -> SignInStyle {
+        let public = funnel || self.tailscale.expose == Expose::Public;
+
+        match public && !self.sign_in.public_profiles {
+            true => SignInStyle::Username,
+            false => self.sign_in.style,
         }
     }
 

@@ -77,6 +77,10 @@ impl Tailscale {
         self.status.lock().unwrap().url.clone()
     }
 
+    pub fn funnel(&self) -> bool {
+        self.status.lock().unwrap().funnel
+    }
+
     pub async fn refresh(&self, config: &Config, config_dir: &Path) -> Status {
         let _busy = self.busy.lock().await;
         let status = self.detect(config, config_dir).await;

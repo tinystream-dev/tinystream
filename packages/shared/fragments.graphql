@@ -550,6 +550,7 @@ fragment SettingsFields on Settings {
   }
   signIn {
     style
+    publicProfiles
   }
   smtp {
     host

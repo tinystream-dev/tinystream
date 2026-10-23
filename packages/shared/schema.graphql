@@ -1969,10 +1969,18 @@ type Shelf {
 
 type SignInConfig {
 	style: SignInStyle!
+	"""
+	Keeps showing profile pictures while Funnel has tinystream open to the internet.
+	"""
+	publicProfiles: Boolean!
 }
 
 input SignInConfigInput {
 	style: SignInStyle!
+	"""
+	Keeps showing profile pictures while Funnel has tinystream open to the internet.
+	"""
+	publicProfiles: Boolean!
 }
 
 type SignInProfile {
