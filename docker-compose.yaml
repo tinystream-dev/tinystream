@@ -3,6 +3,7 @@
 # `mkdir -p config data && sudo chown 1000:1000 config data && docker compose up -d`
 # pulls the latest release and starts it on port 3000. Use the UID/GID from `user` below if changed.
 # Point each library in Settings (or config.toml's `[[library]] path`) at where it's mounted under /media.
+# For VA-API transcoding on hosts with /dev/dri, see docker-compose.vaapi.yaml.
 
 services:
   tinystream:
@@ -22,12 +23,6 @@ services:
       - /path/to/media:/media
       # Tailscale: see network_mode below.
       # - /var/run/tailscale/tailscaled.sock:/var/run/tailscale/tailscaled.sock
-    # VA-API transcoding, with the host's render group (`getent group render`). Without them,
-    # transcoding is in software; remove both on machines without /dev/dri.
-    devices:
-      - /dev/dri:/dev/dri
-    group_add:
-      - "${RENDER_GID:-989}"
     # Tailscale: tinystream finds tailscaled through its socket (above) and the tailnet through the
     # host's network, so remove `ports` with this. For `[tailscale] expose`, the host user with the
     # UID above has to be tailscaled's operator (`sudo tailscale set --operator=<user>`).

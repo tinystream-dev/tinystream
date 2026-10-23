@@ -1,0 +1,12 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# Optional VA-API transcoding on hosts with /dev/dri. Set RENDER_GID to the host's render group:
+#   export RENDER_GID=$(getent group render | cut -d: -f3)
+#   docker compose -f docker-compose.yaml -f docker-compose.vaapi.yaml up -d
+
+services:
+  tinystream:
+    devices:
+      - /dev/dri:/dev/dri
+    group_add:
+      - "${RENDER_GID:-989}"
