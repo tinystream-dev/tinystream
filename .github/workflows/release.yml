@@ -184,10 +184,11 @@ jobs:
             ${{ steps.package.outputs.apk }}
             ${{ steps.package.outputs.apk }}.sha256
 
+  # Publishes whatever got built, so one failed or slow target doesn't hold back the rest.
   release:
     name: Publish
     needs: [build, android]
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: ${{ !cancelled() && startsWith(github.ref, 'refs/tags/v') }}
     runs-on: blacksmith-2vcpu-ubuntu-2404
     steps:
       - uses: actions/download-artifact@v4
