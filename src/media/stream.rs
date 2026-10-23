@@ -213,6 +213,7 @@ fn run(req: &StreamRequest, hw: Option<&BufferRef>, sink: &mut Sink) -> Result<(
             hw,
             max_height,
             (req.start * ff::q2d(ffi::av_inv_q(v_tb))) as i64,
+            unsafe { (*input.0).bit_rate },
         )?)),
     };
 
@@ -346,6 +347,7 @@ struct VideoTranscode {
     hw_attempted: bool,
     max_height: i32,
     start_pts: i64,
+    source: Option<SourceRate>,
     graph: Option<FilterGraph>,
     enc: Option<Codec>,
     frame: Frame,
@@ -373,18 +375,53 @@ pub(super) unsafe extern "C" fn prefer_vaapi(
     }
 }
 
-fn bitrate_for(height: i32) -> i64 {
-    match height {
+/// What the source spends on its picture, so a transcode doesn't spend far more.
+#[derive(Debug, Clone, Copy)]
+struct SourceRate {
+    bitrate: i64,
+    height: i32,
+    /// How many times the bits H.264 needs for the same picture.
+    h264_factor: f64,
+}
+
+impl SourceRate {
+    fn new(par: &ffi::AVCodecParameters, container_bitrate: i64) -> Option<Self> {
+        let bitrate = if par.bit_rate > 0 { par.bit_rate } else { container_bitrate };
+        let h264_factor = match par.codec_id {
+            ffi::AV_CODEC_ID_AV1 => 3.0,
+            ffi::AV_CODEC_ID_HEVC | ffi::AV_CODEC_ID_VP9 => 2.0,
+            _ => 1.25,
+        };
+        (bitrate > 0 && par.height > 0).then_some(Self { bitrate, height: par.height, h264_factor })
+    }
+}
+
+/// Never ask for less than this, however little the source spends.
+const MIN_BITRATE: i64 = 1_000_000;
+
+/// The usual bitrate for `height`, capped near what the source spends at that size.
+fn bitrate_for(height: i32, source: Option<SourceRate>) -> i64 {
+    let usual = match height {
         h if h >= 2000 => 20_000_000,
         h if h >= 1400 => 12_000_000,
         h if h >= 1000 => 8_000_000,
         h if h >= 700 => 4_500_000,
         _ => 2_000_000,
-    }
+    };
+    let Some(s) = source else { return usual };
+    let scale = (f64::from(height) / f64::from(s.height)).min(1.0).powi(2);
+    let cap = (s.bitrate as f64 * s.h264_factor * scale) as i64;
+    usual.min(cap.max(MIN_BITRATE))
 }
 
 impl VideoTranscode {
-    fn new(st: &ffi::AVStream, hw: Option<&BufferRef>, max_height: i32, start_pts: i64) -> anyhow::Result<Self> {
+    fn new(
+        st: &ffi::AVStream,
+        hw: Option<&BufferRef>,
+        max_height: i32,
+        start_pts: i64,
+        container_bitrate: i64,
+    ) -> anyhow::Result<Self> {
         let par = unsafe { &*st.codecpar };
         let mut decoder = unsafe { ffi::avcodec_find_decoder(par.codec_id) };
 
@@ -427,6 +464,7 @@ impl VideoTranscode {
             hw_attempted: hw.is_some(),
             max_height,
             start_pts,
+            source: SourceRate::new(par, container_bitrate),
             graph: None,
             enc: None,
             frame: Frame::new(),
@@ -537,7 +575,7 @@ impl VideoTranscode {
 
         let mut enc = Codec::alloc(codec)?;
         let (w, h) = unsafe { (ffi::av_buffersink_get_w(g.sink), ffi::av_buffersink_get_h(g.sink)) };
-        let bitrate = bitrate_for(h);
+        let bitrate = bitrate_for(h, self.source);
         let fps = ff::q2d(self.frame_rate).round().max(1.0) as c_int;
 
         unsafe {
@@ -866,5 +904,35 @@ impl AudioTranscode {
         self.encode_fifo(true, mux, sink)?;
         self.enc.send_frame(None)?;
         self.drain_encoder(mux, sink)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn source(bitrate: i64, height: i32, h264_factor: f64) -> Option<SourceRate> {
+        Some(SourceRate { bitrate, height, h264_factor })
+    }
+
+    #[test]
+    fn lean_av1_stays_lean() {
+        assert_eq!(bitrate_for(1080, source(1_625_925, 1080, 3.0)), 4_877_775);
+    }
+
+    #[test]
+    fn rich_sources_get_the_usual() {
+        assert_eq!(bitrate_for(1080, source(30_000_000, 1080, 1.25)), 8_000_000);
+        assert_eq!(bitrate_for(1080, None), 8_000_000);
+    }
+
+    #[test]
+    fn scaled_down_by_area() {
+        assert_eq!(bitrate_for(540, source(4_000_000, 1080, 2.0)), 2_000_000);
+    }
+
+    #[test]
+    fn never_starved() {
+        assert_eq!(bitrate_for(720, source(300_000, 1080, 1.25)), MIN_BITRATE);
     }
 }
