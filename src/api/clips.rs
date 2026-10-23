@@ -1950,8 +1950,8 @@ fn buckets() -> &'static Mutex<HashMap<IpAddr, (f64, Instant)>> {
     B.get_or_init(Default::default)
 }
 
-pub async fn rate_limit(req: Request, next: Next) -> Response {
-    if let Some(ip) = auth::throttle::client(&req) {
+pub async fn rate_limit(State(state): State<Arc<AppState>>, req: Request, next: Next) -> Response {
+    if let Some(ip) = auth::throttle::client(&req, &state.config.current().network) {
         let mut b = buckets().lock().unwrap();
 
         if b.len() > 50_000 {

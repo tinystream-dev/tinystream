@@ -1143,6 +1143,7 @@ type NetworkConfig {
 	host: String!
 	port: Int!
 	cors: [String!]!
+	trustedProxies: [String!]!
 	publicUrl: String
 }
 
@@ -1150,6 +1151,7 @@ input NetworkConfigInput {
 	host: String!
 	port: Int!
 	cors: [String!]!
+	trustedProxies: [String!]!
 	publicUrl: String
 }
 

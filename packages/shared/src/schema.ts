@@ -1571,6 +1571,7 @@ export type NetworkConfig = {
   host: Scalars['String']['output'];
   port: Scalars['Int']['output'];
   publicUrl?: Maybe<Scalars['String']['output']>;
+  trustedProxies: Array<Scalars['String']['output']>;
 };
 
 export type NetworkConfigInput = {
@@ -1578,6 +1579,7 @@ export type NetworkConfigInput = {
   host: Scalars['String']['input'];
   port: Scalars['Int']['input'];
   publicUrl?: InputMaybe<Scalars['String']['input']>;
+  trustedProxies: Array<Scalars['String']['input']>;
 };
 
 export type NewAppPassword = {

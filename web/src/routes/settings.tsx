@@ -642,6 +642,20 @@ function Server() {
           </Field>
         </div>
         <div className="mt-4">
+          <Field label="Trusted proxies" hint="Reverse proxies not on this machine, comma-separated">
+            <Input
+              value={draft.network.trustedProxies.join(', ')}
+              placeholder="172.16.0.0/12"
+              onChange={(e) =>
+                set(
+                  (c) =>
+                    void (c.network.trustedProxies = e.target.value.split(',').map((s) => s.trim()).filter(Boolean)),
+                )
+              }
+            />
+          </Field>
+        </div>
+        <div className="mt-4">
           <Field label="Public address" hint="Where links in invites, emails and shares point">
             <Input
               value={draft.network.publicUrl ?? ''}

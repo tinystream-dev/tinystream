@@ -2,6 +2,7 @@
 
 mod store;
 
+use std::net::IpAddr;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -95,19 +96,54 @@ pub struct Network {
 
     pub cors: Vec<String>,
 
+    pub trusted_proxies: Vec<String>,
+
     #[serde(skip_serializing_if = "Option::is_none")]
     pub public_url: Option<String>,
 }
 
 impl Default for Network {
     fn default() -> Self {
-        Self { host: "0.0.0.0".into(), port: 3000, cors: Vec::new(), public_url: None }
+        Self { host: "0.0.0.0".into(), port: 3000, cors: Vec::new(), trusted_proxies: Vec::new(), public_url: None }
     }
 }
 
 impl Network {
     pub fn public_base(&self) -> Option<&str> {
         self.public_url.as_deref().map(|u| u.trim().trim_end_matches('/')).filter(|u| !u.is_empty())
+    }
+
+    /// Whether `ip` may say who it's passing along: anything on this machine (like Tailscale Serve
+    /// and Funnel), or what `trusted-proxies` lists.
+    pub fn trusts_proxy(&self, ip: IpAddr) -> bool {
+        let ip = ip.to_canonical();
+        ip.is_loopback()
+            || self.trusted_proxies.iter().filter_map(|p| ip_range(p)).any(|(net, bits)| in_range(ip, net, bits))
+    }
+}
+
+fn ip_range(text: &str) -> Option<(IpAddr, u32)> {
+    let (ip, bits) = match text.trim().split_once('/') {
+        Some((ip, bits)) => (ip.parse::<IpAddr>().ok()?, Some(bits.parse().ok()?)),
+        None => (text.trim().parse().ok()?, None),
+    };
+
+    let max = if ip.is_ipv4() { 32 } else { 128 };
+    let bits = bits.unwrap_or(max);
+    (bits <= max).then_some((ip.to_canonical(), bits))
+}
+
+fn in_range(ip: IpAddr, net: IpAddr, bits: u32) -> bool {
+    match (ip, net) {
+        (IpAddr::V4(ip), IpAddr::V4(net)) => {
+            let mask = u32::MAX.checked_shl(32 - bits).unwrap_or(0);
+            u32::from(ip) & mask == u32::from(net) & mask
+        },
+        (IpAddr::V6(ip), IpAddr::V6(net)) => {
+            let mask = u128::MAX.checked_shl(128 - bits).unwrap_or(0);
+            u128::from(ip) & mask == u128::from(net) & mask
+        },
+        _ => false,
     }
 }
 
@@ -784,6 +820,12 @@ impl Config {
             }
         }
 
+        for proxy in &self.network.trusted_proxies {
+            if ip_range(proxy).is_none() {
+                return Err(format!("trusted proxy {proxy:?} isn't an address or a range like \"172.16.0.0/12\""));
+            }
+        }
+
         for t in [&self.downloads.slow_from, &self.downloads.slow_to].into_iter().flatten() {
             if parse_clock(t).is_none() {
                 return Err(format!("{t:?} isn't a time of day; write it like \"08:00\""));
@@ -890,6 +932,7 @@ pub const TEMPLATE: &str = r#"# tinystream
 host = "0.0.0.0"
 port = 3000
 # public-url = "https://tv.example.com"   # where links in invites and emails point
+# trusted-proxies = ["172.16.0.0/12"]      # reverse proxies not on this machine, like in Docker
 #
 # On a tailnet, tinystream finds its own address through tailscaled, so links
 # work without public-url. Turn that off with [tailscale] detect = false, or

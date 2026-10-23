@@ -103,7 +103,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/c/{code}/video.mp4", get(clips::public_file))
         .route("/c/{code}/image.png", get(clips::public_file))
         .route("/c/{code}/poster.jpg", get(clips::public_poster))
-        .layer(middleware::from_fn(clips::rate_limit))
+        .layer(middleware::from_fn_with_state(state.clone(), clips::rate_limit))
         .with_state(state.clone());
 
     let app = Router::new().nest("/api", api).merge(public).merge(subsonic::router(state.clone()));
@@ -132,7 +132,7 @@ async fn session(state: &AppState, headers: HeaderMap, ip: Option<IpAddr>) -> Se
 }
 
 async fn graphql_post(State(api): State<Api>, headers: HeaderMap, req: Request) -> Response {
-    let ip = throttle::client(&req);
+    let ip = throttle::client(&req, &api.state.config.current().network);
 
     let req = match upload::graphql_request(req).await {
         Ok(r) => r,
@@ -144,7 +144,7 @@ async fn graphql_post(State(api): State<Api>, headers: HeaderMap, req: Request) 
 }
 
 async fn graphql_get(State(api): State<Api>, req: Request) -> Response {
-    let ip = throttle::client(&req);
+    let ip = throttle::client(&req, &api.state.config.current().network);
     let (mut parts, _) = req.into_parts();
     let protocol = GraphQLProtocol::from_request_parts(&mut parts, &()).await;
     let upgrade = WebSocketUpgrade::from_request_parts(&mut parts, &()).await;

@@ -617,6 +617,13 @@ mod tests {
     }
 
     #[test]
+    fn trusted_proxies_must_be_addresses() {
+        assert!(Config::parse("[network]\ntrusted-proxies = [\"10.0.0.0/8\", \"::1\"]\n").is_ok());
+        assert!(Config::parse("[network]\ntrusted-proxies = [\"proxy.lan\"]\n").is_err());
+        assert!(Config::parse("[network]\ntrusted-proxies = [\"10.0.0.0/33\"]\n").is_err());
+    }
+
+    #[test]
     fn exposing_rules() {
         let public = Config::parse("[tailscale]\nexpose = \"public\"\n").unwrap();
         assert_eq!(public.sign_in_style(false), super::super::SignInStyle::Username);

@@ -7,6 +7,8 @@ use std::time::{Duration, Instant};
 
 use axum::extract::{ConnectInfo, Request};
 
+use crate::config::Network;
+
 /// Wrong passwords an address gets before it has to wait.
 const BURST: f64 = 10.0;
 
@@ -70,17 +72,12 @@ fn key(ip: IpAddr) -> IpAddr {
     }
 }
 
-/// Who's asking: the connection's address, or the one a proxy on this machine or network (like
-/// Tailscale Serve and Funnel) says it's passing along.
-pub fn client(req: &Request) -> Option<IpAddr> {
+/// Who's asking: the connection's address, or the one a proxy it trusts (like Tailscale Serve and
+/// Funnel) says it's passing along.
+pub fn client(req: &Request, network: &Network) -> Option<IpAddr> {
     let peer = req.extensions().get::<ConnectInfo<SocketAddr>>()?.0.ip();
 
-    let local = match peer {
-        IpAddr::V4(v4) => v4.is_loopback() || v4.is_private() || v4.is_link_local(),
-        IpAddr::V6(v6) => v6.is_loopback() || v6.is_unique_local() || v6.is_unicast_link_local(),
-    };
-
-    if local {
+    if network.trusts_proxy(peer) {
         let forwarded = req.headers().get("x-forwarded-for").and_then(|v| v.to_str().ok());
 
         if let Some(ip) = forwarded.and_then(|v| v.rsplit(',').next()).and_then(|v| v.trim().parse().ok()) {
@@ -130,5 +127,25 @@ mod tests {
 
         assert!(throttle.guess(Some("2001:db8::ffff:1".parse().unwrap())).is_err());
         assert!(throttle.guess(Some("2001:db8:0:1::1".parse().unwrap())).is_ok());
+    }
+
+    fn asks(peer: &str, forwarded: &str, network: &Network) -> Option<IpAddr> {
+        let mut req = Request::builder().header("x-forwarded-for", forwarded).body(axum::body::Body::empty()).unwrap();
+        req.extensions_mut().insert(ConnectInfo(SocketAddr::new(peer.parse().unwrap(), 1234)));
+        client(&req, network)
+    }
+
+    #[test]
+    fn only_trusted_proxies_pass_addresses_along() {
+        let network = Network { trusted_proxies: vec!["172.16.0.0/12".into(), "fd00::1".into()], ..Network::default() };
+        let forwarded = Some("203.0.113.7".parse().unwrap());
+
+        assert_eq!(asks("127.0.0.1", "203.0.113.7", &network), forwarded);
+        assert_eq!(asks("::ffff:127.0.0.1", "203.0.113.7", &network), forwarded);
+        assert_eq!(asks("172.18.0.2", "10.0.0.1, 203.0.113.7", &network), forwarded);
+        assert_eq!(asks("fd00::1", "203.0.113.7", &network), forwarded);
+        assert_eq!(asks("192.168.1.20", "203.0.113.7", &network), Some("192.168.1.20".parse().unwrap()));
+        assert_eq!(asks("fd00::2", "203.0.113.7", &network), Some("fd00::2".parse().unwrap()));
+        assert_eq!(asks("172.18.0.2", "203.0.113.7", &Network::default()), Some("172.18.0.2".parse().unwrap()));
     }
 }

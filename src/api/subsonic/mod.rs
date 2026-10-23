@@ -322,7 +322,7 @@ async fn rest(
         .is_some_and(|v| v.starts_with("application/x-www-form-urlencoded"));
 
     let streams = matches!(name.as_str(), "stream" | "download");
-    let ip = auth::throttle::client(&req);
+    let ip = auth::throttle::client(&req, &state.config.current().network);
 
     let (req, body) = if method == Method::POST && !streams {
         let bytes = axum::body::to_bytes(req.into_body(), 1 << 20).await.unwrap_or_default();

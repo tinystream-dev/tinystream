@@ -486,6 +486,7 @@ fragment SettingsFields on Settings {
     host
     port
     cors
+    trustedProxies
     publicUrl
   }
   log {
