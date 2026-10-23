@@ -1,0 +1,14 @@
+.git
+target
+.native
+.native-musl
+.ffmpeg
+.libtorrent
+dev
+dist
+**/node_modules
+web/dist
+web/.output
+web/.tanstack
+mobile
+!mobile/package.json

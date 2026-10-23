@@ -1,0 +1,33 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# `mkdir -p config data && docker compose up -d` pulls the latest release and starts it on port 3000.
+# Point each library in Settings (or config.toml's `[[library]] path`) at where it's mounted under /media.
+
+services:
+  tinystream:
+    image: ghcr.io/tinystream-dev/tinystream:latest
+    # `docker compose build` builds it from source instead.
+    build: .
+    restart: unless-stopped
+    # Whoever owns your media; config/ and data/ need to be writable by them too.
+    user: "1000:1000"
+    ports:
+      - "3000:3000"
+      - "6881:6881/tcp"
+      - "6881:6881/udp"
+    volumes:
+      - ./config:/config
+      - ./data:/data
+      - /path/to/media:/media
+      # Tailscale: see network_mode below.
+      # - /var/run/tailscale/tailscaled.sock:/var/run/tailscale/tailscaled.sock
+    # VA-API transcoding, with the host's render group (`getent group render`). Without them,
+    # transcoding is in software; remove both on machines without /dev/dri.
+    devices:
+      - /dev/dri:/dev/dri
+    group_add:
+      - "${RENDER_GID:-989}"
+    # Tailscale: tinystream finds tailscaled through its socket (above) and the tailnet through the
+    # host's network, so remove `ports` with this. For `[tailscale] expose`, the host user with the
+    # UID above has to be tailscaled's operator (`sudo tailscale set --operator=<user>`).
+    # network_mode: host
