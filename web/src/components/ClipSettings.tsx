@@ -59,6 +59,7 @@ const DeleteClip = graphql(`
 `)
 import { clipName, clipSource, copyLink, length, space } from '../lib/clips'
 import { bytes } from '../lib/downloads'
+import { useOrigin } from '../lib/hooks'
 import { Avatar } from './Avatar'
 import { ask, toast, toastError } from './feedback'
 import { Card, Row, useSave, useSettings } from './SettingsKit'
@@ -69,6 +70,7 @@ import { Button, Field, IconButton, Input, Progress, Toggle } from './ui'
 export function ClipSettings() {
   const { data } = useSettings()
   const { data: admin } = useQuery({ queryKey: ['clips-admin'], queryFn: async () => (await request(ClipStorageQuery)).clipStorage })
+  const origin = useOrigin()
   const qc = useQueryClient()
   const refresh = useSave()
   const [draft, setDraft] = useState<ClipsConfig | null>(null)
@@ -210,7 +212,7 @@ export function ClipSettings() {
                     </p>
                   </div>
                   {c.link && c.linkLive && (
-                    <IconButton label="Copy link" onClick={() => void copyLink(c.link!).then(() => toast({ title: 'Link copied', tone: 'ok' }))}>
+                    <IconButton label="Copy link" onClick={() => void copyLink(c.link!, origin).then((url) => toast({ title: 'Link copied', body: url, tone: 'ok' }))}>
                       <Copy className="size-4" />
                     </IconButton>
                   )}

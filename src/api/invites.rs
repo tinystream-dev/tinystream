@@ -77,14 +77,18 @@ impl InviteMutation {
             return Err(ApiError::bad_request("that isn't an email address"));
         }
 
+        let base = match &email {
+            Some(_) => Some(state.public_url().ok_or_else(|| ApiError::bad_request(mail::NO_PUBLIC_URL))?),
+            None => None,
+        };
+
         let (invite, token) = invites::create(&state.db, admin.id, &label, max_uses, expires_in_hours).await?;
         let link = format!("invite#{token}");
 
-        if let Some(to) = &email {
+        if let (Some(to), Some(base)) = (&email, &base) {
             let body = format!(
-                "{} invited you to tinystream.\n\nMake your account here:\n{}\n\nThe link works for {}.\n",
+                "{} invited you to tinystream.\n\nMake your account here:\n{base}/{link}\n\nThe link works for {}.\n",
                 admin.username,
-                config.smtp.link(&link).unwrap_or_default(),
                 lifetime(expires_in_hours),
             );
 

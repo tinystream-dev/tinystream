@@ -2,6 +2,7 @@
 
 mod store;
 
+use std::net::IpAddr;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -78,6 +79,8 @@ pub struct Config {
     pub sign_in: SignIn,
     #[serde(default)]
     pub smtp: Smtp,
+    #[serde(default)]
+    pub tailscale: Tailscale,
     #[serde(default, rename = "source")]
     pub sources: Vec<Source>,
     #[serde(default, rename = "profile")]
@@ -92,11 +95,55 @@ pub struct Network {
     pub port: u16,
 
     pub cors: Vec<String>,
+
+    pub trusted_proxies: Vec<String>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub public_url: Option<String>,
 }
 
 impl Default for Network {
     fn default() -> Self {
-        Self { host: "0.0.0.0".into(), port: 3000, cors: Vec::new() }
+        Self { host: "0.0.0.0".into(), port: 3000, cors: Vec::new(), trusted_proxies: Vec::new(), public_url: None }
+    }
+}
+
+impl Network {
+    pub fn public_base(&self) -> Option<&str> {
+        self.public_url.as_deref().map(|u| u.trim().trim_end_matches('/')).filter(|u| !u.is_empty())
+    }
+
+    /// Whether `ip` may say who it's passing along: anything on this machine (like Tailscale Serve
+    /// and Funnel), or what `trusted-proxies` lists.
+    pub fn trusts_proxy(&self, ip: IpAddr) -> bool {
+        let ip = ip.to_canonical();
+        ip.is_loopback()
+            || self.trusted_proxies.iter().filter_map(|p| ip_range(p)).any(|(net, bits)| in_range(ip, net, bits))
+    }
+}
+
+fn ip_range(text: &str) -> Option<(IpAddr, u32)> {
+    let (ip, bits) = match text.trim().split_once('/') {
+        Some((ip, bits)) => (ip.parse::<IpAddr>().ok()?, Some(bits.parse().ok()?)),
+        None => (text.trim().parse().ok()?, None),
+    };
+
+    let max = if ip.is_ipv4() { 32 } else { 128 };
+    let bits = bits.unwrap_or(max);
+    (bits <= max).then_some((ip.to_canonical(), bits))
+}
+
+fn in_range(ip: IpAddr, net: IpAddr, bits: u32) -> bool {
+    match (ip, net) {
+        (IpAddr::V4(ip), IpAddr::V4(net)) => {
+            let mask = u32::MAX.checked_shl(32 - bits).unwrap_or(0);
+            u32::from(ip) & mask == u32::from(net) & mask
+        },
+        (IpAddr::V6(ip), IpAddr::V6(net)) => {
+            let mask = u128::MAX.checked_shl(128 - bits).unwrap_or(0);
+            u128::from(ip) & mask == u128::from(net) & mask
+        },
+        _ => false,
     }
 }
 
@@ -505,6 +552,9 @@ pub enum SignInStyle {
 #[serde(rename_all = "kebab-case", deny_unknown_fields, default)]
 pub struct SignIn {
     pub style: SignInStyle,
+
+    /// Keeps showing profile pictures while Funnel has tinystream open to the internet.
+    pub public_profiles: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, Default, async_graphql::Enum)]
@@ -534,7 +584,8 @@ pub struct Smtp {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub from: Option<String>,
 
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing)]
+    #[graphql(skip)]
     pub public_url: Option<String>,
 }
 
@@ -551,12 +602,44 @@ impl Smtp {
             SmtpSecurity::None => 25,
         })
     }
+}
 
-    pub fn link(&self, path: &str) -> Option<String> {
-        let base = self.public_url.as_deref()?.trim().trim_end_matches('/');
-        Some(format!("{base}/{}", path.trim_start_matches('/')))
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, Default, async_graphql::Enum)]
+#[serde(rename_all = "kebab-case")]
+pub enum Expose {
+    /// Tailscale Serve is left as it is.
+    #[default]
+    Manual,
+
+    /// Serve puts tinystream behind HTTPS on the tailnet.
+    Tailnet,
+
+    /// Serve and Funnel put it on the internet too.
+    Public,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize, async_graphql::SimpleObject, async_graphql::InputObject)]
+#[graphql(name = "TailscaleConfig", input_name = "TailscaleConfigInput")]
+#[serde(rename_all = "kebab-case", deny_unknown_fields, default)]
+pub struct Tailscale {
+    pub detect: bool,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub socket: Option<String>,
+
+    pub expose: Expose,
+
+    pub https_port: u16,
+}
+
+impl Default for Tailscale {
+    fn default() -> Self {
+        Self { detect: true, socket: None, expose: Expose::Manual, https_port: 443 }
     }
 }
+
+/// The ports Funnel can open to the internet.
+pub const FUNNEL_PORTS: [u16; 3] = [443, 8443, 10000];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, async_graphql::Enum)]
 #[serde(rename_all = "kebab-case")]
@@ -646,7 +729,12 @@ impl Default for Profile {
 
 impl Config {
     pub fn parse(text: &str) -> Result<Self, String> {
-        let config: Config = toml::from_str(text).map_err(|e| e.to_string())?;
+        let mut config: Config = toml::from_str(text).map_err(|e| e.to_string())?;
+
+        if config.network.public_url.is_none() {
+            config.network.public_url = config.smtp.public_url.take();
+        }
+
         config.validate()?;
         Ok(config)
     }
@@ -732,6 +820,12 @@ impl Config {
             }
         }
 
+        for proxy in &self.network.trusted_proxies {
+            if ip_range(proxy).is_none() {
+                return Err(format!("trusted proxy {proxy:?} isn't an address or a range like \"172.16.0.0/12\""));
+            }
+        }
+
         for t in [&self.downloads.slow_from, &self.downloads.slow_to].into_iter().flatten() {
             if parse_clock(t).is_none() {
                 return Err(format!("{t:?} isn't a time of day; write it like \"08:00\""));
@@ -761,18 +855,31 @@ impl Config {
             return Err("every [automation] retry step needs a non-zero `every`".into());
         }
 
-        if self.smtp.relay_host().is_some() {
-            if !self.smtp.from.as_deref().is_some_and(|f| f.contains('@')) {
-                return Err("[smtp] needs a `from` address, like \"tinystream <tinystream@example.com>\"".into());
-            }
+        if self.smtp.relay_host().is_some() && !self.smtp.from.as_deref().is_some_and(|f| f.contains('@')) {
+            return Err("[smtp] needs a `from` address, like \"tinystream <tinystream@example.com>\"".into());
+        }
 
-            let url = self.smtp.public_url.as_deref().map(str::trim).unwrap_or_default();
+        if self.tailscale.expose != Expose::Manual && !self.tailscale.detect {
+            return Err("[tailscale] `expose` needs `detect = true`".into());
+        }
 
-            if !url::Url::parse(url).is_ok_and(|u| matches!(u.scheme(), "http" | "https")) {
-                return Err(format!(
-                    "`[smtp] public-url = {url:?}` isn't the address people open tinystream at, like https://tv.example.com"
-                ));
-            }
+        if self.tailscale.https_port == 0 {
+            return Err("`[tailscale] https-port` can't be 0".into());
+        }
+
+        if self.tailscale.expose == Expose::Public && !FUNNEL_PORTS.contains(&self.tailscale.https_port) {
+            return Err(format!(
+                "Funnel only opens ports 443, 8443 and 10000 to the internet, so `[tailscale] https-port = {}` can't be public",
+                self.tailscale.https_port
+            ));
+        }
+
+        if let Some(url) = self.network.public_base()
+            && !url::Url::parse(url).is_ok_and(|u| matches!(u.scheme(), "http" | "https") && u.host().is_some())
+        {
+            return Err(format!(
+                "`[network] public-url = {url:?}` isn't the address people open tinystream at, like https://tv.example.com"
+            ));
         }
 
         if self.log.level.parse::<tracing::Level>().is_err() {
@@ -783,6 +890,17 @@ impl Config {
         }
 
         Ok(())
+    }
+
+    /// Profile pictures would show everyone's username to the whole internet, unless that's what
+    /// they want. `funnel` is whether Tailscale says Funnel is on, set up by tinystream or not.
+    pub fn sign_in_style(&self, funnel: bool) -> SignInStyle {
+        let public = funnel || self.tailscale.expose == Expose::Public;
+
+        match public && !self.sign_in.public_profiles {
+            true => SignInStyle::Username,
+            false => self.sign_in.style,
+        }
     }
 
     pub fn library(&self, name: &str) -> Option<&Library> {
@@ -813,6 +931,21 @@ pub const TEMPLATE: &str = r#"# tinystream
 [network]
 host = "0.0.0.0"
 port = 3000
+# public-url = "https://tv.example.com"   # where links in invites and emails point
+# trusted-proxies = ["172.16.0.0/12"]      # reverse proxies not on this machine, like in Docker
+#
+# On a tailnet, tinystream finds its own address through tailscaled, so links
+# work without public-url. Turn that off with [tailscale] detect = false, or
+# point it at a socket that isn't in the usual place (like in Docker):
+#
+# [tailscale]
+# socket = "/var/run/tailscale/tailscaled.sock"
+#
+# tinystream can also set up Tailscale Serve for you, for HTTPS on the tailnet
+# ("tailnet"), or Serve and Funnel to open it to the internet ("public"):
+#
+# expose = "tailnet"
+# https-port = 443   # Funnel only takes 443, 8443 or 10000
 
 # Add one [[library]] per folder. tinystream figures out on its own whether a
 # folder holds a show (it has season folders) or a movie (a video right inside).
@@ -865,5 +998,4 @@ port = 3000
 # username = "me@example.com"
 # password = "…"
 # from = "tinystream <me@example.com>"
-# public-url = "https://tv.example.com"   # where links in emails point
 "#;

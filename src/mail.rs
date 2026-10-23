@@ -2,6 +2,8 @@
 
 use crate::config::Smtp;
 
+pub const NO_PUBLIC_URL: &str = "tinystream doesn't know the address people open it at; set it in Settings → Network";
+
 /// Whether this build can send email, and [smtp] says where through.
 pub fn available(smtp: &Smtp) -> bool {
     cfg!(feature = "smtp") && smtp.relay_host().is_some()

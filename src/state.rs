@@ -5,7 +5,7 @@ use std::sync::Arc;
 use sqlx::SqlitePool;
 
 use crate::auth::passkeys::Challenges;
-use crate::config::ConfigStore;
+use crate::config::{ConfigStore, SignInStyle};
 use crate::events::Events;
 use crate::library::Scanner;
 use crate::logging::LogHandle;
@@ -26,10 +26,27 @@ pub struct AppState {
     pub metadata: MetadataService,
     pub media: Arc<MediaService>,
     pub passkeys: Challenges,
+    pub throttle: crate::auth::throttle::Throttle,
     pub http: reqwest::Client,
     pub together: Arc<Together>,
     pub clips: Arc<crate::clips::Clips>,
     pub music: crate::music::Music,
     pub books: crate::books::Books,
     pub tints: crate::tint::Tints,
+    pub tailscale: crate::tailscale::Tailscale,
+}
+
+impl AppState {
+    /// Where people open tinystream: `[network] public-url`, or else where the tailnet reaches it.
+    pub fn public_url(&self) -> Option<String> {
+        self.config.current().network.public_base().map(str::to_string).or_else(|| self.tailscale.url())
+    }
+
+    pub fn sign_in_style(&self) -> SignInStyle {
+        self.config.current().sign_in_style(self.tailscale.funnel())
+    }
+
+    pub fn link(&self, path: &str) -> Option<String> {
+        Some(format!("{}/{}", self.public_url()?, path.trim_start_matches('/')))
+    }
 }

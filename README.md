@@ -17,6 +17,9 @@ A small self-hosted media server for your shows, movies and music.
 
 </div>
 
+> [!WARNING]
+> crates.io and npm are in the middle of a wave of supply chain attacks. Until it's over, don't update any of tinystream's dependencies: stick to the locked versions (`cargo build --locked`, `bun install --frozen-lockfile`) and don't run `cargo update` or `bun update`.
+
 ## License
 
 Released under the [AGPL-3.0-or-later](./LICENSE) open-source license.

@@ -425,6 +425,7 @@ export type ConfigPatch = {
   scan?: InputMaybe<ScanConfigInput>;
   signIn?: InputMaybe<SignInConfigInput>;
   smtp?: InputMaybe<SmtpConfigInput>;
+  tailscale?: InputMaybe<TailscaleConfigInput>;
   transcode?: InputMaybe<TranscodeConfigInput>;
 };
 
@@ -630,6 +631,14 @@ export type EpisodesImported = {
 };
 
 export type Event = ClipChanged | ConfigChanged | EpisodesImported | LibraryChanged | ListChanged | MetadataChanged | NotificationReceived | PlaybackChanged | QueueChanged | ScanFinished | ScanStarted | SeriesChanged;
+
+export type Expose =
+  /** Tailscale Serve is left as it is. */
+  | 'MANUAL'
+  /** Serve and Funnel put it on the internet too. */
+  | 'PUBLIC'
+  /** Serve puts tinystream behind HTTPS on the tailnet. */
+  | 'TAILNET';
 
 export type FileOperation = {
   dst: Scalars['String']['output'];
@@ -1561,12 +1570,16 @@ export type NetworkConfig = {
   cors: Array<Scalars['String']['output']>;
   host: Scalars['String']['output'];
   port: Scalars['Int']['output'];
+  publicUrl?: Maybe<Scalars['String']['output']>;
+  trustedProxies: Array<Scalars['String']['output']>;
 };
 
 export type NetworkConfigInput = {
   cors: Array<Scalars['String']['input']>;
   host: Scalars['String']['input'];
   port: Scalars['Int']['input'];
+  publicUrl?: InputMaybe<Scalars['String']['input']>;
+  trustedProxies: Array<Scalars['String']['input']>;
 };
 
 export type NewAppPassword = {
@@ -2492,6 +2505,11 @@ export type Server = {
   clips: Scalars['Boolean']['output'];
   downloads: Scalars['Boolean']['output'];
   email: Scalars['Boolean']['output'];
+  /**
+   * Where links to this server should point, for whoever's signed in; `None` means wherever
+   * they opened it.
+   */
+  publicUrl?: Maybe<Scalars['String']['output']>;
   setupRequired: Scalars['Boolean']['output'];
   signInStyle: SignInStyle;
   smtp: Scalars['Boolean']['output'];
@@ -2528,12 +2546,16 @@ export type Settings = {
   network: NetworkConfig;
   paths: ServerPaths;
   profiles: Array<Profile>;
+  /** Where links point: `[network] public-url`, or else the tailnet's address for this machine. */
+  publicUrl?: Maybe<Scalars['String']['output']>;
   raw: Scalars['String']['output'];
   requests: RequestsConfig;
   scan: ScanConfig;
   signIn: SignInConfig;
   smtp: SmtpConfig;
   sources: Array<Source>;
+  tailscale: TailscaleConfig;
+  tailscaleStatus: TailscaleStatus;
   transcode: TranscodeConfig;
 };
 
@@ -2543,10 +2565,14 @@ export type Shelf = {
 };
 
 export type SignInConfig = {
+  /** Keeps showing profile pictures while Funnel has tinystream open to the internet. */
+  publicProfiles: Scalars['Boolean']['output'];
   style: SignInStyle;
 };
 
 export type SignInConfigInput = {
+  /** Keeps showing profile pictures while Funnel has tinystream open to the internet. */
+  publicProfiles: Scalars['Boolean']['input'];
   style: SignInStyle;
 };
 
@@ -2581,7 +2607,6 @@ export type SmtpConfig = {
   host?: Maybe<Scalars['String']['output']>;
   password?: Maybe<Scalars['String']['output']>;
   port?: Maybe<Scalars['Int']['output']>;
-  publicUrl?: Maybe<Scalars['String']['output']>;
   security: SmtpSecurity;
   username?: Maybe<Scalars['String']['output']>;
 };
@@ -2591,7 +2616,6 @@ export type SmtpConfigInput = {
   host?: InputMaybe<Scalars['String']['input']>;
   password?: InputMaybe<Scalars['String']['input']>;
   port?: InputMaybe<Scalars['Int']['input']>;
-  publicUrl?: InputMaybe<Scalars['String']['input']>;
   security: SmtpSecurity;
   username?: InputMaybe<Scalars['String']['input']>;
 };
@@ -2646,6 +2670,45 @@ export type SubtitleTrack = {
   language?: Maybe<Scalars['String']['output']>;
   supported: Scalars['Boolean']['output'];
   title?: Maybe<Scalars['String']['output']>;
+};
+
+export type TailscaleConfig = {
+  detect: Scalars['Boolean']['output'];
+  expose: Expose;
+  httpsPort: Scalars['Int']['output'];
+  socket?: Maybe<Scalars['String']['output']>;
+};
+
+export type TailscaleConfigInput = {
+  detect: Scalars['Boolean']['input'];
+  expose: Expose;
+  httpsPort: Scalars['Int']['input'];
+  socket?: InputMaybe<Scalars['String']['input']>;
+};
+
+export type TailscaleState =
+  | 'MISSING'
+  /** `[tailscale] detect` is off. */
+  | 'OFF'
+  | 'RUNNING'
+  /** tailscaled is there but not connected to a tailnet. */
+  | 'STOPPED'
+  /** There's a tailnet interface, but tailscaled's socket can't be reached. */
+  | 'UNREACHABLE';
+
+export type TailscaleStatus = {
+  dnsName?: Maybe<Scalars['String']['output']>;
+  /** Funnel opens that to the internet. */
+  funnel: Scalars['Boolean']['output'];
+  /** Tailscale Serve puts tinystream behind HTTPS. */
+  https: Scalars['Boolean']['output'];
+  ips: Array<Scalars['String']['output']>;
+  /** Why `[tailscale] expose` couldn't be set up. */
+  serveError?: Maybe<Scalars['String']['output']>;
+  state: TailscaleState;
+  /** Where the tailnet reaches tinystream, when it can. */
+  url?: Maybe<Scalars['String']['output']>;
+  warning?: Maybe<Scalars['String']['output']>;
 };
 
 export type Title = {

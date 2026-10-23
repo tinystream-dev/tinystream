@@ -178,8 +178,8 @@ const SkippedQuery = graphql(`
 `)
 
 /** The parts of config.toml the Server tab edits. */
-type ServerConfig = Pick<Settings, 'network' | 'log' | 'scan' | 'metadata' | 'transcode' | 'signIn' | 'smtp'>
-const serverPart = ({ network, log, scan, metadata, transcode, signIn, smtp }: Settings): ServerConfig => ({ network, log, scan, metadata, transcode, signIn, smtp })
+type ServerConfig = Pick<Settings, 'network' | 'log' | 'scan' | 'metadata' | 'transcode' | 'signIn' | 'smtp' | 'tailscale'>
+const serverPart = ({ network, log, scan, metadata, transcode, signIn, smtp, tailscale }: Settings): ServerConfig => ({ network, log, scan, metadata, transcode, signIn, smtp, tailscale })
 const SMTP_PORTS = { STARTTLS: 587, TLS: 465, NONE: 25 }
 import { useEmailOn, useMe, useStatus } from '../lib/hooks'
 import { notifyEnabled, setNotify } from '../lib/notify'
@@ -587,6 +587,33 @@ function Server() {
   }
   const dirty = JSON.stringify(draft) !== JSON.stringify(serverPart(data))
   const t = data.transcoding
+  const expose = async (v: ServerConfig['tailscale']['expose']) => {
+    if (v === 'PUBLIC' && draft.tailscale.expose !== 'PUBLIC') {
+      const ok = await ask({
+        title: 'Open tinystream to the internet?',
+        body: draft.signIn.publicProfiles
+          ? 'Funnel lets anyone reach the sign-in page, not just your tailnet, and it keeps showing everyone’s profile picture.'
+          : 'Funnel lets anyone reach the sign-in page, not just your tailnet. While it’s on, the sign-in page asks for a username instead of showing everyone’s profile picture.',
+        confirm: 'Open it',
+        danger: true,
+      })
+      if (!ok) return
+    }
+    set((c) => void (c.tailscale.expose = v))
+  }
+  const publicProfiles = async (v: boolean) => {
+    if (v) {
+      const ok = await ask({
+        title: 'Show profiles to the internet?',
+        body: 'Anyone who finds this address sees every account’s name and picture, and only needs a password to sign in as one.',
+        confirm: 'Show them',
+        danger: true,
+      })
+      if (!ok) return
+    }
+    set((c) => void (c.signIn.publicProfiles = v))
+  }
+  const onInternet = draft.tailscale.expose === 'PUBLIC' || data.tailscaleStatus.funnel
 
   return (
     <>
@@ -614,6 +641,76 @@ function Server() {
             />
           </Field>
         </div>
+        <div className="mt-4">
+          <Field label="Trusted proxies" hint="Reverse proxies not on this machine, comma-separated">
+            <Input
+              value={draft.network.trustedProxies.join(', ')}
+              placeholder="172.16.0.0/12"
+              onChange={(e) =>
+                set(
+                  (c) =>
+                    void (c.network.trustedProxies = e.target.value.split(',').map((s) => s.trim()).filter(Boolean)),
+                )
+              }
+            />
+          </Field>
+        </div>
+        <div className="mt-4">
+          <Field label="Public address" hint="Where links in invites, emails and shares point">
+            <Input
+              value={draft.network.publicUrl ?? ''}
+              placeholder={data.tailscaleStatus.url ?? 'https://tv.example.com'}
+              onChange={(e) => set((c) => void (c.network.publicUrl = e.target.value.trim() || null))}
+            />
+          </Field>
+          <p className="mt-1.5 text-xs text-ink-3">
+            {data.network.publicUrl
+              ? `Links point to ${data.publicUrl}.`
+              : data.publicUrl
+                ? `Links point to ${data.publicUrl}, found through Tailscale.`
+                : 'Links point to whichever address each person opened tinystream at.'}
+          </p>
+        </div>
+        <div className="mt-5 space-y-4 border-t border-line pt-4">
+          <Row label="Find this machine’s tailnet address" hint={tailnet(data.tailscaleStatus)}>
+            <Toggle label="Detect Tailscale" checked={draft.tailscale.detect} onChange={(v) => set((c) => void (c.tailscale.detect = v))} />
+          </Row>
+          {draft.tailscale.detect && (
+            <>
+              <Field label="tailscaled socket" hint="Only if it isn’t in the usual place, like in Docker">
+                <Input
+                  value={draft.tailscale.socket ?? ''}
+                  placeholder="/var/run/tailscale/tailscaled.sock"
+                  onChange={(e) => set((c) => void (c.tailscale.socket = e.target.value.trim() || null))}
+                />
+              </Field>
+              <div className="grid gap-4 sm:grid-cols-[1fr_8rem]">
+                <Field label="Tailscale Serve">
+                  <Select
+                    value={draft.tailscale.expose}
+                    options={[
+                      { value: 'MANUAL', label: 'Leave it as it is' },
+                      { value: 'TAILNET', label: 'HTTPS on the tailnet' },
+                      { value: 'PUBLIC', label: 'HTTPS, open to the internet (Funnel)' },
+                    ]}
+                    onChange={(v) => void expose(v)}
+                  />
+                </Field>
+                {draft.tailscale.expose !== 'MANUAL' && (
+                  <Field label="HTTPS port">
+                    <Input
+                      inputMode="numeric"
+                      value={draft.tailscale.httpsPort}
+                      onChange={(e) => set((c) => void (c.tailscale.httpsPort = Number(e.target.value.replace(/\D/g, '')) || 0))}
+                    />
+                  </Field>
+                )}
+              </div>
+            </>
+          )}
+          {data.tailscaleStatus.serveError && <p className="text-xs leading-relaxed text-danger">{data.tailscaleStatus.serveError}</p>}
+          {data.tailscaleStatus.warning && <p className="text-xs leading-relaxed text-warn">{data.tailscaleStatus.warning}</p>}
+        </div>
       </Card>
 
       <Card title="Sign-in">
@@ -629,6 +726,16 @@ function Server() {
             />
           </Field>
         </div>
+        {onInternet && draft.signIn.style === 'PROFILES' && (
+          <div className="mt-4">
+            <Row label="Keep profile pictures while open to the internet" hint={draft.signIn.publicProfiles ? undefined : 'It asks for a username while Funnel has tinystream open to the internet.'}>
+              <Toggle label="Keep profile pictures" checked={draft.signIn.publicProfiles} onChange={(v) => void publicProfiles(v)} />
+            </Row>
+            {draft.signIn.publicProfiles && (
+              <p className="mt-1.5 text-xs leading-relaxed text-warn">Anyone who finds this address sees every account’s name and picture, and only needs a password to sign in as one.</p>
+            )}
+          </div>
+        )}
       </Card>
 
       {smtp && (
@@ -682,15 +789,6 @@ function Server() {
                 autoComplete="new-password"
                 value={draft.smtp.password ?? ''}
                 onChange={(e) => set((c) => void (c.smtp.password = e.target.value || null))}
-              />
-            </Field>
-          </div>
-          <div className="mt-4">
-            <Field label="Public address" hint="Where links in emails go">
-              <Input
-                value={draft.smtp.publicUrl ?? ''}
-                placeholder="https://tv.example.com"
-                onChange={(e) => set((c) => void (c.smtp.publicUrl = e.target.value.trim() || null))}
               />
             </Field>
           </div>
@@ -779,6 +877,21 @@ function Server() {
       </div>
     </>
   )
+}
+
+function tailnet(t: Settings['tailscaleStatus']): string {
+  switch (t.state) {
+    case 'OFF':
+      return 'Off'
+    case 'MISSING':
+      return 'Tailscale isn’t running on this machine.'
+    case 'UNREACHABLE':
+      return 'Can’t reach tailscaled.'
+    case 'STOPPED':
+      return 'Tailscale isn’t connected.'
+    case 'RUNNING':
+      return `${t.dnsName ?? t.ips[0] ?? 'Connected'} · ${t.funnel ? 'open to the internet through Funnel' : t.https ? 'HTTPS through Tailscale Serve' : 'plain HTTP'}`
+  }
 }
 
 function TestEmail({ unsaved }: { unsaved: boolean }) {

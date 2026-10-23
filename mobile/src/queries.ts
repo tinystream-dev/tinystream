@@ -55,6 +55,7 @@ const StatusQuery = graphql(`
       clips
       downloads
       sources
+      publicUrl
     }
     viewer {
       ...Viewer
@@ -70,6 +71,11 @@ export function useStatus() {
 
 export function useMe(): User | null {
   return useStatus().data?.viewer ?? null
+}
+
+/** Where links to the server should point, when it knows better than the address you connected with. */
+export function usePublicUrl(): string | null {
+  return useStatus().data?.server.publicUrl ?? null
 }
 
 /** Whether clipping is on here at all. */

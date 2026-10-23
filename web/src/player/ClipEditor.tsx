@@ -15,7 +15,7 @@ import { Squircle } from '../components/Squircle'
 import { Button, Checkbox, IconButton, Input, Panel, Popover, Progress, Select, Spinner, Toggle } from '../components/ui'
 import { graphql } from '../gql'
 import { type Clip, type ClipAllowance, type Person, type Playback, request } from '../lib/api'
-import { usePeople } from '../lib/hooks'
+import { useOrigin, usePeople } from '../lib/hooks'
 
 const AllowanceQuery = graphql(`
   query ClipAllowance {
@@ -717,6 +717,7 @@ function Rendering({ id, onClose }: { id: number; onClose: () => void }) {
     [id, markRead],
   )
   const [copied, setCopied] = useState(false)
+  const origin = useOrigin()
   if (!clip) return null
   const done = clip.state === 'READY'
   return (
@@ -761,9 +762,9 @@ function Rendering({ id, onClose }: { id: number; onClose: () => void }) {
               variant="quiet"
               size="lg"
               onClick={() =>
-                void copyLink(clip.link!).then(() => {
+                void copyLink(clip.link!, origin).then((url) => {
                   setCopied(true)
-                  toast({ title: 'Link copied', tone: 'ok' })
+                  toast({ title: 'Link copied', body: url, tone: 'ok' })
                 })
               }
             >

@@ -39,6 +39,7 @@ mod music;
 mod notifications;
 mod paths;
 mod state;
+mod tailscale;
 mod theme;
 mod tint;
 mod together;
@@ -219,12 +220,14 @@ async fn serve(paths: Paths) -> anyhow::Result<()> {
         metadata: metadata::MetadataService::new(http.clone()),
         media,
         passkeys: Default::default(),
+        throttle: Default::default(),
         http,
         together: Default::default(),
         clips: Default::default(),
         music: Default::default(),
         books: Default::default(),
         tints: Default::default(),
+        tailscale: Default::default(),
     });
 
     library::scanner::spawn_worker(state.clone(), scan_rx);
@@ -232,6 +235,7 @@ async fn serve(paths: Paths) -> anyhow::Result<()> {
     metadata::spawn_worker(state.clone());
     music::spawn(state.clone());
     books::spawn(state.clone());
+    tailscale::spawn(state.clone());
 
     #[cfg(feature = "torrent")]
     automation::spawn(state.clone());
@@ -253,7 +257,10 @@ async fn serve(paths: Paths) -> anyhow::Result<()> {
 
                 tokio::select! {
                     r = rx.changed() => { r?; continue }
-                    _ = shutdown_signal() => return Ok(()),
+                    _ = shutdown_signal() => {
+                        state.tailscale.withdraw().await;
+                        return Ok(());
+                    }
                 }
             },
         };
@@ -273,6 +280,7 @@ async fn serve(paths: Paths) -> anyhow::Result<()> {
             }
             _ = shutdown_signal() => {
                 tracing::info!("shutting down");
+                state.tailscale.withdraw().await;
 
                 #[cfg(feature = "torrent")]
                 automation::engine::flush(&state).await;

@@ -82,6 +82,7 @@ export type ConfigPatch = {
   scan?: ScanConfigInput | null | undefined;
   signIn?: SignInConfigInput | null | undefined;
   smtp?: SmtpConfigInput | null | undefined;
+  tailscale?: TailscaleConfigInput | null | undefined;
   transcode?: TranscodeConfigInput | null | undefined;
 };
 
@@ -123,6 +124,14 @@ export type EpisodeState =
   | 'MISSING'
   | 'SKIPPED'
   | 'WANTED';
+
+export type Expose =
+  /** Tailscale Serve is left as it is. */
+  | 'MANUAL'
+  /** Serve and Funnel put it on the internet too. */
+  | 'PUBLIC'
+  /** Serve puts tinystream behind HTTPS on the tailnet. */
+  | 'TAILNET';
 
 export type Hardware =
   | 'AUTO'
@@ -197,6 +206,8 @@ export type NetworkConfigInput = {
   cors: Array<string>;
   host: string;
   port: number;
+  publicUrl?: string | null | undefined;
+  trustedProxies: Array<string>;
 };
 
 export type NewQuote = {
@@ -406,6 +417,8 @@ export type ServerAppearanceInput = {
 };
 
 export type SignInConfigInput = {
+  /** Keeps showing profile pictures while Funnel has tinystream open to the internet. */
+  publicProfiles: boolean;
   style: SignInStyle;
 };
 
@@ -418,7 +431,6 @@ export type SmtpConfigInput = {
   host?: string | null | undefined;
   password?: string | null | undefined;
   port?: number | null | undefined;
-  publicUrl?: string | null | undefined;
   security: SmtpSecurity;
   username?: string | null | undefined;
 };
@@ -448,6 +460,23 @@ export type SourceStatus =
   | 'CHANGED'
   | 'GONE'
   | 'OK';
+
+export type TailscaleConfigInput = {
+  detect: boolean;
+  expose: Expose;
+  httpsPort: number;
+  socket?: string | null | undefined;
+};
+
+export type TailscaleState =
+  | 'MISSING'
+  /** `[tailscale] detect` is off. */
+  | 'OFF'
+  | 'RUNNING'
+  /** tailscaled is there but not connected to a tailnet. */
+  | 'STOPPED'
+  /** There's a tailnet interface, but tailscaled's socket can't be reached. */
+  | 'UNREACHABLE';
 
 export type TitleArtwork =
   | 'BACKDROP'
@@ -999,7 +1028,7 @@ export type PlayerOverviewQuery = { title: { overview: string | null } | null, v
 export type StatusQueryVariables = Exact<{ [key: string]: never; }>;
 
 
-export type StatusQuery = { server: { version: string, setupRequired: boolean, clips: boolean, downloads: boolean, sources: number }, viewer: { isAdmin: boolean, id: number, username: string, avatar: string | null, permissions: { allLibraries: boolean, libraries: Array<string>, request: boolean, autoApprove: boolean, requestLimit: number, manageRequests: boolean, manageShows: boolean, downloads: boolean, editMetadata: boolean, watchTogether: boolean, shareLinks: boolean, clip: boolean, clipMaxLength: number, clipLimit: number, clipStorage: number, clipLinks: boolean } } | null };
+export type StatusQuery = { server: { version: string, setupRequired: boolean, clips: boolean, downloads: boolean, sources: number, publicUrl: string | null }, viewer: { isAdmin: boolean, id: number, username: string, avatar: string | null, permissions: { allLibraries: boolean, libraries: Array<string>, request: boolean, autoApprove: boolean, requestLimit: number, manageRequests: boolean, manageShows: boolean, downloads: boolean, editMetadata: boolean, watchTogether: boolean, shareLinks: boolean, clip: boolean, clipMaxLength: number, clipLimit: number, clipStorage: number, clipLinks: boolean } } | null };
 
 export type AppearanceQueryVariables = Exact<{ [key: string]: never; }>;
 
@@ -1014,7 +1043,7 @@ export type LibrariesQuery = { libraries: Array<{ name: string, kind: LibraryKin
 export type SettingsQueryVariables = Exact<{ [key: string]: never; }>;
 
 
-export type SettingsQuery = { settings: { raw: string, error: string | null, network: { host: string, port: number, cors: Array<string> }, log: { level: string }, scan: { watch: boolean, interval: string | null }, metadata: { tmdbApiKey: string | null, language: string }, transcode: { hardware: Hardware, vaapiDevice: string }, clips: { enabled: boolean, path: string | null, publicLinks: boolean, concurrency: number, maxStorage: number, fontsDir: string | null, defaultFont: string | null }, music: { onlineLyrics: boolean, lyricsUrl: string, analyzeLoudness: boolean }, downloads: { path: string | null, import: ImportMode, port: number, upnp: boolean, dht: boolean, maxActive: number, downloadLimit: number, uploadLimit: number, slowDownloadLimit: number, slowUploadLimit: number, slowFrom: string | null, slowTo: string | null, bindInterface: string | null, proxy: string | null, seeding: { ratio: number | null, time: string | null, idle: string | null, then: SeedAction } }, automation: { defaultMonitor: Monitor, rssInterval: string, renameSuggestions: boolean, retry: Array<{ every: string, until: string }> }, requests: { monitor: Monitor }, signIn: { style: SignInStyle }, smtp: { host: string | null, port: number | null, security: SmtpSecurity, username: string | null, password: string | null, from: string | null, publicUrl: string | null }, sources: Array<{ name: string, kind: SourceKind, url: string, feed: string | null, apiKey: string | null, categories: Array<number>, enabled: boolean, downloadPath: string | null, seeding: { ratio: number | null, time: string | null, idle: string | null, then: SeedAction } | null }>, profiles: Array<{ name: string, resolutions: Array<string>, groups: Array<string>, require: Array<string>, reject: Array<string>, minSize: number | null, maxSize: number | null, codecs: Array<string>, preferDualAudio: boolean, batches: boolean, minSeeders: number }>, libraries: Array<{ name: string, path: string, kind: LibraryKind, metadataProvider: Provider | null, managed: boolean, profile: string | null, downloadPath: string | null, resolvedPath: string | null, exists: boolean, error: string | null, titleCount: number, skippedCount: number }>, paths: { config: string, data: string, log: string } }, server: { transcoding: { vaapi: string | null, vaapiError: string | null, softwareH264: boolean } } };
+export type SettingsQuery = { settings: { publicUrl: string | null, raw: string, error: string | null, network: { host: string, port: number, cors: Array<string>, trustedProxies: Array<string>, publicUrl: string | null }, log: { level: string }, scan: { watch: boolean, interval: string | null }, metadata: { tmdbApiKey: string | null, language: string }, transcode: { hardware: Hardware, vaapiDevice: string }, clips: { enabled: boolean, path: string | null, publicLinks: boolean, concurrency: number, maxStorage: number, fontsDir: string | null, defaultFont: string | null }, music: { onlineLyrics: boolean, lyricsUrl: string, analyzeLoudness: boolean }, downloads: { path: string | null, import: ImportMode, port: number, upnp: boolean, dht: boolean, maxActive: number, downloadLimit: number, uploadLimit: number, slowDownloadLimit: number, slowUploadLimit: number, slowFrom: string | null, slowTo: string | null, bindInterface: string | null, proxy: string | null, seeding: { ratio: number | null, time: string | null, idle: string | null, then: SeedAction } }, automation: { defaultMonitor: Monitor, rssInterval: string, renameSuggestions: boolean, retry: Array<{ every: string, until: string }> }, requests: { monitor: Monitor }, signIn: { style: SignInStyle, publicProfiles: boolean }, smtp: { host: string | null, port: number | null, security: SmtpSecurity, username: string | null, password: string | null, from: string | null }, tailscale: { detect: boolean, socket: string | null, expose: Expose, httpsPort: number }, tailscaleStatus: { state: TailscaleState, dnsName: string | null, ips: Array<string>, https: boolean, funnel: boolean, url: string | null, warning: string | null, serveError: string | null }, sources: Array<{ name: string, kind: SourceKind, url: string, feed: string | null, apiKey: string | null, categories: Array<number>, enabled: boolean, downloadPath: string | null, seeding: { ratio: number | null, time: string | null, idle: string | null, then: SeedAction } | null }>, profiles: Array<{ name: string, resolutions: Array<string>, groups: Array<string>, require: Array<string>, reject: Array<string>, minSize: number | null, maxSize: number | null, codecs: Array<string>, preferDualAudio: boolean, batches: boolean, minSeeders: number }>, libraries: Array<{ name: string, path: string, kind: LibraryKind, metadataProvider: Provider | null, managed: boolean, profile: string | null, downloadPath: string | null, resolvedPath: string | null, exists: boolean, error: string | null, titleCount: number, skippedCount: number }>, paths: { config: string, data: string, log: string } }, server: { transcoding: { vaapi: string | null, vaapiError: string | null, softwareH264: boolean } } };
 
 export type TitleQueryVariables = Exact<{
   id: number;
@@ -1417,7 +1446,7 @@ export type ReleaseCandidateFieldsFragment = { batch: boolean, release: { title:
 
 export type CalendarEntryFieldsFragment = { seriesId: number, library: string, show: string, poster: string | null, backdrop: string | null, backdropTint: string | null, monitor: Monitor, season: number, episode: number, absolute: number | null, name: string | null, airAt: number, state: EpisodeState, title: { id: number } | null, video: { id: number } | null, download: { stage: TorrentStage, progress: number, downloadRate: number, eta: number | null } | null };
 
-export type SettingsFieldsFragment = { raw: string, error: string | null, network: { host: string, port: number, cors: Array<string> }, log: { level: string }, scan: { watch: boolean, interval: string | null }, metadata: { tmdbApiKey: string | null, language: string }, transcode: { hardware: Hardware, vaapiDevice: string }, clips: { enabled: boolean, path: string | null, publicLinks: boolean, concurrency: number, maxStorage: number, fontsDir: string | null, defaultFont: string | null }, music: { onlineLyrics: boolean, lyricsUrl: string, analyzeLoudness: boolean }, downloads: { path: string | null, import: ImportMode, port: number, upnp: boolean, dht: boolean, maxActive: number, downloadLimit: number, uploadLimit: number, slowDownloadLimit: number, slowUploadLimit: number, slowFrom: string | null, slowTo: string | null, bindInterface: string | null, proxy: string | null, seeding: { ratio: number | null, time: string | null, idle: string | null, then: SeedAction } }, automation: { defaultMonitor: Monitor, rssInterval: string, renameSuggestions: boolean, retry: Array<{ every: string, until: string }> }, requests: { monitor: Monitor }, signIn: { style: SignInStyle }, smtp: { host: string | null, port: number | null, security: SmtpSecurity, username: string | null, password: string | null, from: string | null, publicUrl: string | null }, sources: Array<{ name: string, kind: SourceKind, url: string, feed: string | null, apiKey: string | null, categories: Array<number>, enabled: boolean, downloadPath: string | null, seeding: { ratio: number | null, time: string | null, idle: string | null, then: SeedAction } | null }>, profiles: Array<{ name: string, resolutions: Array<string>, groups: Array<string>, require: Array<string>, reject: Array<string>, minSize: number | null, maxSize: number | null, codecs: Array<string>, preferDualAudio: boolean, batches: boolean, minSeeders: number }>, libraries: Array<{ name: string, path: string, kind: LibraryKind, metadataProvider: Provider | null, managed: boolean, profile: string | null, downloadPath: string | null, resolvedPath: string | null, exists: boolean, error: string | null, titleCount: number, skippedCount: number }>, paths: { config: string, data: string, log: string } };
+export type SettingsFieldsFragment = { publicUrl: string | null, raw: string, error: string | null, network: { host: string, port: number, cors: Array<string>, trustedProxies: Array<string>, publicUrl: string | null }, log: { level: string }, scan: { watch: boolean, interval: string | null }, metadata: { tmdbApiKey: string | null, language: string }, transcode: { hardware: Hardware, vaapiDevice: string }, clips: { enabled: boolean, path: string | null, publicLinks: boolean, concurrency: number, maxStorage: number, fontsDir: string | null, defaultFont: string | null }, music: { onlineLyrics: boolean, lyricsUrl: string, analyzeLoudness: boolean }, downloads: { path: string | null, import: ImportMode, port: number, upnp: boolean, dht: boolean, maxActive: number, downloadLimit: number, uploadLimit: number, slowDownloadLimit: number, slowUploadLimit: number, slowFrom: string | null, slowTo: string | null, bindInterface: string | null, proxy: string | null, seeding: { ratio: number | null, time: string | null, idle: string | null, then: SeedAction } }, automation: { defaultMonitor: Monitor, rssInterval: string, renameSuggestions: boolean, retry: Array<{ every: string, until: string }> }, requests: { monitor: Monitor }, signIn: { style: SignInStyle, publicProfiles: boolean }, smtp: { host: string | null, port: number | null, security: SmtpSecurity, username: string | null, password: string | null, from: string | null }, tailscale: { detect: boolean, socket: string | null, expose: Expose, httpsPort: number }, tailscaleStatus: { state: TailscaleState, dnsName: string | null, ips: Array<string>, https: boolean, funnel: boolean, url: string | null, warning: string | null, serveError: string | null }, sources: Array<{ name: string, kind: SourceKind, url: string, feed: string | null, apiKey: string | null, categories: Array<number>, enabled: boolean, downloadPath: string | null, seeding: { ratio: number | null, time: string | null, idle: string | null, then: SeedAction } | null }>, profiles: Array<{ name: string, resolutions: Array<string>, groups: Array<string>, require: Array<string>, reject: Array<string>, minSize: number | null, maxSize: number | null, codecs: Array<string>, preferDualAudio: boolean, batches: boolean, minSeeders: number }>, libraries: Array<{ name: string, path: string, kind: LibraryKind, metadataProvider: Provider | null, managed: boolean, profile: string | null, downloadPath: string | null, resolvedPath: string | null, exists: boolean, error: string | null, titleCount: number, skippedCount: number }>, paths: { config: string, data: string, log: string } };
 
 export type MusicTrackFragment = { id: number, title: string, artist: string, album: string, albumId: number | null, albumArtist: string | null, library: string, disc: number | null, number: number | null, year: number | null, duration: number, codec: string, suffix: string, lossless: boolean, bitrate: number | null, sampleRate: number | null, bitDepth: number | null, channels: number | null, size: number, file: string, flac: string, cover: string | null, coverTint: string | null, starred: boolean, rating: number | null, playCount: number, artists: Array<{ id: number, name: string }>, gains: { trackGain: number | null, trackPeak: number | null, albumGain: number | null, albumPeak: number | null, pending: boolean } };
 
@@ -2096,6 +2125,8 @@ export const SettingsFieldsFragmentDoc = new TypedDocumentString(`
     host
     port
     cors
+    trustedProxies
+    publicUrl
   }
   log {
     level
@@ -2159,6 +2190,7 @@ export const SettingsFieldsFragmentDoc = new TypedDocumentString(`
   }
   signIn {
     style
+    publicProfiles
   }
   smtp {
     host
@@ -2167,8 +2199,24 @@ export const SettingsFieldsFragmentDoc = new TypedDocumentString(`
     username
     password
     from
-    publicUrl
   }
+  tailscale {
+    detect
+    socket
+    expose
+    httpsPort
+  }
+  tailscaleStatus {
+    state
+    dnsName
+    ips
+    https
+    funnel
+    url
+    warning
+    serveError
+  }
+  publicUrl
   sources {
     name
     kind
@@ -3907,6 +3955,7 @@ export const StatusDocument = new TypedDocumentString(`
     clips
     downloads
     sources
+    publicUrl
   }
   viewer {
     ...Viewer
@@ -4009,6 +4058,8 @@ fragment SettingsFields on Settings {
     host
     port
     cors
+    trustedProxies
+    publicUrl
   }
   log {
     level
@@ -4072,6 +4123,7 @@ fragment SettingsFields on Settings {
   }
   signIn {
     style
+    publicProfiles
   }
   smtp {
     host
@@ -4080,8 +4132,24 @@ fragment SettingsFields on Settings {
     username
     password
     from
-    publicUrl
   }
+  tailscale {
+    detect
+    socket
+    expose
+    httpsPort
+  }
+  tailscaleStatus {
+    state
+    dnsName
+    ips
+    https
+    funnel
+    url
+    warning
+    serveError
+  }
+  publicUrl
   sources {
     name
     kind

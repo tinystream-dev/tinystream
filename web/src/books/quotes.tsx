@@ -17,7 +17,7 @@ import type { QuoteMarkFragment } from '../gql/graphql'
 import { type Person, request } from '../lib/api'
 import { copyLink } from '../lib/clips'
 import { relative } from '../lib/downloads'
-import { useCanClip, useClipsOn } from '../lib/hooks'
+import { useCanClip, useClipsOn, useOrigin } from '../lib/hooks'
 import { SendTo, allowanceQuery } from '../player/ClipEditor'
 
 export type Quote = QuoteMarkFragment
@@ -292,6 +292,7 @@ function Note({ quote: q }: { quote: Quote }) {
 function QuoteActions({ quote: q, onClose }: { quote: Quote; onClose: () => void }) {
   const qc = useQueryClient()
   const { data: you } = useQuery(allowanceQuery)
+  const origin = useOrigin()
   const [to, setTo] = useState<Person[]>([])
   const act = async (f: () => Promise<unknown>) => {
     try {
@@ -335,7 +336,7 @@ function QuoteActions({ quote: q, onClose }: { quote: Quote; onClose: () => void
           <Toggle label="Anyone with the link" checked={q.public} onChange={(v) => void act(() => request(UpdateQuote, { id: q.id, input: { public: v } }))} />
           <span className="min-w-0 flex-1 text-[13px]">Anyone with the link</span>
           {q.public && q.link && q.linkLive && (
-            <IconButton label="Copy link" onClick={() => void copyLink(q.link!).then(() => toast({ title: 'Link copied', tone: 'ok' }))}>
+            <IconButton label="Copy link" onClick={() => void copyLink(q.link!, origin).then((url) => toast({ title: 'Link copied', body: url, tone: 'ok' }))}>
               <Link2 className="size-4" />
             </IconButton>
           )}

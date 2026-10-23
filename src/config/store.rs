@@ -13,7 +13,7 @@ use toml_edit::{ArrayOfTables, DocumentMut, Item, Table};
 
 use super::{
     Automation, Clips, Config, Downloads, LibraryKind, Log, Metadata, Music, Network, Provider, Requests, Scan, SignIn,
-    Smtp, TEMPLATE, Transcode,
+    Smtp, TEMPLATE, Tailscale, Transcode,
 };
 use crate::events::{Event, Events};
 
@@ -42,6 +42,7 @@ pub struct SettingsPatch {
     pub requests: Option<Requests>,
     pub sign_in: Option<SignIn>,
     pub smtp: Option<Smtp>,
+    pub tailscale: Option<Tailscale>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, async_graphql::InputObject)]
@@ -138,6 +139,7 @@ impl ConfigStore {
         let mut doc: DocumentMut =
             text.parse().map_err(|e| format!("config.toml has a syntax error, fix it first:\n{e}"))?;
 
+        move_public_url(&mut doc)?;
         f(&mut doc)?;
         self.write(doc.to_string())
     }
@@ -202,6 +204,9 @@ impl ConfigStore {
             }
             if let Some(v) = patch.smtp {
                 sync_section(doc, "smtp", &v, &Smtp::default())?;
+            }
+            if let Some(v) = patch.tailscale {
+                sync_section(doc, "tailscale", &v, &Tailscale::default())?;
             }
             Ok(())
         })
@@ -352,6 +357,25 @@ impl ConfigStore {
             },
         }
     }
+}
+
+/// `public-url` used to sit under [smtp], when only emails had links in them.
+fn move_public_url(doc: &mut DocumentMut) -> Result<(), String> {
+    let Some(url) = doc.get_mut("smtp").and_then(Item::as_table_like_mut).and_then(|t| t.remove("public-url")) else {
+        return Ok(());
+    };
+
+    if !doc.contains_key("network") {
+        insert_before_libraries(doc, "network");
+    }
+
+    let network = doc["network"].as_table_mut().ok_or("`network` in config.toml must be a [network] table")?;
+
+    if !network.contains_key("public-url") {
+        network.insert("public-url", url);
+    }
+
+    Ok(())
 }
 
 fn libraries_mut(doc: &mut DocumentMut) -> Result<&mut ArrayOfTables, String> {
@@ -576,6 +600,39 @@ mod tests {
         let mut doc: DocumentMut = "".parse().unwrap();
         sync_section(&mut doc, "log", &Log::default(), &Log::default()).unwrap();
         assert_eq!(doc.to_string(), "");
+    }
+
+    #[test]
+    fn public_url_moves_out_of_smtp() {
+        let text = "[network]\nport = 1\n\n[smtp]\nhost = \"mail\"\nfrom = \"a@b.c\"\npublic-url = \"https://tv.example.com\"\n";
+        assert_eq!(Config::parse(text).unwrap().network.public_base(), Some("https://tv.example.com"));
+
+        let mut doc: DocumentMut = text.parse().unwrap();
+        move_public_url(&mut doc).unwrap();
+        let out = doc.to_string();
+        let config = Config::parse(&out).unwrap();
+        assert_eq!(config.network.public_base(), Some("https://tv.example.com"), "{out}");
+        assert_eq!(out.matches("public-url").count(), 1, "{out}");
+        assert!(out.find("public-url").unwrap() < out.find("[smtp]").unwrap(), "{out}");
+    }
+
+    #[test]
+    fn trusted_proxies_must_be_addresses() {
+        assert!(Config::parse("[network]\ntrusted-proxies = [\"10.0.0.0/8\", \"::1\"]\n").is_ok());
+        assert!(Config::parse("[network]\ntrusted-proxies = [\"proxy.lan\"]\n").is_err());
+        assert!(Config::parse("[network]\ntrusted-proxies = [\"10.0.0.0/33\"]\n").is_err());
+    }
+
+    #[test]
+    fn exposing_rules() {
+        let public = Config::parse("[tailscale]\nexpose = \"public\"\n").unwrap();
+        assert_eq!(public.sign_in_style(false), super::super::SignInStyle::Username);
+        let shown = Config::parse("[tailscale]\nexpose = \"public\"\n\n[sign-in]\npublic-profiles = true\n").unwrap();
+        assert_eq!(shown.sign_in_style(false), super::super::SignInStyle::Profiles);
+        assert_eq!(Config::default().sign_in_style(true), super::super::SignInStyle::Username);
+        assert!(Config::parse("[tailscale]\nexpose = \"public\"\nhttps-port = 444\n").is_err());
+        assert!(Config::parse("[tailscale]\nexpose = \"tailnet\"\nhttps-port = 444\n").is_ok());
+        assert!(Config::parse("[tailscale]\nexpose = \"tailnet\"\ndetect = false\n").is_err());
     }
 
     #[test]

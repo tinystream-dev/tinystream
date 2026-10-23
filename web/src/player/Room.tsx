@@ -10,7 +10,7 @@ import { Squircle } from '../components/Squircle'
 import { Button, Panel, Popover, Segmented, Toggle } from '../components/ui'
 import { graphql } from '../gql'
 import type { RoomQuery } from '../gql/graphql'
-import { usePeople } from '../lib/hooks'
+import { useOrigin, usePeople } from '../lib/hooks'
 import { type Member, type RoomState, type Status, type SyncSnapshot, type SyncClient, canControl } from './sync'
 
 /** What a room is, and what you may do in it. */
@@ -125,7 +125,8 @@ function RoomPanel({ ctx }: { ctx: RoomContext }) {
   const snap = useSync(client)
   const room = snap.room!
   const isHost = info.isHost
-  const link = `${location.origin}/together/${room.code}`
+  const origin = useOrigin()
+  const link = `${origin}/together/${room.code}`
   const [copied, setCopied] = useState(false)
   const [ending, setEnding] = useState(false)
   const me = room.members.find((m) => m.id === snap.you)

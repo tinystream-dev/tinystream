@@ -9,17 +9,22 @@ use super::schema::Ctx;
 use crate::auth::permissions;
 use crate::config::{
     Automation, Clips, Config, Downloads, LibraryInput, LibraryKind, Log, Metadata, Music, Network, Profile, Provider,
-    Requests, Scan, SettingsPatch, SignIn, Smtp, Source, Transcode,
+    Requests, Scan, SettingsPatch, SignIn, Smtp, Source, Tailscale, Transcode,
 };
 use crate::error::{ApiError, ApiResult};
 use crate::paths::resolve_config_path;
 use crate::state::AppState;
 
-pub struct Settings(Arc<Config>);
+pub struct Settings(Arc<Config>, tokio::sync::OnceCell<crate::tailscale::Status>);
 
 impl Settings {
     pub(super) fn now(state: &AppState) -> Self {
-        Self(state.config.current())
+        Self(state.config.current(), Default::default())
+    }
+
+    /// Looks again rather than waiting for the next check, once per query.
+    async fn tailnet(&self, state: &AppState) -> &crate::tailscale::Status {
+        self.1.get_or_init(|| state.tailscale.refresh(&self.0, state.config.config_dir())).await
     }
 }
 
@@ -99,6 +104,22 @@ impl Settings {
 
     async fn smtp(&self) -> &Smtp {
         &self.0.smtp
+    }
+
+    async fn tailscale(&self) -> &Tailscale {
+        &self.0.tailscale
+    }
+
+    async fn tailscale_status(&self, ctx: &Context<'_>) -> &crate::tailscale::Status {
+        self.tailnet(ctx.state()).await
+    }
+
+    /// Where links point: `[network] public-url`, or else the tailnet's address for this machine.
+    async fn public_url(&self, ctx: &Context<'_>) -> Option<String> {
+        match self.0.network.public_base() {
+            Some(url) => Some(url.to_string()),
+            None => self.tailnet(ctx.state()).await.url.clone(),
+        }
     }
 
     async fn sources(&self) -> &[Source] {

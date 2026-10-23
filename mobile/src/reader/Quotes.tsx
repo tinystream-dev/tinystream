@@ -15,7 +15,7 @@ import { toast, toastError } from '../components/Feedback'
 import { Sheet } from '../components/Sheet'
 import { Button, Checkbox, IconButton, Input, Panel, Toggle } from '../components/ui'
 import { resolve } from '../lib/address'
-import { useMe, usePeople } from '../queries'
+import { useMe, usePeople, usePublicUrl } from '../queries'
 import { type Mark, type Quote, DeleteQuote, HideQuote, ShareQuote, UpdateQuote } from '../quotes'
 import { useApi, useConnection } from '../session'
 import { useTheme } from '../theme/ThemeProvider'
@@ -140,6 +140,7 @@ function QuoteActions({ quote: q, onSend, onClose }: { quote: Quote; onSend: (q:
   const qc = useQueryClient()
   const me = useMe()
   const connection = useConnection()
+  const publicUrl = usePublicUrl()
   const { tokens } = useTheme()
   const act = async (f: () => Promise<unknown>) => {
     try {
@@ -163,7 +164,7 @@ function QuoteActions({ quote: q, onSend, onClose }: { quote: Quote; onSend: (q:
         <View className="flex-row items-center gap-3">
           <Text className="font-sans flex-1 text-[15px] text-ink">Anyone with the link</Text>
           {q.public && q.link && q.linkLive && connection && (
-            <IconButton label="Share the link" size={36} onPress={() => void Share.share({ message: resolve(connection.origin, q.link!) })}>
+            <IconButton label="Share the link" size={36} onPress={() => void Share.share({ message: resolve(publicUrl ?? connection.origin, q.link!) })}>
               <Share2 size={18} color={tokens.ink} />
             </IconButton>
           )}

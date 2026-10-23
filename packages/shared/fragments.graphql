@@ -486,6 +486,8 @@ fragment SettingsFields on Settings {
     host
     port
     cors
+    trustedProxies
+    publicUrl
   }
   log {
     level
@@ -549,6 +551,7 @@ fragment SettingsFields on Settings {
   }
   signIn {
     style
+    publicProfiles
   }
   smtp {
     host
@@ -557,8 +560,24 @@ fragment SettingsFields on Settings {
     username
     password
     from
-    publicUrl
   }
+  tailscale {
+    detect
+    socket
+    expose
+    httpsPort
+  }
+  tailscaleStatus {
+    state
+    dnsName
+    ips
+    https
+    funnel
+    url
+    warning
+    serveError
+  }
+  publicUrl
   sources {
     name
     kind
