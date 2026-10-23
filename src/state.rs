@@ -26,6 +26,7 @@ pub struct AppState {
     pub metadata: MetadataService,
     pub media: Arc<MediaService>,
     pub passkeys: Challenges,
+    pub throttle: crate::auth::throttle::Throttle,
     pub http: reqwest::Client,
     pub together: Arc<Together>,
     pub clips: Arc<crate::clips::Clips>,

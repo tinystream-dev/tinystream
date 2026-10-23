@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 use std::collections::HashMap;
-use std::net::{IpAddr, SocketAddr};
+use std::net::IpAddr;
 use std::path::{Path as FsPath, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Instant;
 
 use async_graphql::{Context, Enum, InputObject, Object, SimpleObject};
 use axum::body::Body;
-use axum::extract::{ConnectInfo, Path, Query, Request, State};
+use axum::extract::{Path, Query, Request, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::middleware::Next;
 use axum::response::{Html, IntoResponse, Response};
@@ -1950,33 +1950,8 @@ fn buckets() -> &'static Mutex<HashMap<IpAddr, (f64, Instant)>> {
     B.get_or_init(Default::default)
 }
 
-fn client(req: &Request) -> Option<IpAddr> {
-    let peer = req.extensions().get::<ConnectInfo<SocketAddr>>()?.0.ip();
-
-    let local = match peer {
-        IpAddr::V4(v4) => v4.is_loopback() || v4.is_private() || v4.is_link_local(),
-        IpAddr::V6(v6) => v6.is_loopback() || v6.is_unique_local() || v6.is_unicast_link_local(),
-    };
-
-    if local {
-        let forwarded = req.headers().get("x-forwarded-for").and_then(|v| v.to_str().ok());
-
-        if let Some(ip) = forwarded.and_then(|v| v.rsplit(',').next()).and_then(|v| v.trim().parse().ok()) {
-            return Some(ip);
-        }
-
-        if let Some(ip) =
-            req.headers().get("x-real-ip").and_then(|v| v.to_str().ok()).and_then(|v| v.trim().parse().ok())
-        {
-            return Some(ip);
-        }
-    }
-
-    Some(peer)
-}
-
 pub async fn rate_limit(req: Request, next: Next) -> Response {
-    if let Some(ip) = client(&req) {
+    if let Some(ip) = auth::throttle::client(&req) {
         let mut b = buckets().lock().unwrap();
 
         if b.len() > 50_000 {

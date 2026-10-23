@@ -24,6 +24,7 @@ mod together;
 mod upload;
 mod users;
 
+use std::net::IpAddr;
 use std::sync::Arc;
 
 use async_graphql::Data;
@@ -40,7 +41,7 @@ use schema::{AppSchema, Session};
 use serde_json::json;
 use tower_http::compression::CompressionLayer;
 
-use crate::auth::{token_from, user_from_token};
+use crate::auth::{throttle, token_from, user_from_token};
 use crate::state::AppState;
 
 #[derive(Clone)]
@@ -119,7 +120,7 @@ pub fn router(state: Arc<AppState>) -> Router {
     app.layer(middleware::from_fn_with_state(state, cors)).layer(middleware::from_fn(isolation))
 }
 
-async fn session(state: &AppState, headers: HeaderMap) -> Session {
+async fn session(state: &AppState, headers: HeaderMap, ip: Option<IpAddr>) -> Session {
     let token = token_from(&headers);
 
     let user = match &token {
@@ -127,20 +128,23 @@ async fn session(state: &AppState, headers: HeaderMap) -> Session {
         None => None,
     };
 
-    Session { user, token, headers }
+    Session { user, token, headers, ip }
 }
 
 async fn graphql_post(State(api): State<Api>, headers: HeaderMap, req: Request) -> Response {
+    let ip = throttle::client(&req);
+
     let req = match upload::graphql_request(req).await {
         Ok(r) => r,
         Err(e) => return e,
     };
 
-    let session = session(&api.state, headers).await;
+    let session = session(&api.state, headers, ip).await;
     GraphQLResponse::from(api.schema.execute(req.data(session)).await).into_response()
 }
 
 async fn graphql_get(State(api): State<Api>, req: Request) -> Response {
+    let ip = throttle::client(&req);
     let (mut parts, _) = req.into_parts();
     let protocol = GraphQLProtocol::from_request_parts(&mut parts, &()).await;
     let upgrade = WebSocketUpgrade::from_request_parts(&mut parts, &()).await;
@@ -151,7 +155,7 @@ async fn graphql_get(State(api): State<Api>, req: Request) -> Response {
     };
 
     let headers = parts.headers;
-    let session = session(&api.state, headers).await;
+    let session = session(&api.state, headers, ip).await;
     let state = api.state.clone();
 
     upgrade

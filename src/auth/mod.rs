@@ -4,6 +4,7 @@ pub mod invites;
 pub mod passkeys;
 pub mod permissions;
 pub mod resets;
+pub mod throttle;
 
 use std::sync::Arc;
 

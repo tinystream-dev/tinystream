@@ -121,6 +121,7 @@ pub struct Session {
     pub user: Option<User>,
     pub token: Option<String>,
     pub headers: HeaderMap,
+    pub ip: Option<std::net::IpAddr>,
 }
 
 pub trait Ctx {

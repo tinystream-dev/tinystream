@@ -5,6 +5,7 @@ mod encode;
 mod files;
 mod people;
 
+use std::net::IpAddr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -184,7 +185,7 @@ async fn used(state: &AppState, id: i64, client: &str) {
         .await;
 }
 
-async fn sign_in(state: &AppState, params: &Params, client: &str) -> Result<User> {
+async fn sign_in(state: &AppState, params: &Params, client: &str, ip: Option<IpAddr>) -> Result<User> {
     let api_key = params.get("apiKey");
     let username = params.get("u");
 
@@ -211,7 +212,10 @@ async fn sign_in(state: &AppState, params: &Params, client: &str) -> Result<User
         .fetch_optional(&state.db)
         .await?;
 
-    let (user_id, hash) = account.ok_or_else(wrong)?;
+    let Some((user_id, hash)) = account else {
+        state.throttle.guess(ip).map_err(|e| Failure::new(40, e))?;
+        return Err(wrong());
+    };
 
     let apps: Vec<(i64, String)> = sqlx::query_as("SELECT id, secret FROM app_passwords WHERE user_id = ?")
         .bind(user_id)
@@ -240,11 +244,16 @@ async fn sign_in(state: &AppState, params: &Params, client: &str) -> Result<User
 
             if remembered(state, key) == Some(user_id) {
                 true
-            } else if auth::verify_password(password, hash).await {
-                remember(state, key, user_id);
-                true
             } else {
-                false
+                state.throttle.guess(ip).map_err(|e| Failure::new(40, e))?;
+                let ok = auth::verify_password(password, hash).await;
+
+                if ok {
+                    state.throttle.right(ip);
+                    remember(state, key, user_id);
+                }
+
+                ok
             }
         }
     } else {
@@ -313,6 +322,7 @@ async fn rest(
         .is_some_and(|v| v.starts_with("application/x-www-form-urlencoded"));
 
     let streams = matches!(name.as_str(), "stream" | "download");
+    let ip = auth::throttle::client(&req);
 
     let (req, body) = if method == Method::POST && !streams {
         let bytes = axum::body::to_bytes(req.into_body(), 1 << 20).await.unwrap_or_default();
@@ -332,7 +342,7 @@ async fn rest(
         return respond(&params, result);
     }
 
-    let user = match sign_in(&state, &params, &client).await {
+    let user = match sign_in(&state, &params, &client, ip).await {
         Ok(u) => u,
         Err(f) => return respond(&params, Err(f)),
     };

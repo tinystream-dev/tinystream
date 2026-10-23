@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use async_graphql::{Context, Json, Object, SimpleObject};
 use axum::extract::{Path, State};
-use axum::http::header;
+use axum::http::{StatusCode, header};
 use axum::response::IntoResponse;
 use serde_json::Value;
 use webauthn_rs::prelude::{PublicKeyCredential, RegisterPublicKeyCredential, SecurityKey, Uuid};
@@ -50,6 +50,15 @@ async fn keys_of(state: &AppState, user_id: i64) -> ApiResult<Vec<(i64, Security
         .await?;
 
     Ok(rows.into_iter().filter_map(|(id, c)| Some((id, serde_json::from_str(&c).ok()?))).collect())
+}
+
+/// Spends one of the caller's guesses at a password; see [`auth::throttle`].
+pub(super) fn guess(ctx: &Context<'_>) -> ApiResult<()> {
+    ctx.state().throttle.guess(ctx.session().ip).map_err(|e| ApiError::new(StatusCode::TOO_MANY_REQUESTS, e))
+}
+
+pub(super) fn right(ctx: &Context<'_>) {
+    ctx.state().throttle.right(ctx.session().ip);
 }
 
 pub(super) async fn sign_in(ctx: &Context<'_>, user_id: i64) -> ApiResult<SignedIn> {
@@ -228,7 +237,8 @@ impl AuthMutation {
         password: String,
     ) -> ApiResult<SignedIn> {
         let message = if profile.is_some() { "wrong password" } else { "wrong username or password" };
-        let wrong = || ApiError::new(axum::http::StatusCode::UNAUTHORIZED, message);
+        let wrong = || ApiError::new(StatusCode::UNAUTHORIZED, message);
+        guess(ctx)?;
 
         let Some((id, hash)) = account(ctx.state(), username, profile).await? else {
             return Err(wrong());
@@ -238,6 +248,7 @@ impl AuthMutation {
             return Err(wrong());
         }
 
+        right(ctx);
         sign_in(ctx, id).await
     }
 
@@ -309,9 +320,13 @@ impl AuthMutation {
             .fetch_one(&state.db)
             .await?;
 
+        guess(ctx)?;
+
         if !auth::verify_password(current, hash).await {
             return Err(ApiError::bad_request("your current password isn't right"));
         }
+
+        right(ctx);
 
         let hash = auth::hash_password(new).await?;
 

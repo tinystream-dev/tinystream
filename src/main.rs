@@ -220,6 +220,7 @@ async fn serve(paths: Paths) -> anyhow::Result<()> {
         metadata: metadata::MetadataService::new(http.clone()),
         media,
         passkeys: Default::default(),
+        throttle: Default::default(),
         http,
         together: Default::default(),
         clips: Default::default(),

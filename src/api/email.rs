@@ -2,7 +2,7 @@
 
 use async_graphql::{Context, Object};
 
-use super::auth::{SignedIn, sign_in};
+use super::auth::{SignedIn, guess, right, sign_in};
 use super::schema::Ctx;
 use crate::auth::{self, resets};
 use crate::error::{ApiError, ApiResult};
@@ -105,9 +105,13 @@ impl EmailMutation {
             .fetch_one(&state.db)
             .await?;
 
+        guess(ctx)?;
+
         if !auth::verify_password(password, hash).await {
             return Err(ApiError::bad_request("your password isn't right"));
         }
+
+        right(ctx);
 
         sqlx::query("UPDATE users SET email = ? WHERE id = ?").bind(&email).bind(user.id).execute(&state.db).await?;
         Ok(email)
