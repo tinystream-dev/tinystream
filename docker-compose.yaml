@@ -1,12 +1,13 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 #
-# `mkdir -p config data && docker compose up -d` pulls the latest release and starts it on port 3000.
+# `mkdir -p config data && sudo chown 1000:1000 config data && docker compose up -d`
+# pulls the latest release and starts it on port 3000. Use the UID/GID from `user` below if changed.
 # Point each library in Settings (or config.toml's `[[library]] path`) at where it's mounted under /media.
 
 services:
   tinystream:
     image: ghcr.io/tinystream-dev/tinystream:latest
-    # `docker compose build` builds it from source instead.
+    # Build and run from source: `docker compose up -d --build --pull never`.
     build: .
     restart: unless-stopped
     # Whoever owns your media; config/ and data/ need to be writable by them too.
