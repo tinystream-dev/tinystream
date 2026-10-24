@@ -14,7 +14,7 @@ const libraries = [
   { name: 'Opus', license: 'BSD-3-Clause', href: 'https://opus-codec.org', does: 'Opus audio' },
   { name: 'zimg', license: 'WTFPL', href: 'https://github.com/sekrit-twc/zimg', does: 'Scaling and color conversion' },
   { name: 'libva', license: 'MIT', href: 'https://github.com/intel/libva', does: 'Hardware transcoding' },
-  { name: 'rustyass', license: 'LGPL-3.0-or-later', href: 'https://github.com/tinystream-dev/tinystream', does: 'Subtitles' },
+  { name: 'rustyass', license: 'LGPL-3.0-or-later', href: 'https://github.com/tinystream-dev/rustyass', does: 'Subtitles' },
   { name: 'HarfRust', license: 'MIT', href: 'https://github.com/harfbuzz/harfrust', does: 'Text shaping' },
   { name: 'Fontations', license: 'MIT OR Apache-2.0', href: 'https://github.com/googlefonts/fontations', does: 'Font reading' },
   { name: 'unicode-bidi', license: 'MIT OR Apache-2.0', href: 'https://github.com/servo/unicode-bidi', does: 'Right-to-left text' },

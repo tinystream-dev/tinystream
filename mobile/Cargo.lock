@@ -477,7 +477,9 @@ dependencies = [
 
 [[package]]
 name = "rustyass"
-version = "0.38.0"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8287a4499ebd759ad95cf201800651eb91fb0fea734e0aa7cc5a9ccd8cc22488"
 dependencies = [
  "harfrust",
  "rustc-hash",

@@ -17,7 +17,6 @@ fn main() {
         "web/decoder",
         "decoder/core",
         "web/subtitles",
-        "rustyass",
         "assets/fonts",
         "web/scripts",
         "web/package.json",

@@ -27,3 +27,22 @@ targets = [
 ignore-build-dependencies = true
 ignore-dev-dependencies = true
 private = { ignore = true }
+
+
+# rustyass, tinystream's subtitle renderer, is under the LGPL, which is the GPL plus permissions: its
+# text has to go with the GPL's, so both are listed as if it were under both.
+[rustyass]
+accepted = ["LGPL-3.0-or-later", "GPL-3.0-or-later"]
+
+[rustyass.clarify]
+license = "LGPL-3.0-or-later AND GPL-3.0-or-later"
+
+[[rustyass.clarify.files]]
+path = "COPYING.LESSER"
+license = "LGPL-3.0-or-later"
+checksum = "da7eabb7bafdf7d3ae5e9f223aa5bdc1eece45ac569dc21b3b037520b4464768"
+
+[[rustyass.clarify.files]]
+path = "COPYING"
+license = "GPL-3.0-or-later"
+checksum = "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903"
