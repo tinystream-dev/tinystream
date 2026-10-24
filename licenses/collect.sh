@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 #
 # Prints the THIRD_PARTY_LICENSES that ship with a release: the native libraries from <native-dir>,
-# the system libraries a musl build links in, the Rust crates and the web UI's packages.
+# the Rust crates and the web UI's packages.
 #
 #   licenses/collect.sh <native-dir> <target> > THIRD_PARTY_LICENSES
 #
@@ -44,13 +44,6 @@ for lib in $(cargo tree --locked -e normal --target "$target" --prefix none --fo
         cat "$native/licenses/$lib.txt"
     fi
 done
-
-case $target in
-*-musl)
-    part "System libraries (linked statically into musl builds)"
-    cat "$here"/musl/*.txt
-    ;;
-esac
 
 part "Rust crates"
 cargo about generate --workspace --locked --fail -c "$here/about.toml" "$here/about.hbs"

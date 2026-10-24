@@ -24,11 +24,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Docker images are only made from the glibc builds.
-          - { target: x86_64-unknown-linux-gnu, runner: ubuntu-24.04, libc: gnu, docker: linux/amd64 }
-          - { target: aarch64-unknown-linux-gnu, runner: ubuntu-24.04-arm, libc: gnu, docker: linux/arm64 }
-          - { target: x86_64-unknown-linux-musl, runner: ubuntu-24.04, libc: musl }
-          - { target: aarch64-unknown-linux-musl, runner: ubuntu-24.04-arm, libc: musl }
+          - { target: x86_64-unknown-linux-gnu, runner: ubuntu-24.04, docker: linux/amd64 }
+          - { target: aarch64-unknown-linux-gnu, runner: ubuntu-24.04-arm, docker: linux/arm64 }
     steps:
       - uses: actions/checkout@v4
         with:
@@ -36,7 +33,6 @@ jobs:
           persist-credentials: false
       - uses: oven-sh/setup-bun@v2
       - uses: ./.github/actions/native-deps
-        if: matrix.libc == 'gnu'
       # rustyass, in burn-in and the web player's subtitles, is on nightly.
       - uses: ./.github/actions/rust
         with:
@@ -48,45 +44,8 @@ jobs:
         with:
           key: ${{ matrix.target }}
 
-      - name: Cache musl native libraries
-        if: matrix.libc == 'musl'
-        uses: actions/cache@v4
-        with:
-          path: .native-musl
-          key: native-musl-${{ matrix.target }}-${{ hashFiles('native/**/Cargo.toml', 'native/**/build.rs', 'native/support/src/**') }}
-          restore-keys: native-musl-${{ matrix.target }}-
-
-      - name: Build web UI
-        if: matrix.libc == 'musl'
-        run: |
-          bun install --frozen-lockfile --filter tinystream-web --filter @tinystream/shared
-          cd web
-          bun run build
-
       - name: Build
-        if: matrix.libc == 'gnu'
         run: cargo build --release --locked
-
-      - name: Build musl
-        if: matrix.libc == 'musl'
-        run: |
-          docker run --rm \
-            -v "$PWD:/workspace" -w /workspace \
-            -e CARGO_TERM_COLOR \
-            -e TS_BUILD_OWNER="$(id -u):$(id -g)" \
-            -e TINYSTREAM_SKIP_WEB_BUILD=1 \
-            -e TINYSTREAM_NATIVE_DIR=/workspace/.native-musl \
-            -e RUSTC_WRAPPER=/workspace/.github/scripts/rustc-host \
-            rust:alpine sh -ec '
-              apk add --no-cache \
-                build-base pkgconf curl git tar bash \
-                meson ninja autoconf automake libtool \
-                clang-dev openssl-dev openssl-libs-static libdrm-dev linux-headers \
-                zlib-dev zlib-static bzip2-dev bzip2-static xz-dev xz-static
-              git config --global --add safe.directory /workspace
-              cargo build --release --locked --target "${{ matrix.target }}"
-              chown -R "$TS_BUILD_OWNER" target .native-musl
-            '
 
       - name: Package
         id: package
@@ -94,14 +53,8 @@ jobs:
           version="${GITHUB_REF_NAME#v}"
           name="tinystream-${version}-${{ matrix.target }}"
           mkdir -p "dist/$name"
-          binary="target/release/tinystream"
-          native=.native
-          if [ "${{ matrix.libc }}" = musl ]; then
-            binary="target/${{ matrix.target }}/release/tinystream"
-            native=.native-musl
-          fi
-          licenses/collect.sh "$native" "${{ matrix.target }}" > "dist/$name/THIRD_PARTY_LICENSES"
-          cp "$binary" LICENSE README.md "dist/$name/"
+          licenses/collect.sh .native "${{ matrix.target }}" > "dist/$name/THIRD_PARTY_LICENSES"
+          cp target/release/tinystream LICENSE README.md "dist/$name/"
           tar -C dist -czf "dist/$name.tar.gz" "$name"
           (cd dist && sha256sum "$name.tar.gz" > "$name.tar.gz.sha256")
           echo "dir=dist/$name" >> "$GITHUB_OUTPUT"
@@ -116,16 +69,16 @@ jobs:
 
       # Each architecture's image is pushed by digest; the docker job below puts them under one tag.
       - uses: docker/setup-buildx-action@v3
-        if: matrix.docker && startsWith(github.ref, 'refs/tags/v')
+        if: startsWith(github.ref, 'refs/tags/v')
       - uses: docker/login-action@v3
-        if: matrix.docker && startsWith(github.ref, 'refs/tags/v')
+        if: startsWith(github.ref, 'refs/tags/v')
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Docker image
         id: docker
-        if: matrix.docker && startsWith(github.ref, 'refs/tags/v')
+        if: startsWith(github.ref, 'refs/tags/v')
         uses: docker/build-push-action@v6
         with:
           context: ${{ steps.package.outputs.dir }}
@@ -137,14 +90,14 @@ jobs:
           # The record's artifact name starts with the owner, `tinystream-dev`, so Publish's `tinystream-*` would pick it up.
           DOCKER_BUILD_RECORD_UPLOAD: false
       - name: Save the image's digest
-        if: matrix.docker && startsWith(github.ref, 'refs/tags/v')
+        if: startsWith(github.ref, 'refs/tags/v')
         run: |
           mkdir -p digests
           touch "digests/${DIGEST#sha256:}"
         env:
           DIGEST: ${{ steps.docker.outputs.digest }}
       - uses: actions/upload-artifact@v4
-        if: matrix.docker && startsWith(github.ref, 'refs/tags/v')
+        if: startsWith(github.ref, 'refs/tags/v')
         with:
           name: docker-digest-${{ matrix.target }}
           path: digests/*

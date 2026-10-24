@@ -1,7 +1,6 @@
 .git
 target
 .native
-.native-musl
 .ffmpeg
 .libtorrent
 dev

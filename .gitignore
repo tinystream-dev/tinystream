@@ -1,6 +1,5 @@
 /target
 /.native
-/.native-musl
 /node_modules
 /web/node_modules
 /web/dist
