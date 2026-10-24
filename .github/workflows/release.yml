@@ -27,8 +27,6 @@ jobs:
           # Docker images are only made from the glibc builds.
           - { target: x86_64-unknown-linux-gnu, runner: blacksmith-4vcpu-ubuntu-2404, libc: gnu, docker: linux/amd64 }
           - { target: aarch64-unknown-linux-gnu, runner: blacksmith-4vcpu-ubuntu-2404-arm, libc: gnu, docker: linux/arm64 }
-          - { target: x86_64-unknown-linux-musl, runner: blacksmith-4vcpu-ubuntu-2404, libc: musl }
-          - { target: aarch64-unknown-linux-musl, runner: blacksmith-4vcpu-ubuntu-2404-arm, libc: musl }
     steps:
       - uses: useblacksmith/checkout@v1
         with:
