@@ -12,6 +12,6 @@ publish = false
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-rustyass = { path = "../../rustyass" }
+rustyass = "0.1"
 # Has to be the version of the wasm-bindgen CLI that builds it.
 wasm-bindgen = "=0.2.126"

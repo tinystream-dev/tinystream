@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 #
 # Prints the THIRD_PARTY_LICENSES that ship with a release: the native libraries from <native-dir>,
-# rustyass, the system libraries a musl build links in, the Rust crates and the web UI's packages.
+# the system libraries a musl build links in, the Rust crates and the web UI's packages.
 #
 #   licenses/collect.sh <native-dir> <target> > THIRD_PARTY_LICENSES
 #
@@ -44,11 +44,6 @@ for lib in $(cargo tree --locked -e normal --target "$target" --prefix none --fo
         cat "$native/licenses/$lib.txt"
     fi
 done
-
-part "rustyass, tinystream's subtitle renderer (GNU LGPL version 3 or later)"
-cat rustyass/COPYING.LESSER
-printf '\n\n'
-cat rustyass/COPYING
 
 case $target in
 *-musl)

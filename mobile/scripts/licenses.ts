@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Writes the THIRD_PARTY_LICENSES the APK ships (into the native project's
 // assets, so run it after `expo prebuild`): the libraries and fonts in
-// licenses/, the Rust crates the app links (rustyass and, through cargo-about,
-// the rest), and every package in the JS bundle.
+// licenses/, the Rust crates the app links (through cargo-about) and every
+// package in the JS bundle.
 
 import { spawnSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
@@ -77,20 +77,13 @@ this file carries their copyright notices and licenses. The source of tinystream
 itself is at https://github.com/tinystream-dev/tinystream.
 `
 
-/** rustyass, the subtitle renderer: tinystream's own, but under the LGPL, which cargo-about skips (it isn't published). */
-function rustyass() {
-  const dir = join(root, 'rustyass')
-  const text = ['COPYING.LESSER', 'COPYING'].map((f) => readFileSync(join(dir, f), 'utf8').trimEnd()).join('\n\n')
-  return `${rule}\nrustyass\nLGPL-3.0-or-later\n${rule}\n\n${text}\n`
-}
-
 const libraries = readdirSync(join(app, 'licenses'))
   .filter((f) => f.endsWith('.txt'))
   .sort()
   .map((f) => readFileSync(join(app, 'licenses', f), 'utf8').trimEnd())
   .join('\n\n')
 
-const text = header + part('Libraries and fonts') + libraries + part('Rust crates') + rustyass() + '\n' + crateLicenses() + part('JavaScript packages') + packageLicenses()
+const text = header + part('Libraries and fonts') + libraries + part('Rust crates') + crateLicenses() + part('JavaScript packages') + packageLicenses()
 mkdirSync(join(out, '..'), { recursive: true })
 writeFileSync(out, text)
 console.log(`wrote ${out}`)

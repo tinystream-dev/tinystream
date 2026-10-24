@@ -31,13 +31,13 @@ jobs:
   # rebuild the server.
   changes:
     name: Changes
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     outputs:
       server: ${{ steps.filter.outputs.server }}
       web: ${{ steps.filter.outputs.web }}
       mobile: ${{ steps.filter.outputs.mobile }}
     steps:
-      - uses: useblacksmith/checkout@v1
+      - uses: actions/checkout@v4
       - uses: dorny/paths-filter@v3
         id: filter
         with:
@@ -66,9 +66,9 @@ jobs:
     name: Format
     needs: changes
     if: needs.changes.outputs.server == 'true' || needs.changes.outputs.mobile == 'true'
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     steps:
-      - uses: useblacksmith/checkout@v1
+      - uses: actions/checkout@v4
       - uses: ./.github/actions/rust
         with:
           components: rustfmt
@@ -79,12 +79,12 @@ jobs:
     name: Web UI
     needs: changes
     if: needs.changes.outputs.server == 'true' || needs.changes.outputs.web == 'true'
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: web
     steps:
-      - uses: useblacksmith/checkout@v1
+      - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
       # The music player's decoder and the video player's subtitles (rustyass, on nightly) are Rust, built for the browser.
       - uses: ./.github/actions/rust
@@ -110,9 +110,9 @@ jobs:
     name: Mobile app
     needs: changes
     if: needs.changes.outputs.mobile == 'true'
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     steps:
-      - uses: useblacksmith/checkout@v1
+      - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
       - run: bun install --frozen-lockfile --ignore-scripts
       - name: Shared code
@@ -134,9 +134,9 @@ jobs:
     name: Android build
     needs: changes
     if: needs.changes.outputs.mobile == 'true'
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     steps:
-      - uses: useblacksmith/checkout@v1
+      - uses: actions/checkout@v4
       - uses: ./.github/actions/android
       - name: Build
         working-directory: mobile
@@ -152,11 +152,11 @@ jobs:
     name: Build and test
     needs: [changes, web]
     if: needs.changes.outputs.server == 'true'
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     env:
       TINYSTREAM_SKIP_WEB_BUILD: "1"
     steps:
-      - uses: useblacksmith/checkout@v1
+      - uses: actions/checkout@v4
       - uses: ./.github/actions/native-deps
       - uses: ./.github/actions/rust
       # Only main saves: pull requests restore its cache, and their own copies would push it out.

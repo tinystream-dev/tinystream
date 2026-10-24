@@ -1336,20 +1336,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "freetype-src"
-version = "2.13.3"
-dependencies = [
- "native-support",
-]
-
-[[package]]
-name = "fribidi-src"
-version = "1.0.16"
-dependencies = [
- "native-support",
-]
-
-[[package]]
 name = "fsevent-sys"
 version = "4.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1557,14 +1543,6 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.21",
-]
-
-[[package]]
-name = "harfbuzz-src"
-version = "11.2.1"
-dependencies = [
- "freetype-src",
- "native-support",
 ]
 
 [[package]]
@@ -2066,17 +2044,6 @@ dependencies = [
  "tokio-rustls",
  "url",
  "webpki-roots",
-]
-
-[[package]]
-name = "libass-src"
-version = "0.17.3"
-dependencies = [
- "freetype-src",
- "fribidi-src",
- "harfbuzz-src",
- "nasm-src",
- "native-support",
 ]
 
 [[package]]
@@ -3212,22 +3179,14 @@ checksum = "cf54715a573b99ac80df0bc206da022bcd442c974952c7b9720069370852e21f"
 
 [[package]]
 name = "rustyass"
-version = "0.38.0"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8287a4499ebd759ad95cf201800651eb91fb0fea734e0aa7cc5a9ccd8cc22488"
 dependencies = [
  "harfrust",
  "rustc-hash",
  "skrifa",
  "unicode-bidi",
-]
-
-[[package]]
-name = "rustyass-compare"
-version = "0.38.0"
-dependencies = [
- "libass-src",
- "pkg-config",
- "png",
- "rustyass",
 ]
 
 [[package]]

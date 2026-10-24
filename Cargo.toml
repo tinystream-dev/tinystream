@@ -26,7 +26,7 @@ exclude = [
 ]
 
 [workspace]
-members = ["ffmpeg-sys", "libtorrent-sys", "native/*", "rustyass", "rustyass/compare", "decoder/core", "web/decoder", "web/subtitles"]
+members = ["ffmpeg-sys", "libtorrent-sys", "native/*", "decoder/core", "web/decoder", "web/subtitles"]
 # The app's crates are a workspace of their own (mobile/Cargo.toml), so neither rebuilds the other.
 exclude = ["mobile"]
 
@@ -76,7 +76,7 @@ nucleo-matcher = "0.3"
 quick-xml = { version = "0.41", features = ["escape-html"] }
 rand = "0.9"
 rust-embed = { version = "8", optional = true }
-rustyass = { path = "rustyass" }
+rustyass = "0.1"
 regex = "1"
 reqwest = { version = "0.12", default-features = false, features = [
     "json",
