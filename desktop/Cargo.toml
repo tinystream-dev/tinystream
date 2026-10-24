@@ -1,0 +1,15 @@
+[workspace]
+members = ["app"]
+resolver = "3"
+
+[workspace.package]
+version = "0.38.0"
+edition = "2024"
+license = "AGPL-3.0-or-later"
+authors = ["Phrolova <me@phrolova.moe>"]
+repository = "https://github.com/phrolova/tinystream"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "debuginfo"

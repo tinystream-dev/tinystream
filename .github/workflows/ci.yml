@@ -26,7 +26,7 @@ env:
   CARGO_PROFILE_DEV_DEBUG: "0"
 
 jobs:
-  # The server (Rust), web UI and app build independently: each only when its own files change. The
+  # The server (Rust), web UI and apps build independently: each only when its own files change. The
   # server embeds the web UI, so its jobs take the UI from the web job, but a UI change alone doesn't
   # rebuild the server.
   changes:
@@ -36,6 +36,7 @@ jobs:
       server: ${{ steps.filter.outputs.server }}
       web: ${{ steps.filter.outputs.web }}
       mobile: ${{ steps.filter.outputs.mobile }}
+      desktop: ${{ steps.filter.outputs.desktop }}
     steps:
       - uses: actions/checkout@v4
       - uses: dorny/paths-filter@v3
@@ -46,6 +47,7 @@ jobs:
             server:
               - '**'
               - '!mobile/**'
+              - '!desktop/**'
               - '!web/**'
               - '!packages/**/!(schema.graphql)'
               - '!package.json'
@@ -60,6 +62,11 @@ jobs:
               - '{mobile,packages}/**'
               - '{package.json,bun.lock,bunfig.toml}'
               - '.github/actions/android/**'
+              - '.github/workflows/ci.yml'
+            desktop:
+              - 'desktop/**'
+              - '{rust-toolchain.toml,rustfmt.toml}'
+              - '.github/actions/rust/**'
               - '.github/workflows/ci.yml'
 
   fmt:
@@ -145,6 +152,33 @@ jobs:
           cd android && ./gradlew assembleDebug -PreactNativeArchitectures=arm64-v8a
       - name: Check 16 KB alignment
         run: "$ANDROID_HOME/build-tools/36.0.0/zipalign -c -P 16 -v 4 mobile/android/app/build/outputs/apk/debug/app-debug.apk > /dev/null"
+
+  desktop:
+    name: Desktop app
+    needs: changes
+    if: needs.changes.outputs.desktop == 'true'
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+      - uses: actions/checkout@v4
+      # winit and wgpu load Wayland, X11 and Vulkan at runtime; the headers are for x11-dl's build
+      # script and the tests.
+      - name: System packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends pkg-config libwayland-dev libxkbcommon-dev libx11-dev libvulkan-dev
+      - uses: ./.github/actions/rust
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - run: cargo --locked fmt --check
+      - run: cargo clippy --locked --all-targets
+      - run: cargo test --locked
 
   # One job for the server: the feature sets share the build's dependencies, native libraries and
   # cache, so checking each alone after it costs little more than the server itself.

@@ -22,13 +22,15 @@ exclude = [
     "/node_modules",
     "/web/node_modules",
     "/mobile",
+    "/desktop",
     "/web/dist",
 ]
 
 [workspace]
 members = ["ffmpeg-sys", "libtorrent-sys", "native/*", "decoder/core", "web/decoder", "web/subtitles"]
-# The app's crates are a workspace of their own (mobile/Cargo.toml), so neither rebuilds the other.
-exclude = ["mobile"]
+# The apps' crates are workspaces of their own (mobile/Cargo.toml, desktop/Cargo.toml), so none
+# rebuilds another.
+exclude = ["mobile", "desktop"]
 
 [workspace.package]
 version = "0.38.0"
