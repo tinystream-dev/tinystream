@@ -34,8 +34,27 @@ pub enum UserEvent {
     Wake,
 }
 
+struct RendererNotifier(EventLoopProxy<UserEvent>);
+
+impl iced_wgpu::graphics::shell::Notifier for RendererNotifier {
+    fn tick(&self) {
+        let _ = self.0.send_event(UserEvent::Wake);
+    }
+
+    fn request_redraw(&self) {
+        let _ = self.0.send_event(UserEvent::Wake);
+    }
+
+    fn invalidate_layout(&self) {
+        let _ = self.0.send_event(UserEvent::Wake);
+    }
+}
+
 pub struct Runner {
     app: App,
+    runtime: tokio::runtime::Handle,
+    live: Option<(u64, tokio::task::JoinHandle<()>)>,
+    requests: Vec<tokio::task::JoinHandle<()>>,
     settings: window::Settings,
     proxy: EventLoopProxy<UserEvent>,
     theme: Theme,
@@ -63,9 +82,17 @@ struct Window {
 }
 
 impl Runner {
-    pub fn new(app: App, settings: window::Settings, proxy: EventLoopProxy<UserEvent>) -> Self {
+    pub fn new(
+        app: App,
+        settings: window::Settings,
+        proxy: EventLoopProxy<UserEvent>,
+        runtime: tokio::runtime::Handle,
+    ) -> Self {
         Self {
             app,
+            runtime,
+            live: None,
+            requests: Vec::new(),
             settings,
             proxy,
             theme: style::theme(),
@@ -133,8 +160,21 @@ impl Runner {
                 .map_err(|error| format!("can't open the GPU: {error}"))?,
         };
 
-        let engine = Engine::new(&adapter, device.clone(), queue, format, None, Shell::headless());
-        let renderer = Renderer::new(engine, renderer::Settings::default());
+        let engine = Engine::new(
+            &adapter,
+            device.clone(),
+            queue,
+            format,
+            Some(iced_wgpu::graphics::Antialiasing::MSAAx4),
+            Shell::new(RendererNotifier(self.proxy.clone())),
+        );
+        let renderer = Renderer::new(
+            engine,
+            renderer::Settings {
+                line_height: iced_core::text::LineHeight::Relative(1.5),
+                ..renderer::Settings::default()
+            },
+        );
 
         let size = raw.inner_size();
         let viewport = Viewport::with_physical_size(
@@ -172,7 +212,50 @@ impl Runner {
 
         for effect in std::mem::take(&mut self.effects) {
             match effect {
-                Effect::Exit => event_loop.exit(),
+                Effect::Exit => {
+                    if let Some((_, task)) = self.live.take() {
+                        task.abort();
+                    }
+                    event_loop.exit();
+                },
+                Effect::Task(task) => {
+                    let proxy = self.proxy.clone();
+                    self.runtime.spawn(async move {
+                        let _ = proxy.send_event(UserEvent::Message(task.await));
+                    });
+                },
+                Effect::Request(task) => {
+                    self.requests.retain(|task| !task.is_finished());
+                    let proxy = self.proxy.clone();
+                    self.requests.push(self.runtime.spawn(async move {
+                        let _ = proxy.send_event(UserEvent::Message(task.await));
+                    }));
+                },
+                Effect::Live(api, generation) => {
+                    if api.is_none() {
+                        for task in self.requests.drain(..) {
+                            task.abort();
+                        }
+                    }
+                    if api.is_some() && self.live.as_ref().is_some_and(|(current, _)| *current == generation) {
+                        continue;
+                    }
+                    if let Some((_, task)) = self.live.take() {
+                        task.abort();
+                    }
+                    if let Some(api) = api {
+                        let proxy = self.proxy.clone();
+                        let task = self.runtime.spawn(async move {
+                            api.events(move |event| {
+                                let _ = proxy.send_event(UserEvent::Message(Message::Session(
+                                    crate::session::Message::Live(generation, event),
+                                )));
+                            })
+                            .await;
+                        });
+                        self.live = Some((generation, task));
+                    }
+                },
                 Effect::Operate(operation) => {
                     if let Some(window) = &mut self.window {
                         window.operations.push(operation);
@@ -208,7 +291,13 @@ impl Runner {
         );
 
         for mut operation in window.operations.drain(..) {
-            interface.operate(&window.renderer, operation.as_mut());
+            loop {
+                interface.operate(&window.renderer, operation.as_mut());
+                match operation.finish() {
+                    iced_core::widget::operation::Outcome::Chain(next) => operation = next,
+                    _ => break,
+                }
+            }
         }
 
         let (state, statuses) = interface.update(
@@ -237,6 +326,10 @@ impl Runner {
     fn redraw(&mut self, event_loop: &ActiveEventLoop) {
         self.process(event_loop);
         let Some(window) = &mut self.window else { return };
+        self.app.session.system_dark = window.raw.theme() != Some(winit::window::Theme::Light);
+        let look = self.app.session.look();
+        self.theme = look.theme();
+        iced_core::Renderer::tick(&mut window.renderer);
         let size = window.raw.inner_size();
         if size.width == 0 || size.height == 0 {
             return;
@@ -260,7 +353,7 @@ impl Runner {
             &mut window.renderer,
             &mut messages,
         );
-        interface.draw(&mut window.renderer, &self.theme, &renderer::Style { text_color: style::INK }, window.cursor);
+        interface.draw(&mut window.renderer, &self.theme, &renderer::Style { text_color: look.ink }, window.cursor);
         window.cache = interface.into_cache();
         window.react(state, &mut self.clipboard, &self.proxy);
 
@@ -268,7 +361,7 @@ impl Runner {
             &mut window.renderer,
             &mut window.surface,
             &window.viewport,
-            style::CANVAS,
+            look.canvas,
             || window.raw.pre_present_notify(),
         );
         if presented.is_err() {
@@ -388,6 +481,19 @@ impl ApplicationHandler<UserEvent> for Runner {
                 window.raw.request_redraw();
                 self.window = Some(window);
                 self.update(event_loop, flags);
+                self.update(event_loop, Message::Session(crate::session::Message::Start));
+                let proxy = self.proxy.clone();
+                self.runtime.spawn(async move {
+                    loop {
+                        tokio::time::sleep(std::time::Duration::from_secs(3600)).await;
+                        if proxy
+                            .send_event(UserEvent::Message(Message::Session(crate::session::Message::Tick)))
+                            .is_err()
+                        {
+                            break;
+                        }
+                    }
+                });
             },
             Err(error) => {
                 tracing::error!("can't open the window: {error}");

@@ -27,6 +27,7 @@ pub struct App {
     pub chrome: Chrome,
     pub overlay: Option<Overlay>,
     pub query: String,
+    pub session: crate::session::Session,
     keys: Keys,
     window_state: WindowState,
 }
@@ -48,6 +49,8 @@ pub enum Message {
     Overlay(Option<Overlay>),
     Query(String),
     Submit,
+    Focus(bool),
+    Session(crate::session::Message),
 }
 
 /// What the event loop does for the app after an update.
@@ -55,6 +58,9 @@ pub enum Effect {
     Window(chrome::Action),
     Operate(Box<dyn Operation>),
     Exit,
+    Task(futures::future::BoxFuture<'static, Message>),
+    Live(Option<crate::api::Api>, u64),
+    Request(futures::future::BoxFuture<'static, Message>),
 }
 
 pub const SCROLL: &str = "page";
@@ -69,6 +75,7 @@ impl App {
             chrome,
             overlay: None,
             query: String::new(),
+            session: crate::session::Session::default(),
             keys: Keys::default(),
             window_state,
         }
@@ -76,6 +83,31 @@ impl App {
 
     pub fn update(&mut self, message: Message, effects: &mut Vec<Effect>) {
         match message {
+            Message::Focus(reverse) => {
+                let operation: Box<dyn Operation> = if reverse {
+                    Box::new(operation::focusable::focus_previous())
+                } else {
+                    Box::new(operation::focusable::focus_next())
+                };
+                effects.push(Effect::Operate(operation));
+            },
+            Message::Session(message) => {
+                let generation = self.session.generation;
+                let focus = self.session.focus_target();
+                self.session.update(message, effects);
+                if (self.session.focus_target() != focus || self.session.generation != generation)
+                    && let Some(target) = self.session.focus_target()
+                {
+                    effects.push(Effect::Operate(Box::new(operation::focusable::focus(target.into()))));
+                }
+                if self.session.generation != generation {
+                    self.history = History::new(Route::Home);
+                    self.overlay = None;
+                    self.query.clear();
+                    self.keys = Keys::default();
+                    self.restore_scroll(effects);
+                }
+            },
             Message::Resized { size, maximized, fullscreen } => {
                 self.chrome.maximized = maximized;
                 self.chrome.fullscreen = fullscreen;
@@ -116,6 +148,11 @@ impl App {
     /// Handles shell shortcuts, including search and Escape while a text field has focus.
     pub fn listen(&mut self, event: &Event, status: event::Status) -> Option<Message> {
         match event {
+            Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. })
+                if *key == keyboard::Key::Named(keyboard::key::Named::Tab) =>
+            {
+                Some(Message::Focus(modifiers.shift()))
+            },
             Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. })
                 if modifiers.command() && matches!(key.as_ref(), keyboard::Key::Character("k" | "K")) =>
             {

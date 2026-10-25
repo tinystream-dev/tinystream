@@ -5,15 +5,23 @@
 //! The native tinystream client: the web UI's desktop layout in iced, with video through libmpv and
 //! subtitles through rustyass.
 
+mod api;
 mod app;
+mod auth;
 mod chrome;
 mod keys;
 mod paths;
 mod platform;
 mod route;
 mod runner;
+mod secrets;
+mod servers;
+mod session;
 mod shell;
 mod style;
+#[cfg(test)]
+mod test_support;
+mod updates;
 mod window_state;
 
 use std::process::ExitCode;
@@ -40,6 +48,11 @@ fn main() -> ExitCode {
 
     tracing::debug!(config = ?paths::config_dir(), state = ?paths::state_dir(), cache = ?paths::cache_dir(), "paths");
 
+    let mut fonts = iced_wgpu::graphics::text::font_system().write().expect("font system");
+    fonts.load_font(std::borrow::Cow::Borrowed(include_bytes!("../assets/Geist.ttf")));
+    fonts.raw().db_mut().set_sans_serif_family("Geist");
+    drop(fonts);
+
     let runtime = match tokio::runtime::Builder::new_multi_thread().enable_all().build() {
         Ok(runtime) => runtime,
         Err(error) => {
@@ -62,7 +75,8 @@ fn main() -> ExitCode {
     })));
 
     // A path like `/title/12` opens that screen, as web links will (#92).
-    let route = std::env::args().nth(1).and_then(|path| Route::parse(&path)).unwrap_or(Route::Home);
+    let argument = std::env::args().nth(1);
+    let route = argument.as_deref().and_then(Route::parse).unwrap_or(Route::Home);
     let state = WindowState::load();
     let settings = window::Settings {
         size: state.size(),
@@ -76,7 +90,11 @@ fn main() -> ExitCode {
         ..window::Settings::default()
     };
 
-    let mut runner = Runner::new(App::new(route, state), settings, proxy);
+    let mut app = App::new(route, state);
+    if let Some(link) = argument.filter(|arg| arg.contains("://")) {
+        app.session.initial_link(link);
+    }
+    let mut runner = Runner::new(app, settings, proxy, runtime.handle().clone());
     match event_loop.run_app(&mut runner) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {

@@ -12,6 +12,12 @@ use crate::chrome::ButtonLayout;
 mod linux;
 
 pub trait Desktop {
+    fn secrets() -> crate::secrets::Store;
+
+    fn open_url(_url: String) -> BoxFuture<'static, Result<(), String>> {
+        Box::pin(async { Err("Opening links is not supported on this platform.".into()) })
+    }
+
     /// Opens the GPU device, or leaves it to wgpu's defaults with `None`.
     fn request_device(
         _adapter: &wgpu::Adapter,
@@ -36,4 +42,22 @@ pub type Current = Fallback;
 pub struct Fallback;
 
 #[cfg(not(target_os = "linux"))]
-impl Desktop for Fallback {}
+impl Desktop for Fallback {
+    fn secrets() -> crate::secrets::Store {
+        std::sync::Arc::new(UnavailableSecrets)
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+struct UnavailableSecrets;
+
+#[cfg(not(target_os = "linux"))]
+impl crate::secrets::Secrets for UnavailableSecrets {
+    fn get(&self, _: u64) -> BoxFuture<'_, anyhow::Result<crate::secrets::Stored>> {
+        Box::pin(async { anyhow::bail!("Credential storage is not supported on this platform.") })
+    }
+
+    fn set(&self, _: u64, _: Option<crate::api::Token>) -> BoxFuture<'_, anyhow::Result<bool>> {
+        Box::pin(async { anyhow::bail!("Credential storage is not supported on this platform.") })
+    }
+}

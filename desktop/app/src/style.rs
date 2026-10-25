@@ -1,145 +1,209 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! The web's dark tokens and the few styles the shell needs. The design system (#82) replaces this
-//! with the shared theme crate and the server's appearance settings.
-
 use iced_core::theme::palette::Seed;
-use iced_core::{Background, Border, Color, Shadow, Theme, Vector, border};
+use iced_core::{Background, Color, Shadow, Theme, Vector, border};
 use iced_widget::{button, container};
-
-pub const CANVAS: Color = Color::from_rgb8(0x19, 0x19, 0x19);
-pub const RAISED: Color = Color::from_rgb8(0x20, 0x20, 0x20);
-pub const PANEL: Color = Color::from_rgb8(0x26, 0x26, 0x26);
-pub const FLOAT: Color = Color::from_rgb8(0x2E, 0x2E, 0x2E);
-pub const HOVER: Color = Color::from_rgba8(255, 255, 255, 0.055);
-pub const PRESS: Color = Color::from_rgba8(255, 255, 255, 0.09);
-pub const LINE: Color = Color::from_rgba8(255, 255, 255, 0.075);
-pub const LINE_STRONG: Color = Color::from_rgba8(255, 255, 255, 0.13);
-pub const INK: Color = Color::from_rgb8(0xEB, 0xEB, 0xEA);
-pub const INK_2: Color = Color::from_rgb8(0x9B, 0x9B, 0x98);
-pub const INK_3: Color = Color::from_rgb8(0x6E, 0x6E, 0x6B);
-pub const DANGER: Color = Color::from_rgb8(0xE5, 0x48, 0x4D);
-pub const SHADE: Color = Color::BLACK;
 
 pub const SIDEBAR_WIDTH: f32 = 240.0;
 
 pub fn theme() -> Theme {
-    Theme::custom(
-        "tinystream",
-        Seed {
-            background: CANVAS,
-            text: INK,
-            primary: INK,
-            success: Color::from_rgb8(0x4C, 0xC3, 0x8A),
-            warning: Color::from_rgb8(0xF5, 0xB7, 0x4F),
-            danger: DANGER,
-        },
-    )
+    Look::default().theme()
 }
 
-/// `bg-raised/60` with a hairline on the right.
-pub fn sidebar(_: &Theme) -> container::Style {
-    container::Style { background: Some(Background::Color(RAISED.scale_alpha(0.6))), ..container::Style::default() }
+pub fn sidebar(look: Look) -> impl Fn(&Theme) -> container::Style {
+    move |_| container::Style { background: Some(look.raised.scale_alpha(0.6).into()), ..container::Style::default() }
 }
-
-pub fn hairline(_: &Theme) -> container::Style {
-    container::Style { background: Some(Background::Color(LINE)), ..container::Style::default() }
+pub fn hairline(look: Look) -> impl Fn(&Theme) -> container::Style {
+    move |_| container::Style { background: Some(look.line.into()), ..container::Style::default() }
 }
-
-pub fn canvas(_: &Theme) -> container::Style {
-    container::Style { background: Some(Background::Color(CANVAS)), ..container::Style::default() }
-}
-
-pub fn nav_item(active: bool) -> impl Fn(&Theme, button::Status) -> button::Style {
+pub fn nav_item(active: bool, look: Look) -> impl Fn(&Theme, button::Status) -> button::Style {
     move |_, status| {
-        let (background, text_color) = match (active, status) {
-            (true, _) => (Some(PRESS), INK),
-            (false, button::Status::Hovered | button::Status::Pressed) => (Some(HOVER), INK),
-            (false, _) => (None, INK_2),
-        };
-
+        let hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
         button::Style {
-            background: background.map(Background::Color),
-            text_color,
+            background: if active { Some(look.press.into()) } else { hovered.then_some(look.hover.into()) },
+            text_color: if active || hovered { look.ink } else { look.muted },
             border: border::rounded(8),
             ..button::Style::default()
         }
     }
 }
-
-/// The search field-like button at the top of the sidebar.
-pub fn search(_: &Theme, status: button::Status) -> button::Style {
-    button::Style {
-        background: Some(Background::Color(PANEL)),
-        text_color: if matches!(status, button::Status::Hovered | button::Status::Pressed) { INK_2 } else { INK_3 },
-        border: border::rounded(9).color(LINE).width(1),
+pub fn search(look: Look) -> impl Fn(&Theme, button::Status) -> button::Style {
+    move |_, status| button::Style {
+        background: Some(look.panel.into()),
+        text_color: if matches!(status, button::Status::Hovered | button::Status::Pressed) {
+            look.muted
+        } else {
+            look.faint
+        },
+        border: border::rounded(9).color(look.line).width(1),
         ..button::Style::default()
     }
 }
-
-pub fn menu_row(_: &Theme, status: button::Status) -> button::Style {
-    let hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
-
-    button::Style {
-        background: hovered.then_some(Background::Color(HOVER)),
-        text_color: if hovered { INK } else { INK_2 },
-        border: border::rounded(10),
-        ..button::Style::default()
+pub fn menu_row(look: Look) -> impl Fn(&Theme, button::Status) -> button::Style {
+    move |_, status| {
+        let hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
+        button::Style {
+            background: hovered.then_some(look.hover.into()),
+            text_color: if hovered { look.ink } else { look.muted },
+            border: border::rounded(10),
+            ..button::Style::default()
+        }
     }
 }
-
-/// The window controls' pill, floating over the content.
-pub fn controls_pill(_: &Theme) -> container::Style {
-    container::Style {
-        background: Some(Background::Color(FLOAT.scale_alpha(0.72))),
-        border: Border { color: LINE_STRONG, width: 1.0, radius: 999.0.into() },
-        shadow: Shadow { color: SHADE.scale_alpha(0.35), offset: Vector::new(0.0, 4.0), blur_radius: 16.0 },
+pub fn controls_pill(look: Look) -> impl Fn(&Theme) -> container::Style {
+    move |_| container::Style {
+        background: Some(look.float.scale_alpha(0.72).into()),
+        border: border::rounded(999).color(look.line_strong).width(1),
+        shadow: Shadow { color: look.shade.scale_alpha(0.35), offset: Vector::new(0.0, 4.0), blur_radius: 16.0 },
         ..container::Style::default()
     }
 }
-
-pub fn window_button(close: bool) -> impl Fn(&Theme, button::Status) -> button::Style {
+pub fn window_button(close: bool, look: Look) -> impl Fn(&Theme, button::Status) -> button::Style {
     move |_, status| {
         let background = match status {
-            button::Status::Hovered if close => Some(DANGER),
-            button::Status::Pressed if close => Some(DANGER.scale_alpha(0.8)),
-            button::Status::Hovered => Some(HOVER),
-            button::Status::Pressed => Some(PRESS),
+            button::Status::Hovered if close => Some(look.danger),
+            button::Status::Pressed if close => Some(look.danger.scale_alpha(0.8)),
+            button::Status::Hovered => Some(look.hover),
+            button::Status::Pressed => Some(look.press),
             _ => None,
         };
-
         button::Style {
             background: background.map(Background::Color),
             text_color: if close && matches!(status, button::Status::Hovered | button::Status::Pressed) {
                 Color::WHITE
             } else {
-                INK_2
+                look.muted
             },
             border: border::rounded(999),
             ..button::Style::default()
         }
     }
 }
-
-/// The dimmed backdrop behind dialogs.
-pub fn backdrop(_: &Theme) -> container::Style {
-    container::Style { background: Some(Background::Color(SHADE.scale_alpha(0.5))), ..container::Style::default() }
+pub fn backdrop(look: Look) -> impl Fn(&Theme) -> container::Style {
+    move |_| container::Style { background: Some(look.shade.scale_alpha(0.5).into()), ..container::Style::default() }
 }
-
-pub fn dialog(_: &Theme) -> container::Style {
-    container::Style {
-        background: Some(Background::Color(FLOAT)),
-        border: Border { color: LINE_STRONG, width: 1.0, radius: 18.0.into() },
-        shadow: Shadow { color: SHADE.scale_alpha(0.5), offset: Vector::new(0.0, 16.0), blur_radius: 48.0 },
+pub fn dialog(look: Look) -> impl Fn(&Theme) -> container::Style {
+    move |_| container::Style {
+        background: Some(look.float.into()),
+        border: border::rounded(18).color(look.line_strong).width(1),
+        shadow: Shadow { color: look.shade.scale_alpha(0.5), offset: Vector::new(0.0, 16.0), blur_radius: 48.0 },
+        ..container::Style::default()
+    }
+}
+pub fn kbd(look: Look) -> impl Fn(&Theme) -> container::Style {
+    move |_| container::Style {
+        background: Some(look.panel.into()),
+        border: border::rounded(6).color(look.line_strong).width(1),
+        text_color: Some(look.ink),
         ..container::Style::default()
     }
 }
 
-pub fn kbd(_: &Theme) -> container::Style {
-    container::Style {
-        background: Some(Background::Color(PANEL)),
-        border: Border { color: LINE_STRONG, width: 1.0, radius: 6.0.into() },
-        text_color: Some(INK),
-        ..container::Style::default()
+#[derive(Clone, Copy)]
+pub struct Look {
+    pub canvas: Color,
+    pub raised: Color,
+    pub float: Color,
+    pub panel: Color,
+    pub hover: Color,
+    pub press: Color,
+    pub line_strong: Color,
+    pub ink: Color,
+    pub muted: Color,
+    pub faint: Color,
+    pub accent: Color,
+    pub accent_hover: Color,
+    pub on_accent: Color,
+    pub danger: Color,
+    pub line: Color,
+    pub focus: Color,
+    pub glow: Color,
+    pub shade: Color,
+    pub smoothing: f32,
+    pub radius_scale: f32,
+    pub elevated: bool,
+}
+
+impl Default for Look {
+    fn default() -> Self {
+        Self {
+            canvas: Color::from_rgb8(14, 14, 14),
+            raised: Color::from_rgb8(21, 21, 21),
+            float: Color::from_rgb8(36, 36, 36),
+            panel: Color::from_rgb8(28, 28, 28),
+            hover: Color::from_rgba8(255, 255, 255, 0.055),
+            press: Color::from_rgba8(255, 255, 255, 0.09),
+            line_strong: Color::from_rgba8(255, 255, 255, 0.13),
+            ink: Color::from_rgb8(230, 230, 228),
+            muted: Color::from_rgb8(149, 149, 148),
+            faint: Color::from_rgb8(105, 105, 104),
+            accent: Color::from_rgb8(230, 230, 228),
+            accent_hover: Color::WHITE,
+            on_accent: Color::from_rgb8(14, 14, 14),
+            danger: Color::from_rgb8(235, 138, 122),
+            line: Color::from_rgba8(255, 255, 255, 0.075),
+            focus: Color::from_rgba8(230, 230, 228, 0.35),
+            glow: Color::WHITE,
+            shade: Color::BLACK,
+            smoothing: 0.6,
+            radius_scale: 1.0,
+            elevated: true,
+        }
     }
+}
+
+impl Look {
+    pub fn theme(self) -> Theme {
+        Theme::custom(
+            "tinystream",
+            Seed {
+                background: self.canvas,
+                text: self.ink,
+                primary: self.accent,
+                success: Color::from_rgb8(128, 190, 140),
+                warning: Color::from_rgb8(220, 180, 100),
+                danger: self.danger,
+            },
+        )
+    }
+
+    pub fn token(&mut self, name: &str, value: &str) {
+        let Some(color) = parse_color(value) else { return };
+        match name {
+            "canvas" => self.canvas = color,
+            "raised" => self.raised = color,
+            "float" => self.float = color,
+            "panel" => self.panel = color,
+            "hover" => self.hover = color,
+            "press" => self.press = color,
+            "line-strong" => self.line_strong = color,
+            "ink" => self.ink = color,
+            "ink-2" => self.muted = color,
+            "ink-3" => self.faint = color,
+            "accent" => self.accent = color,
+            "accent-hover" => self.accent_hover = color,
+            "on-accent" => self.on_accent = color,
+            "danger" => self.danger = color,
+            "line" => self.line = color,
+            "focus" => self.focus = color,
+            "glow" => self.glow = color,
+            "shade" => self.shade = color,
+            _ => {},
+        }
+    }
+}
+
+fn parse_color(value: &str) -> Option<Color> {
+    if let Some(hex) = value.strip_prefix('#').filter(|hex| hex.len() == 6) {
+        let rgb = u32::from_str_radix(hex, 16).ok()?;
+        return Some(Color::from_rgb8((rgb >> 16) as u8, (rgb >> 8) as u8, rgb as u8));
+    }
+    let rgb = value.strip_prefix("rgb(")?.strip_suffix(')')?;
+    let mut parts = rgb.split_whitespace().filter(|part| *part != "/");
+    Some(Color::from_rgba8(
+        parts.next()?.parse().ok()?,
+        parts.next()?.parse().ok()?,
+        parts.next()?.parse().ok()?,
+        parts.next()?.parse().ok()?,
+    ))
 }

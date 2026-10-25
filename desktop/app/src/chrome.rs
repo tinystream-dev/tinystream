@@ -161,7 +161,7 @@ impl Chrome {
     }
 
     /// The controls for one side, or nothing if the layout puts none there.
-    pub fn controls<'a>(&self, side: Side) -> Option<Element<'a, Message>> {
+    pub fn controls<'a>(&self, side: Side, look: style::Look) -> Option<Element<'a, Message>> {
         let controls = match side {
             Side::Left => &self.layout.left,
             Side::Right => &self.layout.right,
@@ -174,7 +174,7 @@ impl Chrome {
         let buttons = controls.iter().map(|&control| {
             button(draw(Glyph { control, maximized }).width(10).height(10))
                 .padding(7)
-                .style(style::window_button(control == Control::Close))
+                .style(style::window_button(control == Control::Close, look))
                 .on_press(Message::Control(control))
                 .boxed()
         });
@@ -183,8 +183,9 @@ impl Chrome {
     }
 
     /// The controls in their floating glass pill.
-    pub fn pill<'a>(&self, side: Side) -> Option<Element<'a, Message>> {
-        self.controls(side).map(|controls| container(controls).padding(3).style(style::controls_pill).boxed())
+    pub fn pill<'a>(&self, side: Side, look: style::Look) -> Option<Element<'a, Message>> {
+        self.controls(side, look)
+            .map(|controls| container(controls).padding(3).style(style::controls_pill(look)).boxed())
     }
 
     /// Invisible resize handles around the window, layered over everything else.
@@ -304,7 +305,7 @@ mod tests {
     fn hides_controls_when_fullscreen() {
         let chrome = Chrome { fullscreen: true, ..Chrome::default() };
 
-        assert!(chrome.controls(Side::Right).is_none());
-        assert!(Chrome::default().controls(Side::Right).is_some());
+        assert!(chrome.controls(Side::Right, style::Look::default()).is_none());
+        assert!(Chrome::default().controls(Side::Right, style::Look::default()).is_some());
     }
 }

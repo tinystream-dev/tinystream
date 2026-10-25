@@ -7,10 +7,27 @@ use crate::chrome::ButtonLayout;
 
 mod gpu;
 mod portal;
+mod secrets;
 
 pub struct Linux;
 
 impl Desktop for Linux {
+    fn secrets() -> crate::secrets::Store {
+        std::sync::Arc::new(secrets::LinuxSecrets::default())
+    }
+
+    fn open_url(url: String) -> BoxFuture<'static, Result<(), String>> {
+        Box::pin(async move {
+            tokio::task::spawn_blocking(move || std::process::Command::new("xdg-open").arg(url).status())
+                .await
+                .map_err(|_| "Couldn't open the link.".to_string())?
+                .map_err(|_| "Couldn't open the link.".to_string())?
+                .success()
+                .then_some(())
+                .ok_or_else(|| "Couldn't open the link.".into())
+        })
+    }
+
     fn request_device(
         adapter: &wgpu::Adapter,
         descriptor: &wgpu::DeviceDescriptor<'_>,

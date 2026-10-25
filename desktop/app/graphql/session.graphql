@@ -1,0 +1,58 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+query Connection {
+  server { version signInStyle setupRequired email }
+  appearance { mode style light { palette { tokens { name value } } } dark { palette { tokens { name value } } } }
+  signInProfiles { key avatar }
+  viewer { ...Person }
+}
+
+mutation SignIn($username: String, $profile: String, $password: String!) {
+  signIn(username: $username, profile: $profile, password: $password) {
+    token
+    user { ...Person }
+  }
+}
+
+mutation Setup($username: String!, $password: String!) {
+  setup(username: $username, password: $password) {
+    token
+    user { ...Person }
+  }
+}
+
+mutation SignOut { signOut }
+
+query Invite($token: String!) { invite(token: $token) { expiresAt } }
+mutation AcceptInvite($token: String!, $username: String!, $password: String!) {
+  acceptInvite(token: $token, username: $username, password: $password) {
+    token
+    user { ...Person }
+  }
+}
+query PasswordReset($token: String!) { passwordReset(token: $token) }
+mutation RequestPasswordReset($who: String!) { requestPasswordReset(who: $who) }
+mutation ResetPassword($token: String!, $password: String!) {
+  resetPassword(token: $token, password: $password) {
+    token
+    user { ...Person }
+  }
+}
+
+subscription Events {
+  events {
+    __typename
+    ... on ConfigChanged { error }
+    ... on ScanStarted { library }
+    ... on ScanFinished { library titles videos skipped }
+    ... on LibraryChanged { library }
+    ... on MetadataChanged { titleId status }
+    ... on ListChanged { list }
+    ... on SeriesChanged { seriesId }
+    ... on EpisodesImported { library show titleId episodes { season episode } }
+    ... on NotificationReceived { notification { ...NotificationFields } }
+    ... on ClipChanged { clipId state progress }
+    ... on QueueChanged { by }
+    ... on PlaybackChanged { client trackId position paused }
+  }
+}
