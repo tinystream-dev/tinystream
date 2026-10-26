@@ -1,13 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-use std::collections::HashMap;
 use std::fmt;
 use std::sync::Arc;
 
-use iced_widget::image;
-
 use crate::api::{self, Api, Token};
 use crate::app::{Effect, Message as AppMessage};
+use crate::images::{self, Images};
 use crate::platform::{self, Desktop};
 use crate::servers::{Config, Release, Store, User};
 use crate::updates;
@@ -41,6 +39,11 @@ pub struct Session {
     pub fallback: bool,
     pub address: String,
     pub system_dark: bool,
+    /// Whether the desktop asks for less motion; Settings can override it.
+    pub reduce_motion: bool,
+    pub images: Images,
+    /// The server waiting for "Remove" to be confirmed.
+    pub removing: Option<u64>,
     username: String,
     password: String,
     profile: Option<String>,
@@ -48,7 +51,6 @@ pub struct Session {
     link_token: String,
     link_valid: bool,
     pending_link: Option<String>,
-    avatars: HashMap<String, image::Handle>,
     store: Option<Arc<Store>>,
 }
 
@@ -69,6 +71,9 @@ impl Default for Session {
             fallback: false,
             address: String::new(),
             system_dark: true,
+            reduce_motion: false,
+            images: Images::default(),
+            removing: None,
             username: String::new(),
             password: String::new(),
             profile: None,
@@ -76,7 +81,6 @@ impl Default for Session {
             link_token: String::new(),
             link_valid: false,
             pending_link: None,
-            avatars: HashMap::new(),
             store: None,
         }
     }
@@ -103,6 +107,8 @@ pub enum Message {
     Login,
     Link(String),
     Updates(bool),
+    ReduceMotion(Option<bool>),
+    AskRemove(Option<u64>),
     DismissMismatch,
     AcknowledgeFallback,
     OpenRelease,
@@ -110,6 +116,13 @@ pub enum Message {
     Live(u64, api::Live),
     UpdateResult(Option<Release>),
     Tick,
+}
+
+/// Where a sign-in profile's picture is.
+pub fn profile_avatar(key: &str) -> String {
+    let mut url = url::Url::parse("http://server/api/sign-in/").expect("a URL");
+    url.path_segments_mut().expect("a path").pop_if_empty().push(key).push("avatar");
+    url.path().trim_start_matches('/').to_owned()
 }
 
 impl fmt::Debug for Message {
@@ -125,7 +138,9 @@ pub enum Outcome {
     SignedIn(Config, Api, bool),
     SignedOut(Config),
     Refreshed(Box<api::connection::ResponseData>),
-    Avatars(Vec<(String, image::Handle)>),
+    /// Pictures that arrived: their path, their bytes (or nothing) and whether they're from the
+    /// network rather than the disk.
+    Pictures(Vec<(String, Option<iced_widget::image::Handle>, bool)>),
     LinkValid(Option<String>),
     Sent,
     Saved(Config),
@@ -207,8 +222,10 @@ impl Session {
             },
             Message::SignOut(id) | Message::Remove(id) if !self.busy => {
                 let remove = matches!(message, Message::Remove(_));
+                self.removing = None;
                 self.sign_out(id, remove, effects);
             },
+            Message::AskRemove(id) => self.removing = id,
             Message::Submit if !self.busy && self.screen == Screen::Connect => self.update(Message::Connect, effects),
             Message::Submit if !self.busy && self.screen == Screen::Link => {
                 self.update(Message::Link(self.address.clone()), effects);
@@ -234,6 +251,13 @@ impl Session {
                     Ok(Outcome::Saved(
                         store.save(|config| config.check_updates = enabled).await.map_err(storage_error)?,
                     ))
+                });
+            },
+            Message::ReduceMotion(reduce) => {
+                let Some(store) = self.store.clone() else { return };
+                self.config.reduce_motion = reduce;
+                self.task(effects, async move {
+                    Ok(Outcome::Saved(store.save(|config| config.reduce_motion = reduce).await.map_err(storage_error)?))
                 });
             },
             Message::DismissMismatch => {
@@ -287,7 +311,7 @@ impl Session {
             Message::Live(generation, _) if generation != self.generation => {},
             Message::Live(_, event) => match event {
                 api::Live::Connected => {
-                    self.avatars.clear();
+                    self.images.clear();
                     self.online = true;
                     self.revision += 1;
                     self.refresh(effects);
@@ -309,7 +333,7 @@ impl Session {
                     };
                     if matches!(event.events, api::events::EventsEvents::ListChanged(ref change) if matches!(change.list, api::events::ChangedList::USERS))
                     {
-                        self.avatars.clear();
+                        self.images.clear();
                     }
                     self.last_event = Some(event);
                     self.revision += 1;
@@ -360,7 +384,7 @@ impl Session {
         self.last_event = None;
         self.screen = Screen::Login;
         self.connection = None;
-        self.avatars.clear();
+        self.images.clear();
         self.online = false;
         self.profile = None;
         self.by_name = false;
@@ -423,7 +447,11 @@ impl Session {
                     self.screen = Screen::Connect;
                 }
             },
-            Outcome::Avatars(avatars) => self.avatars.extend(avatars.iter().cloned()),
+            Outcome::Pictures(pictures) => {
+                for (path, bytes, fresh) in pictures {
+                    self.images.arrived(path.clone(), bytes.clone(), *fresh);
+                }
+            },
             Outcome::LinkValid(who) => {
                 self.busy = false;
                 self.link_valid = who.is_some();
@@ -457,12 +485,14 @@ impl Session {
         {
             self.screen = if ready { Screen::Ready } else { Screen::Login };
         }
-        let keys: Vec<_> = data
+        let mut wanted: Vec<String> = data
             .sign_in_profiles
             .iter()
-            .filter(|p| p.avatar.is_some() && !self.avatars.contains_key(&p.key))
-            .map(|p| p.key.clone())
+            .filter(|p| p.avatar.is_some())
+            .map(|p| profile_avatar(&p.key))
+            .chain(data.viewer.as_ref().and_then(|v| v.avatar.clone()))
             .collect();
+        wanted.retain(|path| self.images.want(path));
         self.connection = Some(data);
         if ready
             && !self.online
@@ -470,36 +500,40 @@ impl Session {
         {
             effects.push(Effect::Live(Some(api), self.generation));
         }
-        if !keys.is_empty()
+        if !wanted.is_empty()
             && let Some(api) = self.api.clone()
         {
-            self.request(effects, async move {
-                let mut avatars = vec![];
-                for key in keys {
-                    let mut url = api.origin.join("api/sign-in/").expect("origin");
-                    url.path_segments_mut().expect("http URL").pop_if_empty().push(&key).push("avatar");
-                    let result = async {
-                        let mut response = api.media(url.path()).ok()?.send().await.ok()?.error_for_status().ok()?;
-                        let mut bytes = Vec::new();
-                        while let Some(chunk) = response.chunk().await.ok()? {
-                            if bytes.len() + chunk.len() > 4 * 1024 * 1024 {
-                                return None;
-                            }
-                            bytes.extend_from_slice(&chunk);
-                        }
-                        Some(image::Handle::from_bytes(bytes))
-                    }
-                    .await;
-                    if let Some(handle) = result {
-                        avatars.push((key, handle));
-                    }
-                }
-                Ok(Outcome::Avatars(avatars))
-            });
+            self.pictures(effects, api, wanted);
         }
         if let Some(link) = self.pending_link.take() {
             self.open_link(&link, effects);
         }
+    }
+
+    /// Shows what's on disk for `paths` at once, then what the server has.
+    fn pictures(&self, effects: &mut Vec<Effect>, api: Api, paths: Vec<String>) {
+        let cached = api.clone();
+        let from_disk = paths.clone();
+        self.request(effects, async move {
+            let mut pictures = vec![];
+            for path in from_disk {
+                if let Some(bytes) = images::cached(&cached, &path).await {
+                    pictures.push((path, images::decode(bytes).await, false));
+                }
+            }
+            Ok(Outcome::Pictures(pictures))
+        });
+        self.request(effects, async move {
+            let mut pictures = vec![];
+            for path in paths {
+                let handle = match images::fetch(&api, &path).await {
+                    Some(bytes) => images::decode(bytes).await,
+                    None => None,
+                };
+                pictures.push((path, handle, true));
+            }
+            Ok(Outcome::Pictures(pictures))
+        });
     }
 
     fn refresh(&self, effects: &mut Vec<Effect>) {
@@ -704,6 +738,78 @@ impl Session {
 
 fn storage_error(_: anyhow::Error) -> api::Error {
     api::Error::message("Couldn't access saved servers or credentials. Check your keyring and file permissions.")
+}
+
+#[cfg(debug_assertions)]
+impl Session {
+    /// Local-only scenes for checking layout without opening windows or touching accounts.
+    pub async fn preview(&mut self, scene: &str) -> anyhow::Result<()> {
+        use serde_json::json;
+
+        self.busy = false;
+        self.online = true;
+        self.store = Store::open(
+            std::env::temp_dir().join(format!("tinystream-preview-{}", std::process::id())).join("servers.json"),
+            platform::Current::secrets(),
+        )
+        .await
+        .ok();
+        if scene == "connect" {
+            return Ok(());
+        }
+        if scene.starts_with("http://") || scene.starts_with("https://") {
+            let api = Api::new(url::Url::parse(scene)?, None)?;
+            self.connection = Some(api.connection().await?);
+            self.api = Some(api);
+            self.screen = Screen::Login;
+            return Ok(());
+        }
+        self.api = Some(
+            Api::new(url::Url::parse("https://tv.example.com/").expect("preview URL"), None).expect("preview API"),
+        );
+        self.config.servers = vec![
+            crate::servers::Server {
+                id: 1,
+                url: "https://tv.example.com/".into(),
+                name: "tv.example.com".into(),
+                user: Some(User { id: 1, username: "David".into(), avatar: None }),
+            },
+            crate::servers::Server {
+                id: 2,
+                url: "http://tinystream.lan:3000/".into(),
+                name: "tinystream.lan:3000".into(),
+                user: Some(User { id: 2, username: "Mira".into(), avatar: None }),
+            },
+            crate::servers::Server {
+                id: 3,
+                url: "https://a-very-long-server-address.example.com/tinystream/".into(),
+                name: "a-very-long-server-address.example.com".into(),
+                user: None,
+            },
+        ];
+        self.config.active = Some(1);
+        self.connection = Some(serde_json::from_value(json!({
+            "server": { "version": updates::VERSION, "signInStyle": "PROFILES", "setupRequired": false, "email": true },
+            "appearance": { "mode": "SINGLE", "style": "LAYERED", "mediaTint": false, "light": { "palette": { "tokens": [] } }, "dark": { "palette": { "tokens": [] } } },
+            "signInProfiles": [ { "key": "one", "avatar": null }, { "key": "two", "avatar": null }, { "key": "three", "avatar": null } ],
+            "viewer": null
+        })).expect("preview connection"));
+        self.screen = match scene {
+            "servers" => Screen::Servers,
+            "settings" | "credits" | "account" => Screen::Ready,
+            "reset" => Screen::Reset,
+            "invite" => {
+                self.link_valid = true;
+                Screen::Invite
+            },
+            _ => Screen::Login,
+        };
+        self.by_name = scene == "login";
+        if scene == "unlock" {
+            self.profile = Some("one".into());
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]

@@ -20,6 +20,20 @@ pub enum Shortcut {
     Go(Route),
     Back,
     Forward,
+    Zoom(i8),
+}
+
+/// Zoom remains available when a field or modal has captured keyboard input.
+pub fn zoom(key: &Key, modifiers: Modifiers) -> Option<Shortcut> {
+    if !modifiers.control() || modifiers.alt() || modifiers.logo() {
+        return None;
+    }
+    match key.as_ref() {
+        Key::Character("+" | "=") => Some(Shortcut::Zoom(1)),
+        Key::Character("-") => Some(Shortcut::Zoom(-1)),
+        Key::Character("0") => Some(Shortcut::Zoom(0)),
+        _ => None,
+    }
 }
 
 #[derive(Debug, Default)]
@@ -85,6 +99,8 @@ pub const SHEET: &[(&str, &[(&str, &str)])] = &[
         "Anywhere",
         &[
             ("Ctrl+K", "Search and commands"),
+            ("Ctrl++  Ctrl+−", "Scale the UI"),
+            ("Ctrl+0", "Reset UI scale"),
             ("/", "Search"),
             ("?", "This list"),
             ("N", "Notifications"),

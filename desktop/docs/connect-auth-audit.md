@@ -43,3 +43,10 @@ Network and Secret Service protocol implementations are app code, not additional
 The UI repair adds no crates. Geist is embedded from the web workspace’s installed
 `@fontsource-variable/geist` Latin font, converted to TrueType; its OFL is included
 in `app/assets/Geist-OFL.txt`. The shared vector logo is read by the build script.
+
+The design system (#82) adds only the repository-owned `tinystream-theme` and
+`tinystream-squircle` path crates. Theme reuses the already-approved base64 0.22.1 and
+thiserror 2.0.21 from both lockfiles; squircle has no dependencies. No registry version,
+feature set or iced pin changes. Lucide SVGs come from the web's locked lucide-react 1.48.0;
+the app-owned build script translates their paths to vectors without another crate.
+Asset notices ship in `desktop/THIRD_PARTY_LICENSES` and are accessible from Settings → About.

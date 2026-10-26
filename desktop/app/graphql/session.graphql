@@ -2,7 +2,7 @@
 
 query Connection {
   server { version signInStyle setupRequired email }
-  appearance { mode style light { palette { tokens { name value } } } dark { palette { tokens { name value } } } }
+  appearance { mode style mediaTint light { palette { tokens { name value } } } dark { palette { tokens { name value } } } }
   signInProfiles { key avatar }
   viewer { ...Person }
 }

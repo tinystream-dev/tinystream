@@ -4,13 +4,15 @@
 //! the sidebar's logo row and a strip along the top of the content move the window.
 
 use iced_core::Length::{self, Fill};
-use iced_core::mouse::{self, Interaction};
+use iced_core::Point;
+use iced_core::mouse::Interaction;
 use iced_core::window::Direction;
-use iced_core::{Point, Rectangle, Size, Theme};
-use iced_widget::canvas::{self, Frame, Path, Stroke, stroke};
-use iced_widget::{Element, Renderer, Widget, button, canvas as draw, column, container, mouse_area, row, space};
+use iced_widget::{Element, Widget, column, container, mouse_area, row, space};
 
-use crate::style;
+use crate::ui::Look;
+use crate::ui::icon::{Icon, icon};
+use crate::ui::pressable::{Appearance, Status, pressable};
+use crate::ui::squircle::{Paint, squircle};
 
 /// The invisible strip along the top of the content that moves the window.
 pub const DRAG_STRIP: f32 = 12.0;
@@ -161,7 +163,7 @@ impl Chrome {
     }
 
     /// The controls for one side, or nothing if the layout puts none there.
-    pub fn controls<'a>(&self, side: Side, look: style::Look) -> Option<Element<'a, Message>> {
+    pub fn controls<'a>(&self, side: Side, look: &Look) -> Option<Element<'a, Message>> {
         let controls = match side {
             Side::Left => &self.layout.left,
             Side::Right => &self.layout.right,
@@ -171,21 +173,48 @@ impl Chrome {
         }
 
         let maximized = self.maximized;
+        let l = *look;
         let buttons = controls.iter().map(|&control| {
-            button(draw(Glyph { control, maximized }).width(10).height(10))
-                .padding(7)
-                .style(style::window_button(control == Control::Close, look))
-                .on_press(Message::Control(control))
-                .boxed()
+            let glyph = match control {
+                Control::Minimize => Icon::Minus,
+                Control::Maximize if maximized => Icon::Copy,
+                Control::Maximize => Icon::Square,
+                Control::Close => Icon::X,
+            };
+            let close = control == Control::Close;
+            pressable(container(icon(glyph, 14.0).stroke(1.6)).center(28), 14.0, look, move |status| {
+                let (fill, ink) = match status {
+                    Status::Hovered if close => (Some(l.danger), l.canvas),
+                    Status::Pressed if close => (Some(l.danger.scale_alpha(0.8)), l.canvas),
+                    Status::Hovered => (Some(l.hover), l.ink),
+                    Status::Pressed => (Some(l.press), l.ink),
+                    _ => (None, l.ink_2),
+                };
+                Appearance { paint: Paint { fill, ..Paint::NONE }, ink }
+            })
+            .round()
+            .on_press(Message::Control(control))
+            .boxed()
         });
 
         Some(row(buttons).spacing(2).boxed())
     }
 
-    /// The controls in their floating glass pill.
-    pub fn pill<'a>(&self, side: Side, look: style::Look) -> Option<Element<'a, Message>> {
-        self.controls(side, look)
-            .map(|controls| container(controls).padding(3).style(style::controls_pill(look)).boxed())
+    /// The controls in their floating pill, of the same material as menus.
+    pub fn pill<'a>(&self, side: Side, look: &Look) -> Option<Element<'a, Message>> {
+        self.controls(side, look).map(|controls| {
+            squircle(controls, 17.0, look)
+                .round()
+                .paint(Paint {
+                    fill: Some(look.float),
+                    material: look.material(),
+                    edge: true,
+                    lift: true,
+                    ..Paint::NONE
+                })
+                .padding(3)
+                .boxed()
+        })
     }
 
     /// Invisible resize handles around the window, layered over everything else.
@@ -237,51 +266,6 @@ fn corner(direction: Direction) -> Interaction {
     }
 }
 
-/// A window control's icon, drawn in tinystream's thin-stroke style.
-#[derive(Debug, Clone, Copy)]
-struct Glyph {
-    control: Control,
-    maximized: bool,
-}
-
-impl<Message> canvas::Program<Message> for Glyph {
-    type State = ();
-
-    fn draw(
-        &self,
-        _state: &(),
-        renderer: &Renderer,
-        theme: &Theme,
-        bounds: Rectangle,
-        _cursor: mouse::Cursor,
-    ) -> Vec<canvas::Geometry> {
-        let mut frame = Frame::new(renderer, bounds.size());
-        let color = theme.palette().background.base.text;
-        let line = Stroke::default().with_width(1.2).with_color(color).with_line_cap(stroke::LineCap::Round);
-        let (w, h) = (bounds.width, bounds.height);
-
-        match self.control {
-            Control::Minimize => {
-                frame.stroke(&Path::line(Point::new(0.5, h / 2.0), Point::new(w - 0.5, h / 2.0)), line)
-            },
-            Control::Maximize if self.maximized => {
-                frame.stroke(&Path::rectangle(Point::new(0.5, 2.5), Size::new(w - 3.0, h - 3.0)), line);
-                frame.stroke(&Path::line(Point::new(2.5, 0.5), Point::new(w - 0.5, 0.5)), line);
-                frame.stroke(&Path::line(Point::new(w - 0.5, 0.5), Point::new(w - 0.5, h - 2.5)), line);
-            },
-            Control::Maximize => {
-                frame.stroke(&Path::rectangle(Point::new(0.5, 0.5), Size::new(w - 1.0, h - 1.0)), line)
-            },
-            Control::Close => {
-                frame.stroke(&Path::line(Point::new(0.5, 0.5), Point::new(w - 0.5, h - 0.5)), line);
-                frame.stroke(&Path::line(Point::new(w - 0.5, 0.5), Point::new(0.5, h - 0.5)), line);
-            },
-        }
-
-        vec![frame.into_geometry()]
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -305,7 +289,7 @@ mod tests {
     fn hides_controls_when_fullscreen() {
         let chrome = Chrome { fullscreen: true, ..Chrome::default() };
 
-        assert!(chrome.controls(Side::Right, style::Look::default()).is_none());
-        assert!(Chrome::default().controls(Side::Right, style::Look::default()).is_some());
+        assert!(chrome.controls(Side::Right, &Look::default()).is_none());
+        assert!(Chrome::default().controls(Side::Right, &Look::default()).is_some());
     }
 }

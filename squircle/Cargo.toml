@@ -1,0 +1,9 @@
+[package]
+name = "tinystream-squircle"
+description = "Continuous-curvature corners, the same as packages/shared/src/squircle.ts"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish = false

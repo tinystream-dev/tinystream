@@ -24,7 +24,6 @@ use iced_winit::{Clipboard, conversion, winit};
 use crate::app::{App, Effect, Message};
 use crate::chrome::Action;
 use crate::platform::{self, Desktop};
-use crate::style;
 
 pub enum UserEvent {
     Message(Message),
@@ -67,7 +66,12 @@ struct Window {
     raw: Arc<winit::window::Window>,
     surface: wgpu::Surface<'static>,
     device: wgpu::Device,
+    queue: wgpu::Queue,
     format: wgpu::TextureFormat,
+    /// Whether frames can be drawn into a texture of their own and copied to the surface, so
+    /// glass can read back what's behind it.
+    readback: bool,
+    frame: Option<wgpu::Texture>,
     alpha_mode: wgpu::CompositeAlphaMode,
     renderer: Renderer,
     viewport: Viewport,
@@ -95,7 +99,7 @@ impl Runner {
             requests: Vec::new(),
             settings,
             proxy,
-            theme: style::theme(),
+            theme: crate::ui::Look::default().theme(),
             window: None,
             clipboard: Clipboard::new(),
             effects: Vec::new(),
@@ -139,6 +143,10 @@ impl Runner {
             .find(|format| format.is_srgb() == iced_wgpu::graphics::color::GAMMA_CORRECTION)
             .or_else(|| capabilities.formats.first().copied())
             .ok_or("the surface supports no formats")?;
+        let readback = capabilities.usages.contains(wgpu::TextureUsages::COPY_DST);
+        if !readback {
+            tracing::info!("the surface can't be copied to; glass will be solid");
+        }
         let alpha_mode = if capabilities.alpha_modes.contains(&wgpu::CompositeAlphaMode::PreMultiplied) {
             wgpu::CompositeAlphaMode::PreMultiplied
         } else {
@@ -163,7 +171,7 @@ impl Runner {
         let engine = Engine::new(
             &adapter,
             device.clone(),
-            queue,
+            queue.clone(),
             format,
             Some(iced_wgpu::graphics::Antialiasing::MSAAx4),
             Shell::new(RendererNotifier(self.proxy.clone())),
@@ -179,7 +187,7 @@ impl Runner {
         let size = raw.inner_size();
         let viewport = Viewport::with_physical_size(
             Size::new(size.width, size.height),
-            renderer::Scale { window: raw.scale_factor() as f32, application: 1.0 },
+            renderer::Scale { window: raw.scale_factor() as f32, application: self.app.ui_scale() },
         );
 
         let proxy = self.proxy.clone();
@@ -187,7 +195,10 @@ impl Runner {
             raw,
             surface,
             device,
+            queue,
             format,
+            readback,
+            frame: None,
             alpha_mode,
             renderer,
             viewport,
@@ -212,6 +223,11 @@ impl Runner {
 
         for effect in std::mem::take(&mut self.effects) {
             match effect {
+                Effect::Scale(scale) => {
+                    if let Some(window) = &mut self.window {
+                        window.rescale(scale);
+                    }
+                },
                 Effect::Exit => {
                     if let Some((_, task)) = self.live.take() {
                         task.abort();
@@ -327,7 +343,10 @@ impl Runner {
         self.process(event_loop);
         let Some(window) = &mut self.window else { return };
         self.app.session.system_dark = window.raw.theme() != Some(winit::window::Theme::Light);
-        let look = self.app.session.look();
+        let look = match &self.app.gallery {
+            Some(gallery) => gallery.look(self.app.reduce_motion),
+            None => self.app.session.look(),
+        };
         self.theme = look.theme();
         iced_core::Renderer::tick(&mut window.renderer);
         let size = window.raw.inner_size();
@@ -357,15 +376,11 @@ impl Runner {
         window.cache = interface.into_cache();
         window.react(state, &mut self.clipboard, &self.proxy);
 
-        let presented = iced_wgpu::window::compositor::present(
-            &mut window.renderer,
-            &mut window.surface,
-            &window.viewport,
-            look.canvas,
-            || window.raw.pre_present_notify(),
-        );
-        if presented.is_err() {
+        if !window.present(look.canvas) {
             window.resized = true;
+            window.raw.request_redraw();
+        }
+        if self.app.animating() {
             window.raw.request_redraw();
         }
 
@@ -376,17 +391,37 @@ impl Runner {
 }
 
 impl Window {
-    fn configure(&mut self) {
+    fn rescale(&mut self, application: f32) {
+        let old = self.viewport.scale_factor();
         let size = self.raw.inner_size();
         self.viewport = Viewport::with_physical_size(
             Size::new(size.width, size.height),
-            renderer::Scale { window: self.raw.scale_factor() as f32, application: 1.0 },
+            renderer::Scale { window: self.raw.scale_factor() as f32, application },
         );
+        iced_core::Renderer::hint(&mut self.renderer, self.viewport.scale());
+        if let mouse::Cursor::Available(point) = self.cursor {
+            let point = iced_core::Point::new(
+                point.x * old / self.viewport.scale_factor(),
+                point.y * old / self.viewport.scale_factor(),
+            );
+            self.cursor = mouse::Cursor::Available(point);
+            self.events.push(Event::Mouse(mouse::Event::CursorMoved { position: point }));
+        }
+    }
+
+    fn configure(&mut self) {
+        let size = self.raw.inner_size();
+        self.rescale(self.viewport.scale().application);
         if size.width > 0 && size.height > 0 {
+            let usage = if self.readback {
+                wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_DST
+            } else {
+                wgpu::TextureUsages::RENDER_ATTACHMENT
+            };
             self.surface.configure(
                 &self.device,
                 &wgpu::SurfaceConfiguration {
-                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                    usage,
                     format: self.format,
                     width: size.width,
                     height: size.height,
@@ -397,8 +432,50 @@ impl Window {
                     color_space: wgpu::SurfaceColorSpace::Auto,
                 },
             );
+            self.frame = self.readback.then(|| {
+                self.device.create_texture(&wgpu::TextureDescriptor {
+                    label: Some("tinystream frame"),
+                    size: wgpu::Extent3d { width: size.width, height: size.height, depth_or_array_layers: 1 },
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format: self.format,
+                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                        | wgpu::TextureUsages::TEXTURE_BINDING
+                        | wgpu::TextureUsages::COPY_SRC,
+                    view_formats: &[],
+                })
+            });
+            crate::ui::backdrop::set_frame(self.frame.clone());
         }
         self.resized = false;
+    }
+
+    /// Draws the frame and shows it, or returns `false` if the surface has to be set up again.
+    fn present(&mut self, background: iced_core::Color) -> bool {
+        let surface = match self.surface.get_current_texture() {
+            wgpu::CurrentSurfaceTexture::Success(surface) => surface,
+            wgpu::CurrentSurfaceTexture::Timeout | wgpu::CurrentSurfaceTexture::Occluded => return true,
+            _ => return false,
+        };
+        match &self.frame {
+            Some(frame) => {
+                let view = frame.create_view(&wgpu::TextureViewDescriptor::default());
+                self.renderer.present(Some(background), self.format, &view, &self.viewport);
+                let mut encoder = self
+                    .device
+                    .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("tinystream present") });
+                encoder.copy_texture_to_texture(frame.as_image_copy(), surface.texture.as_image_copy(), frame.size());
+                self.queue.submit([encoder.finish()]);
+            },
+            None => {
+                let view = surface.texture.create_view(&wgpu::TextureViewDescriptor::default());
+                self.renderer.present(Some(background), self.format, &view, &self.viewport);
+            },
+        }
+        self.raw.pre_present_notify();
+        self.queue.present(surface);
+        true
     }
 
     /// Applies what the widgets asked for after an update: the cursor, redraws and the clipboard.
@@ -451,7 +528,8 @@ impl Window {
             },
             Action::Menu => {
                 if let mouse::Cursor::Available(point) = self.cursor {
-                    self.raw.show_window_menu(winit::dpi::LogicalPosition::new(point.x, point.y));
+                    let scale = self.viewport.scale().application;
+                    self.raw.show_window_menu(winit::dpi::LogicalPosition::new(point.x * scale, point.y * scale));
                 }
                 Ok(())
             },
@@ -463,9 +541,13 @@ impl Window {
     }
 
     fn flags(&self) -> Message {
-        let size = self.viewport.logical_size();
+        let size = self.raw.inner_size().to_logical::<f32>(self.raw.scale_factor());
 
-        Message::Resized { size, maximized: self.raw.is_maximized(), fullscreen: self.raw.fullscreen().is_some() }
+        Message::Resized {
+            size: Size::new(size.width, size.height),
+            maximized: self.raw.is_maximized(),
+            fullscreen: self.raw.fullscreen().is_some(),
+        }
     }
 }
 
@@ -481,19 +563,21 @@ impl ApplicationHandler<UserEvent> for Runner {
                 window.raw.request_redraw();
                 self.window = Some(window);
                 self.update(event_loop, flags);
-                self.update(event_loop, Message::Session(crate::session::Message::Start));
-                let proxy = self.proxy.clone();
-                self.runtime.spawn(async move {
-                    loop {
-                        tokio::time::sleep(std::time::Duration::from_secs(3600)).await;
-                        if proxy
-                            .send_event(UserEvent::Message(Message::Session(crate::session::Message::Tick)))
-                            .is_err()
-                        {
-                            break;
+                if self.app.gallery.is_none() {
+                    self.update(event_loop, Message::Session(crate::session::Message::Start));
+                    let proxy = self.proxy.clone();
+                    self.runtime.spawn(async move {
+                        loop {
+                            tokio::time::sleep(std::time::Duration::from_secs(3600)).await;
+                            if proxy
+                                .send_event(UserEvent::Message(Message::Session(crate::session::Message::Tick)))
+                                .is_err()
+                            {
+                                break;
+                            }
                         }
-                    }
-                });
+                    });
+                }
             },
             Err(error) => {
                 tracing::error!("can't open the window: {error}");

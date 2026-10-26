@@ -46,7 +46,10 @@ menu where supported. Controls follow the settings portal's button layout and up
 Fullscreen hides them. Tiled-state detection and hiding controls while tiled are deferred, as
 agreed, to keep winit unpatched.
 
-Window size and maximized state are saved in the XDG state directory as `tinystream/window.json`.
+Window size, maximized state and UI scale are saved on close in the XDG state directory as
+`tinystream/window.json`. `Ctrl++` (or `Ctrl+=`) and `Ctrl+-` change UI scale in browser-style
+steps from 50% to 200%; `Ctrl+0` resets it to 100%. These work in the gallery, fields and dialogs,
+and multiply the display’s DPI scale without changing the window size.
 Configuration and cache directories also use XDG paths through `paths.rs`.
 
 ## Connections and credentials
@@ -101,3 +104,49 @@ App restart restored both file-fallback sessions and sessions migrated to an iso
 Secret Service. The installed server lacks SMTP, so the reset token was seeded in its temporary
 database; mail delivery was not verified. Version mismatch, updates and transport error paths
 are covered by the focused tests. No release build was run.
+
+## Design system
+
+`app/src/ui/` follows the web's `styles.css` and components: all 28 colour tokens,
+Layered/Flat/Glass, Geist Variable, bundled Lucide vectors, squircle surfaces and focus rings.
+`theme/` contains the server's unchanged theme derivation and frozen `ts1` format;
+`squircle/` ports the shared TypeScript corner geometry. Neither adds a registry dependency.
+Shared crate changes trigger the desktop CI job too.
+
+The app draws into a readable frame texture. Glass samples only the layer already drawn
+beneath it, then downsamples, blurs horizontally/vertically and composites through the
+squircle outline. A surface without COPY_DST support uses solid materials. Posters use a
+separate perspective pipeline for tilt/glare. Route changes blur and fade the page while the
+chrome stays in place. Reduced motion follows the settings portal (GNOME animations as a
+fallback), with a persisted System/On/Off override in Settings → Appearance.
+
+The reusable pieces include buttons, fields, switches, checkboxes, keyboard-operated selects,
+menus, dialogs/sheets, segments, badges, progress, spinners, posters/grids/shelves, avatars,
+images, skeletons, tickers, sparklines and toasts. Modal layers contain keyboard focus and
+close on Escape or an outside click. The image cache shows disk entries immediately and
+revalidates them from the connected server; decoding runs off the UI thread with allocation
+limits. A late disk read cannot overwrite a newer download.
+
+The development gallery and headless PNG snapshots need no display connection:
+
+```sh
+cargo run --locked -- --gallery
+cargo run --locked -- --gallery --style glass --custom --snapshot /tmp/gallery.png
+cargo run --locked -- --gallery --scroll 2100 --pointer 100,100 --snapshot /tmp/posters.png
+cargo run --locked -- --gallery --scene dialog --key Escape --snapshot /tmp/dismissed.png
+cargo run --locked -- --scene servers --snapshot /tmp/servers.png
+cargo run --locked -- --scene http://localhost:3000 --light --snapshot /tmp/sign-in.png
+cargo test --locked snapshot::tests::scrolled_artwork_and_modal_keyboard_input -- --ignored
+cargo test --locked --manifest-path ../Cargo.toml -p tinystream-theme -p tinystream-squircle
+```
+
+`--style flat|layered|glass`, `--custom`, and `--reduce-motion` select gallery variants.
+`--size 1920x1200 --scale 1.5` checks fractional scaling at a logical 1280×800.
+`--scroll`, `--pointer`, `--click`, and `--key Tab|Enter|Space|Escape` exercise the headless UI.
+Snapshot scenes include connect, login, profiles, unlock, servers, settings, invite and reset;
+a URL scene reads only the server's public connection query. Scenes never perform sign-in,
+credential or configuration writes. The gallery is available only in debug builds.
+
+Geist and Lucide notices are embedded in Settings → About → Licenses and collected in
+`THIRD_PARTY_LICENSES`. Native and Rust dependency notices are collected by release packaging
+(#96) alongside these asset notices.

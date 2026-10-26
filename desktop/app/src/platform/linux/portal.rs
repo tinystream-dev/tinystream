@@ -1,15 +1,18 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! The window button layout from the xdg-desktop-portal Settings interface, which GNOME, KDE and
-//! others back with their own settings.
+//! Desktop settings from the xdg-desktop-portal Settings interface, which GNOME, KDE and others
+//! back with their own: the window button layout, and whether to reduce motion.
 
 use futures::StreamExt;
 use zbus::zvariant::{OwnedValue, Value};
 
 use crate::chrome::ButtonLayout;
 
-const NAMESPACE: &str = "org.gnome.desktop.wm.preferences";
-const KEY: &str = "button-layout";
+const LAYOUT: (&str, &str) = ("org.gnome.desktop.wm.preferences", "button-layout");
+/// `1` for "reduce", in newer portals.
+const REDUCED_MOTION: (&str, &str) = ("org.freedesktop.appearance", "reduced-motion");
+/// GNOME's switch, read where the portal doesn't have the standard key.
+const ANIMATIONS: (&str, &str) = ("org.gnome.desktop.interface", "enable-animations");
 
 #[zbus::proxy(
     interface = "org.freedesktop.portal.Settings",
@@ -28,36 +31,61 @@ trait Settings {
 }
 
 pub async fn watch_button_layout(send: Box<dyn Fn(ButtonLayout) + Send + Sync>) {
-    if let Err(error) = follow(&*send).await {
+    let parse = |value: &Value<'_>| match value {
+        Value::Str(layout) => Some(ButtonLayout::parse(layout.as_str())),
+        _ => None,
+    };
+    if let Err(error) = follow(LAYOUT, parse, &*send).await {
         tracing::info!("no button layout from the settings portal, using the default: {error}");
     }
 }
 
-async fn follow(send: &(dyn Fn(ButtonLayout) + Send + Sync)) -> zbus::Result<()> {
+pub async fn watch_reduced_motion(send: Box<dyn Fn(bool) + Send + Sync>) {
+    let standard = |value: &Value<'_>| match value {
+        Value::U32(preference) => Some(*preference == 1),
+        _ => None,
+    };
+    let gnome = |value: &Value<'_>| match value {
+        Value::Bool(animations) => Some(!animations),
+        _ => None,
+    };
+    if follow(REDUCED_MOTION, standard, &*send).await.is_err()
+        && let Err(error) = follow(ANIMATIONS, gnome, &*send).await
+    {
+        tracing::info!("no reduced motion setting from the settings portal: {error}");
+    }
+}
+
+/// Calls `send` with a setting now and whenever it changes.
+async fn follow<T>(
+    (namespace, key): (&str, &str),
+    parse: impl Fn(&Value<'_>) -> Option<T>,
+    send: &(dyn Fn(T) + Send + Sync),
+) -> zbus::Result<()> {
     let connection = zbus::Connection::session().await?;
     let settings = SettingsProxy::new(&connection).await?;
-    let mut changes = settings.receive_setting_changed_with_args(&[(0, NAMESPACE), (1, KEY)]).await?;
+    let mut changes = settings.receive_setting_changed_with_args(&[(0, namespace), (1, key)]).await?;
 
-    let value = match settings.read_one(NAMESPACE, KEY).await {
+    let value = match settings.read_one(namespace, key).await {
         Ok(value) => value,
-        Err(_) => settings.read(NAMESPACE, KEY).await?,
+        Err(_) => settings.read(namespace, key).await?,
     };
-    if let Some(layout) = parse(&value) {
-        send(layout);
+    if let Some(value) = unwrap(&value, &parse) {
+        send(value);
     }
 
     while let Some(change) = changes.next().await {
-        if let Some(layout) = change.args().ok().and_then(|args| parse(args.value())) {
-            send(layout);
+        if let Some(value) = change.args().ok().and_then(|args| unwrap(args.value(), &parse)) {
+            send(value);
         }
     }
     Ok(())
 }
 
-fn parse(value: &Value<'_>) -> Option<ButtonLayout> {
+/// Version 1 of the interface wraps values in a second variant.
+fn unwrap<T>(value: &Value<'_>, parse: &impl Fn(&Value<'_>) -> Option<T>) -> Option<T> {
     match value {
-        Value::Str(layout) => Some(ButtonLayout::parse(layout.as_str())),
-        Value::Value(inner) => parse(inner),
-        _ => None,
+        Value::Value(inner) => unwrap(inner, parse),
+        value => parse(value),
     }
 }

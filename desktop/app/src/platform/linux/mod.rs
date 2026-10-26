@@ -38,4 +38,8 @@ impl Desktop for Linux {
     fn watch_button_layout(send: Box<dyn Fn(ButtonLayout) + Send + Sync>) -> BoxFuture<'static, ()> {
         Box::pin(portal::watch_button_layout(send))
     }
+
+    fn watch_reduced_motion(send: Box<dyn Fn(bool) + Send + Sync>) -> BoxFuture<'static, ()> {
+        Box::pin(portal::watch_reduced_motion(send))
+    }
 }

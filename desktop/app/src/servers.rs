@@ -42,6 +42,8 @@ pub struct Config {
     pub release: Option<Release>,
     pub dismissed: Vec<String>,
     pub fallback_seen: bool,
+    /// Overrides the desktop's reduced motion setting.
+    pub reduce_motion: Option<bool>,
 }
 
 impl Default for Config {
@@ -54,6 +56,7 @@ impl Default for Config {
             release: None,
             dismissed: vec![],
             fallback_seen: false,
+            reduce_motion: None,
         }
     }
 }

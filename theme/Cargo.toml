@@ -1,0 +1,13 @@
+[package]
+name = "tinystream-theme"
+description = "tinystream's colour schemes: the token derivation and ts1 codes, shared by the server and the desktop app"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+base64 = "0.22"
+thiserror = "2"

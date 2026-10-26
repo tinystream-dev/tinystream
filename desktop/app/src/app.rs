@@ -20,6 +20,7 @@ pub enum Overlay {
     Shortcuts,
     Notifications,
     Account,
+    Credits,
 }
 
 pub struct App {
@@ -28,6 +29,12 @@ pub struct App {
     pub overlay: Option<Overlay>,
     pub query: String,
     pub session: crate::session::Session,
+    /// The design system's gallery, shown instead of everything else (`--gallery`).
+    pub gallery: Option<crate::ui::gallery::Gallery>,
+    /// Whether the desktop asks for less motion.
+    pub reduce_motion: bool,
+    /// When the route last changed, and from where, while the pages are still crossing over.
+    pub transition: Option<(Instant, Route)>,
     keys: Keys,
     window_state: WindowState,
 }
@@ -51,6 +58,8 @@ pub enum Message {
     Submit,
     Focus(bool),
     Session(crate::session::Message),
+    Gallery(crate::ui::gallery::Message),
+    ReducedMotion(bool),
 }
 
 /// What the event loop does for the app after an update.
@@ -61,6 +70,7 @@ pub enum Effect {
     Task(futures::future::BoxFuture<'static, Message>),
     Live(Option<crate::api::Api>, u64),
     Request(futures::future::BoxFuture<'static, Message>),
+    Scale(f32),
 }
 
 pub const SCROLL: &str = "page";
@@ -76,6 +86,9 @@ impl App {
             overlay: None,
             query: String::new(),
             session: crate::session::Session::default(),
+            gallery: None,
+            reduce_motion: false,
+            transition: None,
             keys: Keys::default(),
             window_state,
         }
@@ -133,6 +146,17 @@ impl App {
             Message::Scrolled(y) => self.history.set_scroll(y),
             Message::Overlay(overlay) => self.open(overlay, effects),
             Message::Query(query) => self.query = query,
+            Message::Gallery(message) => {
+                if let Some(gallery) = &mut self.gallery
+                    && let Some(operation) = gallery.update(message, self.reduce_motion)
+                {
+                    effects.push(Effect::Operate(operation));
+                }
+            },
+            Message::ReducedMotion(reduce) => {
+                self.reduce_motion = reduce;
+                self.session.reduce_motion = reduce;
+            },
             Message::Submit => {
                 if let Some((_, route)) = shell::commands(&self.query).into_iter().next() {
                     self.navigate(route, effects);
@@ -145,8 +169,31 @@ impl App {
         shell::view(self)
     }
 
+    pub fn ui_scale(&self) -> f32 {
+        self.window_state.ui_scale
+    }
+
+    /// Whether something on screen moves without being asked to, so frames have to keep coming.
+    pub fn animating(&self) -> bool {
+        let crossing = self
+            .transition
+            .as_ref()
+            .is_some_and(|(start, _)| crate::ui::effects::page_transition(start.elapsed()).is_some());
+        crossing && !self.session.look().reduce_motion
+            || self
+                .gallery
+                .as_ref()
+                .is_some_and(|gallery| !gallery.look(self.reduce_motion).reduce_motion && gallery.animating())
+    }
+
     /// Handles shell shortcuts, including search and Escape while a text field has focus.
     pub fn listen(&mut self, event: &Event, status: event::Status) -> Option<Message> {
+        if let Event::Keyboard(keyboard::Event::KeyPressed { key, modified_key, modifiers, .. }) = event
+            && let Some(shortcut) =
+                crate::keys::zoom(modified_key, *modifiers).or_else(|| crate::keys::zoom(key, *modifiers))
+        {
+            return Some(Message::Shortcut(shortcut));
+        }
         match event {
             Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. })
                 if *key == keyboard::Key::Named(keyboard::key::Named::Tab) =>
@@ -154,12 +201,18 @@ impl App {
                 Some(Message::Focus(modifiers.shift()))
             },
             Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. })
-                if modifiers.command() && matches!(key.as_ref(), keyboard::Key::Character("k" | "K")) =>
+                if modifiers.command()
+                    && matches!(key.as_ref(), keyboard::Key::Character("k" | "K"))
+                    && self.session.removing.is_none()
+                    && !self.gallery.as_ref().is_some_and(|g| g.modal_open())
+                    && matches!(self.overlay, None | Some(Overlay::Search)) =>
             {
                 Some(Message::Shortcut(Shortcut::ToggleSearch))
             },
             Event::Keyboard(keyboard::Event::KeyPressed { key, .. })
-                if *key == keyboard::Key::Named(keyboard::key::Named::Escape) && self.overlay.is_some() =>
+                if *key == keyboard::Key::Named(keyboard::key::Named::Escape)
+                    && self.overlay.is_some()
+                    && status != event::Status::Captured =>
             {
                 Some(Message::Overlay(None))
             },
@@ -180,6 +233,11 @@ impl App {
 
     fn shortcut(&mut self, shortcut: Shortcut, effects: &mut Vec<Effect>) {
         match shortcut {
+            Shortcut::Zoom(direction) => {
+                if self.window_state.zoom(direction) {
+                    effects.push(Effect::Scale(self.ui_scale()));
+                }
+            },
             Shortcut::ToggleSearch => self.toggle(Overlay::Search, effects),
             Shortcut::Search => self.open(Some(Overlay::Search), effects),
             Shortcut::ToggleShortcuts => self.toggle(Overlay::Shortcuts, effects),
@@ -187,13 +245,17 @@ impl App {
             Shortcut::Go(route) => self.navigate(route, effects),
             Shortcut::Back => {
                 self.overlay = None;
+                let from = self.history.current().route.clone();
                 if self.history.back().is_some() {
+                    self.transition = (!self.session.look().reduce_motion).then(|| (Instant::now(), from));
                     self.restore_scroll(effects);
                 }
             },
             Shortcut::Forward => {
                 self.overlay = None;
+                let from = self.history.current().route.clone();
                 if self.history.forward().is_some() {
+                    self.transition = (!self.session.look().reduce_motion).then(|| (Instant::now(), from));
                     self.restore_scroll(effects);
                 }
             },
@@ -214,7 +276,11 @@ impl App {
 
     fn navigate(&mut self, route: Route, effects: &mut Vec<Effect>) {
         self.overlay = None;
+        let from = self.history.current().route.clone();
         if self.history.push(route) {
+            if !self.session.look().reduce_motion {
+                self.transition = Some((Instant::now(), from));
+            }
             self.restore_scroll(effects);
         }
     }
@@ -278,5 +344,36 @@ mod tests {
             app.listen(&event, event::Status::Ignored),
             Some(Message::Shortcut(Shortcut::ToggleShortcuts))
         ));
+    }
+
+    #[test]
+    fn zoom_shortcuts_work_while_typing_and_in_dialogs() {
+        let state = WindowState::default();
+        let mut app = App::new(Route::Home, state);
+        app.overlay = Some(Overlay::Credits);
+        let mut effects = Vec::new();
+        let mut plus = key("=", keyboard::Modifiers::CTRL | keyboard::Modifiers::SHIFT);
+        if let Event::Keyboard(keyboard::Event::KeyPressed { modified_key, .. }) = &mut plus {
+            *modified_key = keyboard::Key::Character("+".into());
+        }
+        for event in [plus, key("=", keyboard::Modifiers::CTRL)] {
+            let message = app.listen(&event, event::Status::Captured).unwrap();
+            app.update(message, &mut effects);
+        }
+        assert_eq!(app.ui_scale(), 1.25);
+        assert!(matches!(effects.last(), Some(Effect::Scale(1.25))));
+        let message = app.listen(&key("-", keyboard::Modifiers::CTRL), event::Status::Captured).unwrap();
+        app.update(message, &mut effects);
+        assert_eq!(app.ui_scale(), 1.1);
+        let message = app.listen(&key("0", keyboard::Modifiers::CTRL), event::Status::Captured).unwrap();
+        app.update(message, &mut effects);
+        assert_eq!(app.ui_scale(), 1.0);
+        assert_eq!(app.window_state.size(), state.size());
+        assert_eq!(app.overlay, Some(Overlay::Credits));
+        assert!(app.listen(&key("+", keyboard::Modifiers::empty()), event::Status::Captured).is_none());
+        assert!(
+            app.listen(&key("0", keyboard::Modifiers::CTRL | keyboard::Modifiers::ALT), event::Status::Captured)
+                .is_none()
+        );
     }
 }

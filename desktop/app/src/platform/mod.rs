@@ -30,6 +30,12 @@ pub trait Desktop {
     fn watch_button_layout(_send: Box<dyn Fn(ButtonLayout) + Send + Sync>) -> BoxFuture<'static, ()> {
         Box::pin(async {})
     }
+
+    /// Follows whether the desktop asks for less motion, calling `send` now and whenever it
+    /// changes.
+    fn watch_reduced_motion(_send: Box<dyn Fn(bool) + Send + Sync>) -> BoxFuture<'static, ()> {
+        Box::pin(async {})
+    }
 }
 
 #[cfg(target_os = "linux")]
