@@ -5,17 +5,18 @@ use std::sync::Arc;
 
 use async_graphql::{Context, InputObject, Object};
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
-use axum::extract::{Path, Query, State};
+use axum::extract::{Path, Query, Request, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use futures::{SinkExt, StreamExt};
 use rand::seq::IndexedRandom;
 use serde::Deserialize;
 use serde_json::json;
+use sqlx::SqlitePool;
 use tokio::sync::broadcast::error::RecvError;
 
 use super::library::{Title, Video};
-use super::media::{StreamQuery, font_file, preview_frame, stream_file, subtitle_file};
+use super::media::{FileQuery, StreamQuery, font_file, original_file, preview_frame, stream_file, subtitle_file};
 use super::schema::{Access, Ctx};
 use super::{images, users};
 use crate::auth::{self, User};
@@ -64,13 +65,17 @@ pub(super) async fn enter(state: &AppState, code: &str, headers: &HeaderMap) -> 
 }
 
 async fn room_media(state: &AppState, room: &Room, id: i64) -> ApiResult<(PathBuf, i64)> {
+    item_media(&state.db, room.info().item_id, id).await
+}
+
+async fn item_media(db: &SqlitePool, room_item: i64, id: i64) -> ApiResult<(PathBuf, i64)> {
     let (path, item_id): (String, i64) = sqlx::query_as("SELECT path, item_id FROM media WHERE id = ?")
         .bind(id)
-        .fetch_optional(&state.db)
+        .fetch_optional(db)
         .await?
         .ok_or_else(|| ApiError::not_found("video"))?;
 
-    if item_id != room.info().item_id {
+    if item_id != room_item {
         return Err(ApiError::not_found("video"));
     }
 
@@ -422,6 +427,18 @@ pub async fn stream(
     Ok(stream_file(&state, &who, path, q))
 }
 
+pub async fn file(
+    State(state): State<Arc<AppState>>,
+    Path((code, id)): Path<(String, i64)>,
+    Query(q): Query<FileQuery>,
+    req: Request,
+) -> ApiResult<Response> {
+    let (room, user) = enter(&state, &code, req.headers()).await?;
+    let (path, _) = room_media(&state, &room, id).await?;
+    let who = user.map(|u| u.username).unwrap_or_else(|| "a guest".into());
+    original_file(&who, &path, q, req).await
+}
+
 pub async fn subtitles(
     State(state): State<Arc<AppState>>,
     Path((code, id, track)): Path<(String, i64, String)>,
@@ -483,4 +500,26 @@ pub async fn avatar(
     }
 
     Ok(users::avatar_image(&state, user_id).await?.into_response())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn rooms_only_hand_out_their_own_title() {
+        let db = sqlx::sqlite::SqlitePoolOptions::new().max_connections(1).connect("sqlite::memory:").await.unwrap();
+        sqlx::raw_sql(
+            "CREATE TABLE media (id INTEGER PRIMARY KEY, item_id INTEGER, path TEXT);
+             INSERT INTO media VALUES (1, 10, '/shows/a/1.mkv'), (2, 10, '/shows/a/2.mkv'), (3, 20, '/shows/b/1.mkv');",
+        )
+        .execute(&db)
+        .await
+        .unwrap();
+
+        assert_eq!(item_media(&db, 10, 1).await.unwrap(), (PathBuf::from("/shows/a/1.mkv"), 10));
+        assert_eq!(item_media(&db, 10, 2).await.unwrap(), (PathBuf::from("/shows/a/2.mkv"), 10));
+        assert_eq!(item_media(&db, 10, 3).await.err().unwrap().status, StatusCode::NOT_FOUND);
+        assert_eq!(item_media(&db, 10, 4).await.err().unwrap().status, StatusCode::NOT_FOUND);
+    }
 }

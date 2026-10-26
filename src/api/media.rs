@@ -4,12 +4,14 @@ use std::path::{Path as FsPath, PathBuf};
 use std::sync::Arc;
 
 use axum::body::Body;
-use axum::extract::{Path, Query, State};
-use axum::http::{HeaderValue, header};
+use axum::extract::{Path, Query, Request, State};
+use axum::http::{HeaderValue, Method, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use futures::StreamExt;
 use serde::Deserialize;
 use tokio_stream_shim::ReceiverStream;
+use tower::ServiceExt;
+use tower_http::services::ServeFile;
 
 use crate::auth::User;
 use crate::error::{ApiError, ApiResult};
@@ -97,6 +99,61 @@ pub(super) fn stream_file(state: &AppState, who: &str, path: PathBuf, q: StreamQ
     res
 }
 
+#[derive(Deserialize)]
+pub(super) struct FileQuery {
+    download: Option<String>,
+}
+
+pub async fn file(
+    State(state): State<Arc<AppState>>,
+    user: User,
+    Path(id): Path<i64>,
+    Query(q): Query<FileQuery>,
+    req: Request,
+) -> ApiResult<Response> {
+    let (path, _, _) = media_path(&state, &user, id).await?;
+    original_file(&user.username, &path, q, req).await
+}
+
+/// The file as it is, in whatever range was asked for.
+pub(super) async fn original_file(who: &str, path: &FsPath, q: FileQuery, req: Request) -> ApiResult<Response> {
+    let download = q.download.is_some();
+    let name = path.file_name().unwrap_or_default().to_string_lossy().to_string();
+
+    let first =
+        req.headers().get(header::RANGE).and_then(|v| v.to_str().ok()).is_none_or(|v| v.starts_with("bytes=0-"));
+
+    if first && req.method() != Method::HEAD {
+        if download {
+            tracing::info!("{who} is downloading {name}");
+        } else {
+            tracing::info!("{who} is playing {name} (direct)");
+        }
+    }
+
+    let Ok(res) = ServeFile::new(path).oneshot(req).await;
+
+    if res.status() == StatusCode::NOT_FOUND {
+        return Err(ApiError::not_found("file"));
+    }
+
+    let mut res = res.map(Body::new);
+    let h = res.headers_mut();
+    let mime = mime_guess::from_path(path).first_or_octet_stream().to_string();
+
+    if let Ok(v) = HeaderValue::from_str(&mime) {
+        h.insert(header::CONTENT_TYPE, v);
+    }
+
+    h.insert(header::CACHE_CONTROL, HeaderValue::from_static("private, max-age=3600"));
+
+    if download && let Ok(v) = HeaderValue::from_str(&super::clips::content_disposition("attachment", &name)) {
+        h.insert(header::CONTENT_DISPOSITION, v);
+    }
+
+    Ok(res)
+}
+
 pub async fn subtitles(
     State(state): State<Arc<AppState>>,
     user: User,
@@ -168,4 +225,91 @@ pub(super) async fn preview_frame(state: &AppState, path: &FsPath, at: u32) -> A
 
     Ok(([(header::CONTENT_TYPE, "image/jpeg"), (header::CACHE_CONTROL, "private, max-age=604800, immutable")], data)
         .into_response())
+}
+
+#[cfg(test)]
+mod tests {
+    use axum::body::to_bytes;
+    use axum::http::Request as HttpRequest;
+
+    use super::*;
+
+    fn video() -> (PathBuf, Vec<u8>) {
+        let path = std::env::temp_dir().join(format!("tinystream-file-{}", uuid::Uuid::new_v4())).join("Ça va.mkv");
+        let data: Vec<u8> = (0..1000u32).map(|i| (i % 251) as u8).collect();
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, &data).unwrap();
+        (path, data)
+    }
+
+    async fn fetch(path: &FsPath, method: Method, range: Option<&str>, download: bool) -> (Response, Vec<u8>) {
+        let mut req = HttpRequest::builder().method(method);
+
+        if let Some(r) = range {
+            req = req.header(header::RANGE, r);
+        }
+
+        let q = FileQuery { download: download.then(|| "1".into()) };
+        let res = original_file("someone", path, q, req.body(Body::empty()).unwrap()).await.unwrap();
+        let (parts, body) = res.into_parts();
+        let body = to_bytes(body, usize::MAX).await.unwrap().to_vec();
+        (Response::from_parts(parts, Body::empty()), body)
+    }
+
+    fn header<'a>(res: &'a Response, name: header::HeaderName) -> &'a str {
+        res.headers().get(name).unwrap().to_str().unwrap()
+    }
+
+    #[tokio::test]
+    async fn ranges() {
+        let (path, data) = video();
+
+        let (res, body) = fetch(&path, Method::GET, None, false).await;
+        assert_eq!(res.status(), StatusCode::OK);
+        assert_eq!(header(&res, header::CONTENT_TYPE), "video/x-matroska");
+        assert_eq!(header(&res, header::ACCEPT_RANGES), "bytes");
+        assert_eq!(body, data);
+
+        let (res, body) = fetch(&path, Method::GET, Some("bytes=0-9"), false).await;
+        assert_eq!(res.status(), StatusCode::PARTIAL_CONTENT);
+        assert_eq!(header(&res, header::CONTENT_RANGE), "bytes 0-9/1000");
+        assert_eq!(body, data[..10]);
+
+        let (res, body) = fetch(&path, Method::GET, Some("bytes=400-599"), false).await;
+        assert_eq!(res.status(), StatusCode::PARTIAL_CONTENT);
+        assert_eq!(header(&res, header::CONTENT_LENGTH), "200");
+        assert_eq!(body, data[400..600]);
+
+        let (res, body) = fetch(&path, Method::GET, Some("bytes=-16"), false).await;
+        assert_eq!(res.status(), StatusCode::PARTIAL_CONTENT);
+        assert_eq!(header(&res, header::CONTENT_RANGE), "bytes 984-999/1000");
+        assert_eq!(body, data[984..]);
+
+        let (res, _) = fetch(&path, Method::GET, Some("bytes=5000-"), false).await;
+        assert_eq!(res.status(), StatusCode::RANGE_NOT_SATISFIABLE);
+
+        std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+    }
+
+    #[tokio::test]
+    async fn head_and_download() {
+        let (path, _) = video();
+
+        let (res, body) = fetch(&path, Method::HEAD, None, false).await;
+        assert_eq!(res.status(), StatusCode::OK);
+        assert_eq!(header(&res, header::CONTENT_LENGTH), "1000");
+        assert!(res.headers().get(header::CONTENT_DISPOSITION).is_none());
+        assert!(body.is_empty());
+
+        let (res, _) = fetch(&path, Method::GET, None, true).await;
+        assert_eq!(
+            header(&res, header::CONTENT_DISPOSITION),
+            "attachment; filename=\"_a va.mkv\"; filename*=UTF-8''%C3%87a%20va.mkv"
+        );
+
+        std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+        let req = HttpRequest::builder().body(Body::empty()).unwrap();
+        let err = original_file("someone", &path, FileQuery { download: None }, req).await.err().unwrap();
+        assert_eq!(err.status, StatusCode::NOT_FOUND);
+    }
 }
