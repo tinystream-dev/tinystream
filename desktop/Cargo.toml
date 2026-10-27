@@ -1,5 +1,5 @@
 [workspace]
-members = ["app"]
+members = ["app", "mpv", "mpv-sys"]
 resolver = "3"
 
 [workspace.package]

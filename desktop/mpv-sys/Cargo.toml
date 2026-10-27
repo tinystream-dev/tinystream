@@ -1,0 +1,15 @@
+[package]
+name = "mpv-sys"
+description = "Bindings to the static libmpv in native/mpv"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+mpv-src = { path = "../../native/mpv" }
+
+[build-dependencies]
+pkg-config = "0.3"
