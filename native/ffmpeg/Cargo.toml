@@ -22,5 +22,12 @@ lame-src = { path = "../lame" }
 [target.'cfg(not(target_vendor = "apple"))'.dependencies]
 libva-src = { path = "../libva" }
 
+# NVDEC and CUVID decoding, for the desktop app. ffnvcodec loads libcuda at runtime, so the binary
+# still runs on machines without NVIDIA.
+ffnvcodec-src = { path = "../ffnvcodec", optional = true }
+
+[features]
+nvdec = ["dep:ffnvcodec-src"]
+
 [build-dependencies]
 native-support = { path = "../support" }

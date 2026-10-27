@@ -1244,6 +1244,7 @@ name = "ffmpeg-src"
 version = "8.0.0"
 dependencies = [
  "dav1d-src",
+ "ffnvcodec-src",
  "lame-src",
  "libva-src",
  "nasm-src",
@@ -1260,6 +1261,13 @@ dependencies = [
  "bindgen",
  "ffmpeg-src",
  "pkg-config",
+]
+
+[[package]]
+name = "ffnvcodec-src"
+version = "12.1.14"
+dependencies = [
+ "native-support",
 ]
 
 [[package]]

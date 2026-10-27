@@ -24,13 +24,22 @@ pub struct Build {
 
 impl Build {
     pub fn new(name: &str, version: &str, deps: &[&str]) -> Build {
+        Build::variant(name, version, None, deps)
+    }
+
+    /// Like [`Build::new`], building into a directory of its own, so builds of the same library with
+    /// different options (from different workspaces) don't keep replacing each other.
+    pub fn variant(name: &str, version: &str, variant: Option<&str>, deps: &[&str]) -> Build {
         let started = SystemTime::now();
         let manifest = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").unwrap());
 
         let root =
             env::var_os("TINYSTREAM_NATIVE_DIR").map(PathBuf::from).unwrap_or_else(|| manifest.join("../../.native"));
 
-        let work = root.join(format!("{name}-{version}"));
+        let work = match variant {
+            Some(variant) => root.join(format!("{name}-{version}-{variant}")),
+            None => root.join(format!("{name}-{version}")),
+        };
         let downloads = root.join("downloads");
         fs::create_dir_all(&work).expect("can't create the native build directory");
         fs::create_dir_all(&downloads).unwrap();
