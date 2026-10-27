@@ -27,8 +27,8 @@ impl Build {
         Build::variant(name, version, None, deps)
     }
 
-    /// Like [`Build::new`], building into a directory of its own, so builds of the same library with
-    /// different options (from different workspaces) don't keep replacing each other.
+    /// Like [`Build::new`], building into a directory of its own, so builds of the same library
+    /// with different options (from different workspaces) don't keep replacing each other.
     pub fn variant(name: &str, version: &str, variant: Option<&str>, deps: &[&str]) -> Build {
         let started = SystemTime::now();
         let manifest = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").unwrap());
@@ -134,6 +134,25 @@ impl Build {
         }
 
         fs::write(dir.join(format!("{}.txt", self.name)), out).unwrap();
+    }
+
+    /// Gathers the copyright notices at the top of `files` into `NOTICES` in the source tree, for
+    /// [`Build::licenses`], when a project has no license file of its own.
+    pub fn notices(&self, files: &[&str]) {
+        let mut out = String::new();
+
+        for file in files {
+            let text = fs::read_to_string(self.src.join(file)).unwrap();
+            let notice = text
+                .split("*/")
+                .find(|block| block.contains("Copyright"))
+                .and_then(|block| block.rfind("/*").map(|start| &block[start..]))
+                .unwrap_or_else(|| panic!("{} has no copyright notice in {file}", self.name));
+
+            out.push_str(&format!("{file}:\n\n{notice}*/\n\n"));
+        }
+
+        fs::write(self.src.join("NOTICES"), out).unwrap();
     }
 
     pub fn fetch(&self, url: &str, members: &[&str]) {

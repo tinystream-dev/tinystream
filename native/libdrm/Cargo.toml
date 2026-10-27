@@ -1,0 +1,14 @@
+[package]
+name = "libdrm-src"
+# The version of libdrm it builds.
+version = "2.4.134"
+edition.workspace = true
+description = "A static libdrm, without the drivers' libraries, for mpv's VA-API and DRM support"
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish = false
+links = "drm"
+
+[build-dependencies]
+native-support = { path = "../support" }
