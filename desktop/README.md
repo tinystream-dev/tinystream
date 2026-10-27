@@ -38,6 +38,21 @@ implementation uses the integration APIs instead, as requested. zbus stays pinne
 All future additions and pin changes require the same audit before building. Use `--locked` and
 never `cargo update`.
 
+## Video
+
+Playback goes through libmpv (`mpv/`, over the hand-written bindings in `mpv-sys/`), linked
+statically from `native/mpv`: mpv 0.41.0 built with its OpenGL render API on EGL, VA-API through a
+DRM render node the app passes in, NVDEC, the PipeWire and ALSA outputs, and nothing else. It's
+patched to build without libass (`native/mpv/patches/no-libass.patch`), since rustyass renders text
+subtitles; mpv still draws bitmap ones like PGS. FFmpeg comes from `native/ffmpeg` with its `nvdec`
+feature, and libplacebo (OpenGL only), libdrm and libdisplay-info from `native/` too. The first build
+compiles all of them into `../.native`, which takes a while.
+
+They need `meson`, `ninja`, `python3`, `git`, `curl`, the libdrm headers, `libegl-dev`,
+`libpipewire-0.3-dev`, `libasound2-dev` and `hwdata` (see `.github/actions/native-deps` and the
+desktop CI job). `cargo test --locked -p mpv` plays a short clip through the render API into an
+offscreen framebuffer on Mesa's surfaceless EGL, with VA-API too when `/dev/dri/renderD128` exists.
+
 ## Window behavior
 
 The shell draws its own controls and resize edges. Drag the logo row or the top 12 logical pixels
