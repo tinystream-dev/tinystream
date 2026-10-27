@@ -65,6 +65,8 @@ jobs:
               - '.github/workflows/ci.yml'
             desktop:
               - 'desktop/**'
+              - 'native/**'
+              - '.github/actions/native-deps/**'
               - '{theme,squircle}/**'
               - 'packages/shared/{schema.graphql,fragments.graphql,src/logo.ts}'
               - '{rust-toolchain.toml,rustfmt.toml}'
@@ -165,12 +167,16 @@ jobs:
         working-directory: desktop
     steps:
       - uses: actions/checkout@v4
+      - uses: ./.github/actions/native-deps
+        with:
+          cache: native-desktop
       # winit and wgpu load Wayland, X11 and Vulkan at runtime; the headers are for x11-dl's build
-      # script and the tests.
+      # script and the tests. libmpv links EGL, PipeWire and ALSA, libdisplay-info reads hwdata's
+      # PNP IDs, and the mpv tests render on Mesa's software EGL.
       - name: System packages
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends pkg-config libwayland-dev libxkbcommon-dev libx11-dev libvulkan-dev
+          sudo apt-get install -y --no-install-recommends pkg-config libwayland-dev libxkbcommon-dev libx11-dev libvulkan-dev \
+            libegl-dev libpipewire-0.3-dev libasound2-dev hwdata libegl-mesa0 libgl1-mesa-dri
       - uses: ./.github/actions/rust
         with:
           components: rustfmt, clippy

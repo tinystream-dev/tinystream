@@ -39,7 +39,7 @@ EOF
 # Only what this build links: <native-dir> can hold licenses of libraries it no longer builds.
 part "Native libraries"
 for lib in $(cargo tree --locked -e normal --target "$target" --prefix none --format '{p}' |
-    sed -n 's/^\([a-z0-9]*\)-src v.*/\1/p' | sort -u); do
+    sed -n 's/^\([a-z0-9-]*\)-src v.*/\1/p' | sort -u); do
     if [ -f "$native/licenses/$lib.txt" ]; then
         cat "$native/licenses/$lib.txt"
     fi

@@ -1,6 +1,11 @@
 name: Native build dependencies
 description: Installs what native/ needs to build FFmpeg and libtorrent, and restores the .native cache.
 
+inputs:
+  cache:
+    description: The cache's name; each workspace builds its own set of native libraries.
+    default: native
+
 runs:
   using: composite
   steps:
@@ -18,5 +23,5 @@ runs:
       uses: actions/cache@v4
       with:
         path: .native
-        key: native-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('native/**/Cargo.toml', 'native/**/build.rs', 'native/support/src/**') }}
-        restore-keys: native-${{ runner.os }}-${{ runner.arch }}-
+        key: ${{ inputs.cache }}-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('native/**/Cargo.toml', 'native/**/build.rs', 'native/**/patches/**', 'native/support/src/**') }}
+        restore-keys: ${{ inputs.cache }}-${{ runner.os }}-${{ runner.arch }}-
