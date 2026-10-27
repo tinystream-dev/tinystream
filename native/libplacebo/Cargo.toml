@@ -2,11 +2,11 @@
 name = "libplacebo-src"
 # The version of libplacebo it builds.
 version = "7.360.1"
-edition.workspace = true
+edition = "2024"
 description = "A static libplacebo with only its OpenGL backend, for mpv"
-license.workspace = true
-authors.workspace = true
-repository.workspace = true
+license = "AGPL-3.0-or-later"
+authors = ["Phrolova <me@phrolova.moe>"]
+repository = "https://github.com/phrolova/tinystream"
 publish = false
 links = "placebo"
 

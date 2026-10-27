@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-// FFmpeg is linked against this instead of libva, so tinystream starts on
-// systems without it. Every call goes to the system's libva, opened on first
-// use; without one, VA-API fails and transcoding falls back to software.
+// FFmpeg (and the desktop's mpv) is linked against this instead of libva, so
+// tinystream starts on systems without it. Every call goes to the system's
+// libva, opened on first use; without one, VA-API fails and transcoding (or
+// decoding) falls back to software.
 
 #include <va/va.h>
 #include <va/va_str.h>
@@ -97,6 +98,9 @@ STATUS(vaPutImage,
        (VADisplay dpy, VASurfaceID surface, VAImageID image, int src_x, int src_y, unsigned int src_width,
         unsigned int src_height, int dest_x, int dest_y, unsigned int dest_width, unsigned int dest_height),
        (dpy, surface, image, src_x, src_y, src_width, src_height, dest_x, dest_y, dest_width, dest_height))
+STATUS(vaQueryVideoProcFilters,
+       (VADisplay dpy, VAContextID context, VAProcFilterType *filters, unsigned int *num_filters),
+       (dpy, context, filters, num_filters))
 STATUS(vaQueryVideoProcFilterCaps,
        (VADisplay dpy, VAContextID context, VAProcFilterType type, void *filter_caps, unsigned int *num_filter_caps),
        (dpy, context, type, filter_caps, num_filter_caps))

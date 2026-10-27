@@ -29,8 +29,9 @@ exclude = [
 [workspace]
 members = ["ffmpeg-sys", "libtorrent-sys", "native/*", "decoder/core", "web/decoder", "web/subtitles", "theme", "squircle"]
 # The apps' crates are workspaces of their own (mobile/Cargo.toml, desktop/Cargo.toml), so none
-# rebuilds another.
-exclude = ["mobile", "desktop"]
+# rebuilds another. The native libraries only the desktop app uses stay out too, so building the
+# whole workspace doesn't build them.
+exclude = ["mobile", "desktop", "native/mpv", "native/libplacebo", "native/libdrm", "native/libdisplay-info"]
 
 [workspace.package]
 version = "0.38.0"

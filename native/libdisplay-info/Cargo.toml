@@ -2,11 +2,11 @@
 name = "libdisplay-info-src"
 # The version of libdisplay-info it builds.
 version = "0.3.0"
-edition.workspace = true
+edition = "2024"
 description = "A static libdisplay-info, which mpv's DRM support needs"
-license.workspace = true
-authors.workspace = true
-repository.workspace = true
+license = "AGPL-3.0-or-later"
+authors = ["Phrolova <me@phrolova.moe>"]
+repository = "https://github.com/phrolova/tinystream"
 publish = false
 links = "display-info"
 
