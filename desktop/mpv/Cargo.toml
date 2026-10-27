@@ -1,0 +1,12 @@
+[package]
+name = "mpv"
+description = "A small safe wrapper over libmpv for the desktop app"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+mpv-sys = { path = "../mpv-sys" }
