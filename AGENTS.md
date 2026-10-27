@@ -8,7 +8,7 @@
 * Never hardcode RSS/Torznab sources.
 * Use simple, one-line commit messages (if you don't understand the style, you may want to see it with `git log --oneline -n 10` yourself) with [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/) identifiers.
   * Only commit if either the user asks or a task is truly done; if something has been implemented by not verified by the user, never commit.
-  * Before you name a commit, ask the user if they are fine with your given name.
+  * Commit often: one commit per self-contained step (a new crate, a feature, its tests, CI, docs), not one commit for a whole task.
 
 ## Development Workflow
 
