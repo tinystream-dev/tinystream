@@ -1,8 +1,8 @@
 # tinystream desktop
 
-The Linux desktop client lives in its own Cargo workspace. It currently provides the window,
-navigation shell, server connections, sign-in and live API events. Browsing pages and media
-players arrive in later parts of [#80](https://github.com/tinystream-dev/tinystream/issues/80).
+The Linux desktop client lives in its own Cargo workspace. It provides the window, navigation
+shell, server connections, sign-in, live API events and the video player. Browsing pages and
+other media players arrive in later parts of [#80](https://github.com/tinystream-dev/tinystream/issues/80).
 
 From `desktop/`:
 
@@ -17,7 +17,7 @@ cargo --locked fmt --check
 The root `rust-toolchain.toml` and `rustfmt.toml` apply here too. On Ubuntu, install `pkg-config`,
 `libwayland-dev`, `libxkbcommon-dev`, `libx11-dev` and `libvulkan-dev`, plus a working Vulkan driver.
 Wayland is preferred when available; winit falls back to X11. An optional path argument opens a
-placeholder page, for example `cargo run --locked -- /watch/12`.
+page, for example `cargo run --locked -- '/watch/12?t=90'` to play from 90 seconds.
 
 ## Rendering and dependencies
 
@@ -27,7 +27,7 @@ integration example. `runner.rs` owns the winit event loop and the wgpu device. 
 or local dependency patches.
 
 On Linux, `platform/linux/gpu.rs` opens the Vulkan device through wgpu-hal, enabling
-`VK_KHR_external_memory_fd` and `VK_KHR_external_semaphore_fd` for the future mpv renderer. If the
+`VK_KHR_external_memory_fd` and `VK_KHR_external_semaphore_fd` for the mpv renderer. If the
 driver lacks these extensions, the shell uses a standard wgpu device and logs the limitation.
 The raw device remains accessible through `wgpu::Device::as_hal`.
 
@@ -52,6 +52,51 @@ They need `meson`, `ninja`, `python3`, `git`, `curl`, the libdrm headers, `libeg
 `libpipewire-0.3-dev`, `libasound2-dev` and `hwdata` (see `.github/actions/native-deps` and the
 desktop CI job). `cargo test --locked -p mpv` plays a short clip through the render API into an
 offscreen framebuffer on Mesa's surfaceless EGL, with VA-API too when `/dev/dri/renderD128` exists.
+
+The player reads the original Range-capable `/file` endpoint through the app's rustls HTTP
+client. Its quality menu switches to a server transcode; audio switches use mpv directly for
+the original file and rebuild a transcode at the current file time otherwise. Stream reads
+have an inactivity timeout and bounded retries. An early EOF cannot advance the episode while
+most of its known duration remains. Progress is saved every ten seconds, on pause and on exit.
+
+`platform::VideoSurface` keeps GPU sharing behind the platform boundary. Linux matches EGL and
+Vulkan device UUIDs, prefers Mesa's surfaceless display for VA-API imports, and falls back to
+device displays. mpv renders into three Vulkan-allocated images imported into OpenGL, which wgpu
+samples directly. The render thread finishes OpenGL before handing over a frame and waits for
+the preceding Vulkan submission before reusing its memory. The player also draws the ambient
+light, chapter timeline and previews, skip buttons, episode countdown, paused and finale
+overlays, track/quality/speed menus, screenshot feedback and fullscreen controls.
+
+An optional `mpv.conf` in the app's config directory can tune picture quality; Settings →
+Advanced shows its path. Playback, input, timing and text-subtitle options remain controlled by
+the app. Bitmap subtitles in the original file use mpv; text subtitle choices are remembered
+for rustyass in #87. Screenshot links preserve `/clips?clip=<id>` for #93's Clips screen.
+The clip editor (#93), Watch Together (#88), idle inhibition (#92), and picture in picture are
+not implemented in this milestone.
+
+The hardware checks are opt-in. From `desktop/`, the shared-texture test reads actual pixels
+back through Vulkan, opens consecutive players, reloads, and resizes their textures:
+
+```sh
+cargo test --locked shares_decoded_frames_with_vulkan_across_players -- --ignored
+cargo test --locked player_chrome_and_menus_render_and_accept_input -- --ignored
+```
+
+`TINYSTREAM_TEST_VIDEO` can replace the bundled H.264 test pattern with a generated 10-bit AV1
+or HEVC fixture. `TINYSTREAM_TEST_ARTIFACT_DIR` retains the player UI test's PNGs. For an isolated
+test server with a video at least 60 seconds long and two audio tracks, set
+`TINYSTREAM_TEST_SERVER`, `TINYSTREAM_TEST_TOKEN`, and optionally `TINYSTREAM_TEST_VIDEO_ID`
+(defaults to 1), then run:
+
+```sh
+cargo test --locked direct_play_seeks_tracks_and_transcodes -- --ignored
+```
+
+That check exercises the HTTP protocol, hardware direct play, audio selection, seeking,
+pause-preserving 720p transcode and return to direct play. It makes no progress mutations.
+Local validation used generated 1080p 10-bit AV1 and 4K 10-bit HEVC patterns on AMD with VA-API.
+Real remux performance comparisons and NVIDIA/NVDEC validation still require those workloads
+and hardware; neither a release build nor a performance-parity claim is implied by these checks.
 
 ## Window behavior
 
