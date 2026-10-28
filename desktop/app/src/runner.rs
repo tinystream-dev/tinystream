@@ -32,6 +32,8 @@ pub enum UserEvent {
     Event(Event),
     /// A widget asked to be updated from another thread.
     Wake,
+    /// The decoder published a new shared texture.
+    VideoFrame,
 }
 
 struct RendererNotifier(EventLoopProxy<UserEvent>);
@@ -88,6 +90,8 @@ struct Window {
     waker: shell::Waker,
     redraw_at: Option<Instant>,
     resized: bool,
+    ui_dirty: bool,
+    background: iced_core::Color,
 }
 
 impl Runner {
@@ -209,7 +213,7 @@ impl Runner {
         crate::ui::video::set_window(
             device.clone(),
             Arc::new(move || {
-                let _ = proxy.send_event(UserEvent::Wake);
+                let _ = proxy.send_event(UserEvent::VideoFrame);
             }),
         );
 
@@ -238,6 +242,8 @@ impl Runner {
             }),
             redraw_at: None,
             resized: false,
+            ui_dirty: true,
+            background: iced_core::Color::BLACK,
         };
         window.configure();
         Ok(window)
@@ -294,6 +300,8 @@ impl Runner {
             }),
             redraw_at: None,
             resized: false,
+            ui_dirty: true,
+            background: iced_core::Color::BLACK,
         };
         window.configure();
         platform::Current::picture_in_picture_opened();
@@ -408,7 +416,8 @@ impl Runner {
         if !self.app.player.as_ref().is_some_and(|player| player.pip) {
             self.pip = None;
         }
-        for window in self.window.iter().chain(self.pip.iter()) {
+        for window in self.window.iter_mut().chain(self.pip.iter_mut()) {
+            window.ui_dirty = true;
             window.raw.request_redraw();
         }
     }
@@ -420,6 +429,7 @@ impl Runner {
             return;
         }
 
+        window.ui_dirty = true;
         let events = std::mem::take(&mut window.events);
         let mut messages = shell::Bus::new();
         let mut interface = UserInterface::build(
@@ -468,18 +478,31 @@ impl Runner {
 
     fn redraw(&mut self, event_loop: &ActiveEventLoop, pip: bool) {
         self.process(event_loop, pip);
+        let animating = self.app.animating() && (pip || !self.app.player.as_ref().is_some_and(|player| player.pip));
         let Some(window) = (if pip { &mut self.pip } else { &mut self.window }) else { return };
+        let size = window.raw.inner_size();
+        if size.width == 0 || size.height == 0 {
+            return;
+        }
+        // Frame notifications change the shared texture, not the widget tree. iced prepares its
+        // retained primitives on every present, including the newest video frame.
+        if !window.ui_dirty && !window.resized && !animating {
+            iced_core::Renderer::tick(&mut window.renderer);
+            if !window.present(window.background) {
+                window.resized = true;
+                window.raw.request_redraw();
+            }
+            return;
+        }
         self.app.session.system_dark = window.raw.theme() != Some(winit::window::Theme::Light);
         let look = match &self.app.gallery {
             Some(gallery) => gallery.look(self.app.reduce_motion),
             None => self.app.session.look(),
         };
         self.theme = look.theme();
+        window.background = if pip { look.media_shade } else { look.canvas };
+        window.ui_dirty = false;
         iced_core::Renderer::tick(&mut window.renderer);
-        let size = window.raw.inner_size();
-        if size.width == 0 || size.height == 0 {
-            return;
-        }
         if window.resized {
             window.configure();
         }
@@ -503,7 +526,7 @@ impl Runner {
         window.cache = interface.into_cache();
         window.react(state, &mut self.clipboard, &self.proxy);
 
-        if !window.present(look.canvas) {
+        if !window.present(window.background) {
             window.resized = true;
             window.raw.request_redraw();
         }
@@ -537,6 +560,7 @@ impl Window {
     }
 
     fn configure(&mut self) {
+        self.ui_dirty = true;
         let size = self.raw.inner_size();
         self.rescale(self.viewport.scale().application);
         if size.width > 0 && size.height > 0 {
@@ -624,8 +648,14 @@ impl Window {
         }
 
         match redraw_request {
-            RedrawRequest::NextFrame => self.raw.request_redraw(),
-            RedrawRequest::At(at) => self.redraw_at = Some(self.redraw_at.map_or(at, |current| current.min(at))),
+            RedrawRequest::NextFrame => {
+                self.ui_dirty = true;
+                self.raw.request_redraw();
+            },
+            RedrawRequest::At(at) => {
+                self.ui_dirty = true;
+                self.redraw_at = Some(self.redraw_at.map_or(at, |current| current.min(at)));
+            },
             RedrawRequest::Wait => {},
         }
 
@@ -762,6 +792,7 @@ impl ApplicationHandler<UserEvent> for Runner {
                     self.update(event_loop, flags);
                 }
             },
+            WindowEvent::ThemeChanged(_) => window.ui_dirty = true,
             WindowEvent::CursorMoved { position, .. } => {
                 window.cursor =
                     mouse::Cursor::Available(conversion::cursor_position(*position, window.viewport.scale_factor()));
@@ -788,6 +819,12 @@ impl ApplicationHandler<UserEvent> for Runner {
                 self.process(event_loop, false);
             },
             UserEvent::Wake => {
+                for window in self.window.iter_mut().chain(self.pip.iter_mut()) {
+                    window.ui_dirty = true;
+                    window.raw.request_redraw();
+                }
+            },
+            UserEvent::VideoFrame => {
                 if let Some(window) = self.pip.as_ref().or(self.window.as_ref()) {
                     window.raw.request_redraw();
                 }
@@ -836,6 +873,18 @@ mod tests {
             fn resumed(&mut self, event_loop: &ActiveEventLoop) {
                 let window = self.runner.open(event_loop).unwrap();
                 self.runner.window = Some(window);
+                if let Ok(origin) = std::env::var("TINYSTREAM_TEST_SERVER") {
+                    let token = std::env::var("TINYSTREAM_TEST_TOKEN").ok().map(crate::api::Token);
+                    let api = crate::api::Api::new(origin.parse().unwrap(), token).unwrap();
+                    let id = std::env::var("TINYSTREAM_TEST_VIDEO_ID").unwrap_or_else(|_| "1".into()).parse().unwrap();
+                    self.runner.app.history.replace(Route::Watch(id as u64, None));
+                    self.runner.app.player = Some(crate::player::tests::live_player(
+                        api,
+                        id,
+                        self.runner.runtime.clone(),
+                        &mut self.runner.effects,
+                    ));
+                }
                 self.runner.update(event_loop, Message::Player(self.serial, PlayerMessage::PictureInPicture));
                 let main = self.runner.window.as_ref().unwrap();
                 let pip = self.runner.pip.as_ref().unwrap();
@@ -870,6 +919,11 @@ mod tests {
                     return;
                 }
                 assert!(self.rendered, "PiP did not present a frame");
+                if std::env::var_os("TINYSTREAM_TEST_SERVER").is_some() {
+                    let player = self.runner.app.player.as_ref().unwrap();
+                    assert!(player.started, "the detached decoder did not start");
+                    assert!(player.failure().is_none(), "{:?}", player.failure());
+                }
                 if std::env::var_os("NIRI_SOCKET").is_some() {
                     let output =
                         std::process::Command::new("niri").args(["msg", "--json", "windows"]).output().unwrap();
@@ -888,7 +942,7 @@ mod tests {
                 let id = self.runner.pip.as_ref().unwrap().raw.id();
                 self.runner.window_event(event_loop, id, WindowEvent::CloseRequested);
                 assert!(self.runner.pip.is_none());
-                assert!(matches!(self.runner.app.history.current().route, Route::Watch(1, _)));
+                assert!(matches!(self.runner.app.history.current().route, Route::Watch(_, _)));
                 assert_eq!(self.runner.app.player.as_ref().unwrap().serial, self.serial);
                 self.runner.update(event_loop, Message::Player(self.serial, PlayerMessage::PictureInPicture));
                 assert!(self.runner.pip.is_some());
@@ -915,7 +969,7 @@ mod tests {
         );
         let mut test = Test {
             runner,
-            until: Instant::now() + std::time::Duration::from_secs(2),
+            until: Instant::now() + std::time::Duration::from_secs(5),
             serial,
             rendered: false,
             fullscreen_requested: false,
