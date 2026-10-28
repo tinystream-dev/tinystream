@@ -328,6 +328,7 @@ mod tests {
     #[ignore = "needs a test server, a video with two audio tracks, and a hardware decoder"]
     fn direct_play_seeks_tracks_and_transcodes() {
         use crate::platform::{Current, Desktop};
+        use crate::player::{Message, Quality};
 
         let origin = std::env::var("TINYSTREAM_TEST_SERVER").expect("set TINYSTREAM_TEST_SERVER").parse().unwrap();
         let token = std::env::var("TINYSTREAM_TEST_TOKEN").ok().map(crate::api::Token);
@@ -338,7 +339,8 @@ mod tests {
             runtime.block_on(api.request::<crate::api::Playback>(crate::api::playback::Variables { id })).unwrap();
         let pb = data.video.unwrap();
         assert!(pb.media.audio.len() >= 2, "the test video needs two audio tracks");
-        let engine = Engine::with_config(api, runtime.handle().clone(), None).unwrap();
+        let audio = pb.media.audio[1].index;
+        let engine = Engine::with_config(api.clone(), runtime.handle().clone(), None).unwrap();
         engine.set("volume", 0.0);
         let instance =
             iced_wgpu::wgpu::Instance::new(iced_wgpu::wgpu::InstanceDescriptor::new_without_display_handle());
@@ -350,7 +352,14 @@ mod tests {
         engine.listener()(Box::new(move |update| {
             let _ = send.send(update);
         }));
-        let wait = |at: f64, loading: bool| {
+        let mut player = crate::player::tests::player();
+        player.api = api;
+        player.id = id;
+        player.base = format!("api/media/{id}");
+        player.pb = Some(pb);
+        player.engine = Some(engine);
+        player.audio = Some(audio);
+        let wait = |player: &mut crate::player::Player, at: f64, loading: bool| {
             let deadline = Instant::now() + Duration::from_secs(20);
             let mut loaded = !loading;
             loop {
@@ -358,45 +367,74 @@ mod tests {
                 if surface.frame().is_some() {
                     surface.presented();
                 }
-                match recv.recv_timeout(Duration::from_millis(20)) {
-                    Ok(Update::Loaded(_)) => loaded = true,
-                    Ok(Update::Failed(error)) => panic!("{error}"),
-                    Ok(Update::Restarted) if loaded => {
-                        let time = engine.mpv.get_property::<f64>("time-pos").unwrap();
-                        assert!((time - at).abs() < 2.0, "wanted {at}s, got {time}s");
+                if let Ok(update) = recv.recv_timeout(Duration::from_millis(20)) {
+                    if let Update::Failed(error) = &update {
+                        panic!("{error}");
+                    }
+                    if matches!(update, Update::Loaded(_)) {
+                        loaded = true;
+                    }
+                    let restarted = matches!(update, Update::Restarted);
+                    player.update(Message::Mpv(update), &mut Vec::new());
+                    if restarted && loaded {
+                        assert!((player.time - at).abs() < 2.0, "wanted {at}s, got {}s", player.time);
                         return;
-                    },
-                    _ => {},
+                    }
                 }
                 assert!(Instant::now() < deadline, "playback did not reach {at}s");
             }
         };
-        let base = format!("api/media/{id}");
-        engine.load(&Source::Direct.path(&base, None, None), 12.0, false);
-        wait(12.0, true);
-        assert_ne!(engine.mpv.get_property::<String>("hwdec-current").unwrap(), "no");
-        let audio = &pb.media.audio[1];
-        let aid = audio_tracks(&engine.mpv).into_iter().find(|(_, index)| *index == audio.index).unwrap().0;
-        engine.set("aid", aid);
-        assert_eq!(engine.mpv.get_property::<i64>("aid").unwrap(), aid);
-        engine.seek(50.0);
-        wait(50.0, false);
-        engine.set("pause", true);
-        assert!(engine.mpv.get_property::<bool>("pause").unwrap());
-        let path = Source::Transcode { height: 720, start: 30.0 }.path(&base, Some(audio.index), Some(&audio.codec));
-        engine.load(&path, 30.0, true);
-        wait(30.0, true);
-        assert!(engine.mpv.get_property::<bool>("pause").unwrap());
-        assert!(
-            engine.mpv.get_property::<Node>("track-list").unwrap().as_array().iter().any(|track| {
-                track.get("type").and_then(Node::as_str) == Some("audio")
-                    && track.get("selected").and_then(Node::as_bool) == Some(true)
-            }),
-            "transcoding lost the selected audio track"
+        player.play_from(12.0, false);
+        wait(&mut player, 12.0, true);
+        assert_ne!(player.engine.as_ref().unwrap().mpv.get_property::<String>("hwdec-current").unwrap(), "no");
+        player.update(Message::Audio(audio), &mut Vec::new());
+        let aid = player.mpv_audio(audio).unwrap();
+        assert_eq!(player.engine.as_ref().unwrap().mpv.get_property::<i64>("aid").unwrap(), aid);
+        player.update(Message::Seek(50.0), &mut Vec::new());
+        wait(&mut player, 50.0, false);
+        player.update(Message::Toggle, &mut Vec::new());
+        assert!(!player.playing);
+        player.update(Message::Quality(Quality::Height(720)), &mut Vec::new());
+        wait(&mut player, 50.0, true);
+        assert!(player.engine.as_ref().unwrap().mpv.get_property::<bool>("pause").unwrap());
+        let deadline = Instant::now() + Duration::from_secs(20);
+        while !player.engine.as_ref().unwrap().seekable().iter().any(|&(start, end)| start <= 55.0 && end >= 55.0) {
+            assert!(Instant::now() < deadline, "the transcode did not cache 55s");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        let cached_source = player.source;
+        player.update(Message::Seek(55.0), &mut Vec::new());
+        assert_eq!(player.source, cached_source, "a cached seek rebuilt the transcode");
+        wait(&mut player, 55.0, false);
+        player.update(Message::Seek(5.0), &mut Vec::new());
+        assert_eq!(player.source, Source::Transcode { height: 720, start: 5.0 });
+        wait(&mut player, 5.0, true);
+        player.update(Message::Quality(Quality::Auto), &mut Vec::new());
+        wait(&mut player, 5.0, true);
+        assert_ne!(player.engine.as_ref().unwrap().mpv.get_property::<String>("hwdec-current").unwrap(), "no");
+        assert_eq!(
+            player.engine.as_ref().unwrap().mpv.get_property::<i64>("aid").unwrap(),
+            player.mpv_audio(audio).unwrap()
         );
-        engine.load(&Source::Direct.path(&base, None, None), 30.0, false);
-        wait(30.0, true);
-        assert_ne!(engine.mpv.get_property::<String>("hwdec-current").unwrap(), "no");
+        player.can_clip = true;
+        let at = player.time;
+        player.update(Message::MakeClip, &mut Vec::new());
+        wait(&mut player, 0.0, true);
+        let before = player.time;
+        player.update(Message::Editor(super::super::clip::Message::Step(false)), &mut Vec::new());
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while player.time <= before {
+            if surface.frame().is_some() {
+                surface.presented();
+            }
+            if let Ok(update) = recv.recv_timeout(Duration::from_millis(20)) {
+                player.update(Message::Mpv(update), &mut Vec::new());
+            }
+            assert!(Instant::now() < deadline, "frame stepping did not advance the preview");
+        }
+        player.update(Message::Editor(super::super::clip::Message::Close), &mut Vec::new());
+        wait(&mut player, at, true);
+        assert!(!player.playing);
     }
 
     #[test]
