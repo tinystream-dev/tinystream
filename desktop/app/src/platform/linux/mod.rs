@@ -1,13 +1,16 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+use std::sync::Arc;
+
 use futures::future::BoxFuture;
 
-use super::Desktop;
+use super::{Desktop, VideoSurface};
 use crate::chrome::ButtonLayout;
 
 mod gpu;
 mod portal;
 mod secrets;
+mod video;
 
 pub struct Linux;
 
@@ -33,6 +36,30 @@ impl Desktop for Linux {
         descriptor: &wgpu::DeviceDescriptor<'_>,
     ) -> Option<(wgpu::Device, wgpu::Queue)> {
         gpu::request_device(adapter, descriptor)
+    }
+
+    fn utc_offset(at: i64) -> i64 {
+        /// glibc's `struct tm`.
+        #[repr(C)]
+        struct Tm {
+            fields: [std::ffi::c_int; 9],
+            gmtoff: std::ffi::c_long,
+            zone: *const std::ffi::c_char,
+        }
+        unsafe extern "C" {
+            fn localtime_r(time: *const i64, tm: *mut Tm) -> *mut Tm;
+        }
+        let mut tm = Tm { fields: [0; 9], gmtoff: 0, zone: std::ptr::null() };
+        // SAFETY: localtime_r only writes the struct it's given.
+        if unsafe { localtime_r(&at, &mut tm) }.is_null() { 0 } else { tm.gmtoff as i64 }
+    }
+
+    fn video(
+        device: &wgpu::Device,
+        mpv: &mpv::Mpv,
+        wake: Arc<dyn Fn() + Send + Sync>,
+    ) -> Result<Box<dyn VideoSurface>, String> {
+        video::Surface::start(device, mpv, wake).map(|surface| Box::new(surface) as Box<dyn VideoSurface>)
     }
 
     fn watch_button_layout(send: Box<dyn Fn(ButtonLayout) + Send + Sync>) -> BoxFuture<'static, ()> {
