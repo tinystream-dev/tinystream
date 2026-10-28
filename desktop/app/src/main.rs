@@ -14,6 +14,7 @@ mod images;
 mod keys;
 mod paths;
 mod platform;
+mod player;
 mod route;
 mod runner;
 mod secrets;
@@ -82,6 +83,7 @@ fn main() -> ExitCode {
     };
 
     let mut app = App::new(route, state);
+    app.runtime = Some(runtime.handle().clone());
     if let Some(link) = argument.filter(|arg| arg.contains("://")) {
         app.session.initial_link(link);
     }
@@ -155,7 +157,9 @@ fn main() -> ExitCode {
     })));
 
     let mut runner = Runner::new(app, settings, proxy, runtime.handle().clone());
-    match event_loop.run_app(&mut runner) {
+    let result = event_loop.run_app(&mut runner);
+    runtime.block_on(runner.finish());
+    match result {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             tracing::error!("{error}");

@@ -15,23 +15,24 @@ fn main() {
 
     let schema = "../../packages/shared/schema.graphql";
     let fragments = "../../packages/shared/fragments.graphql";
-    let query = "graphql/session.graphql";
-    for path in [schema, fragments, query] {
+    let queries = ["graphql/session.graphql", "graphql/player.graphql"];
+    for path in [schema, fragments].iter().chain(&queries) {
         println!("cargo:rerun-if-changed={path}");
     }
 
     let shared = fs::read_to_string(fragments).expect("shared fragments");
     let mut shared = graphql_parser::parse_query::<String>(&shared).expect("valid shared fragments");
     shared.definitions.retain(|definition| {
-        matches!(definition, Definition::Fragment(fragment) if matches!(fragment.name.as_str(), "Person" | "NotificationFields"))
+        matches!(definition, Definition::Fragment(fragment) if matches!(fragment.name.as_str(), "Person" | "NotificationFields" | "Playback" | "TranscodingFields" | "SeriesEpisodeFields"))
     });
-    let document = format!("{}\n{shared}", fs::read_to_string(query).expect("session operations"));
+    let operations = queries.map(|query| fs::read_to_string(query).expect("operations")).join("\n");
+    let document = format!("{operations}\n{shared}");
     let mut options = GraphQLClientCodegenOptions::new(CodegenMode::Cli);
     options.set_module_visibility(syn::parse_str("pub").expect("public visibility"));
     options.set_response_derives("Clone, Serialize".into());
     options.set_fragments_other_variant(true);
     let generated = generate_module_token_stream_from_string(&document, &PathBuf::from(schema), options)
-        .expect("session operations match the shared schema");
+        .expect("operations match the shared schema");
     fs::write(output.join("graphql.rs"), generated.to_string()).expect("write generated API types");
 }
 

@@ -106,6 +106,13 @@ impl Runner {
         }
     }
 
+    pub async fn finish(&mut self) {
+        self.window = None;
+        self.app.player = None;
+        let requests = std::mem::take(&mut self.requests);
+        let _ = tokio::time::timeout(std::time::Duration::from_secs(5), futures::future::join_all(requests)).await;
+    }
+
     fn open(&mut self, event_loop: &ActiveEventLoop) -> Result<Window, String> {
         let attributes =
             conversion::window_attributes(self.settings.clone(), "tinystream", 1.0, event_loop.primary_monitor(), None);
@@ -191,6 +198,14 @@ impl Runner {
         );
 
         let proxy = self.proxy.clone();
+        crate::ui::video::set_window(
+            device.clone(),
+            Arc::new(move || {
+                let _ = proxy.send_event(UserEvent::Wake);
+            }),
+        );
+
+        let proxy = self.proxy.clone();
         let mut window = Window {
             raw,
             surface,
@@ -271,6 +286,12 @@ impl Runner {
                         });
                         self.live = Some((generation, task));
                     }
+                },
+                Effect::Listen(start) => {
+                    let proxy = self.proxy.clone();
+                    start(Arc::new(move |message| {
+                        let _ = proxy.send_event(UserEvent::Message(message));
+                    }));
                 },
                 Effect::Operate(operation) => {
                     if let Some(window) = &mut self.window {
@@ -475,6 +496,7 @@ impl Window {
         }
         self.raw.pre_present_notify();
         self.queue.present(surface);
+        crate::ui::video::presented();
         true
     }
 
@@ -531,6 +553,10 @@ impl Window {
                     let scale = self.viewport.scale().application;
                     self.raw.show_window_menu(winit::dpi::LogicalPosition::new(point.x * scale, point.y * scale));
                 }
+                Ok(())
+            },
+            Action::Fullscreen(on) => {
+                self.raw.set_fullscreen(on.then_some(winit::window::Fullscreen::Borderless(None)));
                 Ok(())
             },
             Action::Close => Ok(()),

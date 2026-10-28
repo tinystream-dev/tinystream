@@ -92,6 +92,7 @@ pub enum Action {
     Minimize,
     Close,
     Menu,
+    Fullscreen(bool),
 }
 
 #[derive(Debug, Default)]

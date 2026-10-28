@@ -664,6 +664,20 @@ impl Session {
                 l,
             ),
         ];
+        let mpv = crate::player::config_file();
+        let found = mpv.as_ref().is_some_and(|file| file.is_file());
+        let path = mpv.as_ref().map_or_else(|| "No configuration folder".to_owned(), |file| file.display().to_string());
+        cards.push(card(
+            "Advanced",
+            Some("Videos play through mpv. Its own options, like scalers, debanding or shaders, can go in an mpv.conf; what the app controls stays as it sets it."),
+            setting(
+                "mpv.conf",
+                Some(if found { "Found, and read when a video starts." } else { "Not there, so mpv's defaults play, with debanding." }),
+                text(path, type_::XS, l.ink_2).boxed(),
+                l,
+            ),
+            l,
+        ));
         cards.push(card(
             "About",
             None,

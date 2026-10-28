@@ -58,6 +58,9 @@ pub struct Api {
     pub origin: Url,
     pub token: Option<Token>,
     http: Client,
+    /// For media streams, which last as long as playback: no overall timeout, but one on each read
+    /// so a stream that stops sending is noticed (#66).
+    streams: Client,
 }
 
 impl fmt::Debug for Api {
@@ -75,16 +78,32 @@ impl Api {
             .user_agent(concat!("tinystream-desktop/", env!("CARGO_PKG_VERSION")))
             .build()
             .map_err(|_| Error::message("Couldn't start the network client."))?;
-        Ok(Self { origin, token, http })
+        let streams = Client::builder()
+            .connect_timeout(Duration::from_secs(15))
+            .read_timeout(Duration::from_secs(20))
+            .redirect(reqwest::redirect::Policy::none())
+            .user_agent(concat!("tinystream-desktop/", env!("CARGO_PKG_VERSION")))
+            .build()
+            .map_err(|_| Error::message("Couldn't start the network client."))?;
+        Ok(Self { origin, token, http, streams })
     }
 
     /// Authenticated media requests are restricted to this server's origin.
     pub fn media(&self, path: &str) -> Result<reqwest::RequestBuilder, Error> {
+        self.get(&self.http, path)
+    }
+
+    /// Like [`Api::media`], for a stream read while it plays.
+    pub fn stream(&self, path: &str) -> Result<reqwest::RequestBuilder, Error> {
+        self.get(&self.streams, path)
+    }
+
+    fn get(&self, client: &Client, path: &str) -> Result<reqwest::RequestBuilder, Error> {
         let url = self.origin.join(path).map_err(|_| Error::message("Invalid media address."))?;
         if url.origin() != self.origin.origin() {
             return Err(Error::message("Invalid media address."));
         }
-        let request = self.http.get(url);
+        let request = client.get(url);
         Ok(match &self.token {
             Some(token) => request.bearer_auth(&token.0),
             None => request,

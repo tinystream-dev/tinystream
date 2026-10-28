@@ -42,6 +42,11 @@ pub struct Keys {
 }
 
 impl Keys {
+    /// Whether `g` was just pressed, so the next key finishes a combination.
+    pub fn leading(&self) -> bool {
+        self.leader.is_some_and(|at| at.elapsed() < LEADER)
+    }
+
     /// Handles a key press that no widget used (so not typing in a field).
     pub fn press(&mut self, key: &Key, modifiers: Modifiers, now: Instant) -> Option<Shortcut> {
         let leading = self.leader.take().is_some_and(|at| now.duration_since(at) < LEADER);

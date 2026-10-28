@@ -1,0 +1,24 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+query Playback($id: Int!) {
+  video(id: $id) { ...Playback }
+  server { clips transcoding { ...TranscodingFields } }
+  viewer { id permissions { clip watchTogether } }
+}
+
+mutation SaveProgress($videoId: Int!, $position: Float!, $duration: Float!) {
+  saveProgress(videoId: $videoId, position: $position, duration: $duration) { id }
+}
+
+mutation TakeScreenshot($input: NewScreenshot!) {
+  takeScreenshot(input: $input) { id poster }
+}
+
+query PlayerSchedule($id: Int!) {
+  title(id: $id) { series { id monitor status next { ...SeriesEpisodeFields } } }
+}
+
+query PlayerOverview($id: Int!, $videoId: Int!) {
+  title(id: $id) { overview }
+  video(id: $videoId) { overview }
+}
