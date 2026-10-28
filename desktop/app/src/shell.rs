@@ -45,6 +45,10 @@ const PAGES: &[(&str, Route, &str, Icon)] = &[
 ];
 
 pub fn view(app: &App) -> Element<'_, Message> {
+    if let Some(viewer) = &app.local_video {
+        let look = app.session.look();
+        return chrome(app, viewer.view(&look).map(Message::LocalVideo).boxed(), true, &look);
+    }
     if let Some(gallery) = &app.gallery {
         let look = gallery.look(app.reduce_motion);
         return chrome(app, gallery.view(&look).map(Message::Gallery).boxed(), true, &look);
@@ -95,7 +99,16 @@ fn chrome<'a>(app: &'a App, base: Element<'a, Message>, focus: bool, look: &Look
     if focus {
         layers.push(app.chrome.drag_area(space().width(Fill).height(DRAG_STRIP), Message::Chrome));
     }
-    if let Some(pill) = app.chrome.pill(Side::Right, look) {
+    // Over the player, the window's controls come and go with its own.
+    let alpha = app
+        .player
+        .as_ref()
+        .filter(|player| {
+            matches!(app.history.current().route, Route::Watch(..)) && !player.pip && player.clipping.is_none()
+        })
+        .map_or(1.0, |player| if look.reduce_motion { f32::from(player.show_chrome()) } else { player.chrome_alpha() });
+    let hidden = alpha == 0.0;
+    if !hidden && let Some(pill) = app.chrome.pill(Side::Right, look, alpha) {
         layers.push(
             container(pill.map(Message::Chrome))
                 .align_right(Fill)
@@ -103,7 +116,10 @@ fn chrome<'a>(app: &'a App, base: Element<'a, Message>, focus: bool, look: &Look
                 .boxed(),
         );
     }
-    if focus && let Some(pill) = app.chrome.pill(Side::Left, look) {
+    if focus
+        && !hidden
+        && let Some(pill) = app.chrome.pill(Side::Left, look, alpha)
+    {
         layers.push(
             container(pill.map(Message::Chrome)).padding(Padding { top: 8.0, left: 8.0, ..Padding::ZERO }).boxed(),
         );
@@ -231,6 +247,10 @@ fn nav_link<'a>(label: &'a str, glyph: Icon, to: Route, current: &Route, look: &
 /// The page, in the window's single scroll container, under a strip that moves the window. While
 /// the route changes, the old page blurs away and the new one sharpens in.
 fn page<'a>(app: &'a App, look: &Look) -> Element<'a, Message> {
+    if let (Route::Watch(..), Some(player)) = (&app.history.current().route, &app.player) {
+        let serial = player.serial;
+        return crate::player::view(player, look).map(move |message| Message::Player(serial, message)).boxed();
+    }
     let l = *look;
     let transition = app.transition.as_ref().filter(|_| !look.reduce_motion).and_then(|(start, from)| {
         page_transition(Instant::now().saturating_duration_since(*start)).map(|(arrived, veil)| (arrived, veil, from))
@@ -341,7 +361,7 @@ fn route_title(route: &Route) -> String {
     match route {
         Route::Home => "Home".into(),
         Route::Calendar => "Calendar".into(),
-        Route::Clips => "Clips".into(),
+        Route::Clips | Route::Clip(_) => "Clips".into(),
         Route::Discover => "Add shows".into(),
         Route::Downloads => "Downloads".into(),
         Route::Requests => "Requests".into(),
@@ -350,7 +370,7 @@ fn route_title(route: &Route) -> String {
         Route::Library(name) => name.clone(),
         Route::Series { series, .. } => series.clone(),
         Route::Title(id) => format!("Title {id}"),
-        Route::Watch(id) => format!("Watching {id}"),
+        Route::Watch(id, _) => format!("Watching {id}"),
         Route::Artist(id) => format!("Artist {id}"),
         Route::Album(id) => format!("Album {id}"),
         Route::Playlist(id) => format!("Playlist {id}"),

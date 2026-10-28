@@ -22,5 +22,6 @@ pub mod squircle;
 pub mod text;
 pub mod theme;
 pub mod tilt;
+pub mod video;
 
 pub use theme::{Look, Style};

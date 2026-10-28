@@ -3395,6 +3395,7 @@ dependencies = [
  "iced_widget",
  "iced_winit",
  "image",
+ "mpv",
  "reqwest",
  "semver",
  "serde",

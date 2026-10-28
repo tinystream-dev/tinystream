@@ -187,6 +187,24 @@ jobs:
       - run: cargo --locked fmt --check
       - run: cargo clippy --locked --all-targets
       - run: cargo test --locked
+      - run: cargo build --locked
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-about
+      - name: Package desktop test build
+        working-directory: .
+        run: |
+          name=tinystream-desktop-linux-x86_64-test
+          mkdir -p "dist/$name"
+          cp desktop/target/debug/tinystream-desktop LICENSE desktop/docs/player-validation.md "dist/$name/"
+          licenses/collect.sh .native x86_64-unknown-linux-gnu desktop > "dist/$name/THIRD_PARTY_LICENSES"
+          printf 'Commit: %s\nProfile: debug (unoptimized)\n' "$GITHUB_SHA" > "dist/$name/BUILD.txt"
+          tar -C dist -czf "dist/$name.tar.gz" "$name"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-linux-x86_64-test-${{ github.sha }}
+          path: dist/tinystream-desktop-linux-x86_64-test.tar.gz
+          retention-days: 14
 
   # One job for the server: the feature sets share the build's dependencies, native libraries and
   # cache, so checking each alone after it costs little more than the server itself.

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+use std::sync::Arc;
 use std::time::Instant;
 
 use iced_core::widget::operation::scrollable::AbsoluteOffset;
@@ -35,6 +36,14 @@ pub struct App {
     pub reduce_motion: bool,
     /// When the route last changed, and from where, while the pages are still crossing over.
     pub transition: Option<(Instant, Route)>,
+    /// The video playing, while a `/watch` route is open.
+    pub player: Option<crate::player::Player>,
+    pub local_file: Option<std::path::PathBuf>,
+    pub local_video: Option<crate::player::local::Viewer>,
+    players: u64,
+    video_active: bool,
+    /// Where async work runs, for what needs it on other threads (mpv's streams).
+    pub runtime: Option<tokio::runtime::Handle>,
     keys: Keys,
     window_state: WindowState,
 }
@@ -60,7 +69,13 @@ pub enum Message {
     Session(crate::session::Message),
     Gallery(crate::ui::gallery::Message),
     ReducedMotion(bool),
+    /// For the player with this serial.
+    Player(u64, crate::player::Message),
+    LocalVideo(crate::player::local::Message),
 }
+
+/// Sends the app a message from any thread.
+pub type Sender = Arc<dyn Fn(Message) + Send + Sync>;
 
 /// What the event loop does for the app after an update.
 pub enum Effect {
@@ -71,6 +86,11 @@ pub enum Effect {
     Live(Option<crate::api::Api>, u64),
     Request(futures::future::BoxFuture<'static, Message>),
     Scale(f32),
+    PictureInPicture(bool),
+    VideoActivity(bool),
+    PipWindow(chrome::Action),
+    /// Starts something that sends messages for as long as it likes, like mpv's events.
+    Listen(Box<dyn FnOnce(Sender) + Send>),
 }
 
 pub const SCROLL: &str = "page";
@@ -89,13 +109,52 @@ impl App {
             gallery: None,
             reduce_motion: false,
             transition: None,
+            player: None,
+            local_file: None,
+            local_video: None,
+            players: 0,
+            video_active: false,
+            runtime: None,
             keys: Keys::default(),
             window_state,
         }
     }
 
     pub fn update(&mut self, message: Message, effects: &mut Vec<Effect>) {
+        self.handle(message, effects);
+        self.follow_route(effects);
+        let active = self.player.as_ref().is_some_and(crate::player::Player::playback_active);
+        if active != self.video_active {
+            self.video_active = active;
+            effects.push(Effect::VideoActivity(active));
+        }
+    }
+
+    fn handle(&mut self, message: Message, effects: &mut Vec<Effect>) {
         match message {
+            Message::LocalVideo(message) => {
+                use crate::player::local::Message as Local;
+                match message {
+                    Local::Fullscreen => {
+                        effects.push(Effect::Window(chrome::Action::Fullscreen(!self.chrome.fullscreen)))
+                    },
+                    Local::Close if self.chrome.fullscreen => {
+                        effects.push(Effect::Window(chrome::Action::Fullscreen(false)))
+                    },
+                    Local::Close => effects.push(Effect::Exit),
+                    message => {
+                        if let Some(viewer) = &mut self.local_video {
+                            viewer.update(message);
+                        }
+                    },
+                }
+            },
+            Message::Player(serial, message) => {
+                let Some(player) = self.player.as_mut().filter(|player| player.serial == serial) else { return };
+                if let Some(out) = player.update(message, effects) {
+                    self.player_asks(out, effects);
+                }
+            },
             Message::Focus(reverse) => {
                 let operation: Box<dyn Operation> = if reverse {
                     Box::new(operation::focusable::focus_previous())
@@ -114,6 +173,10 @@ impl App {
                     effects.push(Effect::Operate(Box::new(operation::focusable::focus(target.into()))));
                 }
                 if self.session.generation != generation {
+                    if let Some(player) = &mut self.player {
+                        player.pip = false;
+                    }
+                    effects.push(Effect::PictureInPicture(false));
                     self.history = History::new(Route::Home);
                     self.overlay = None;
                     self.query.clear();
@@ -124,6 +187,9 @@ impl App {
             Message::Resized { size, maximized, fullscreen } => {
                 self.chrome.maximized = maximized;
                 self.chrome.fullscreen = fullscreen;
+                if let Some(player) = &mut self.player {
+                    player.fullscreen = fullscreen;
+                }
                 self.window_state.maximized = maximized;
                 if !maximized && !fullscreen && size.width > 0.0 && size.height > 0.0 {
                     self.window_state.width = size.width;
@@ -131,13 +197,16 @@ impl App {
                 }
             },
             Message::CloseRequested => {
+                if let Some(player) = &mut self.player {
+                    player.save(effects);
+                }
                 if let Err(error) = self.window_state.save() {
                     tracing::warn!("can't remember the window's size: {error}");
                 }
                 effects.push(Effect::Exit);
             },
             Message::Chrome(chrome::Message::Control(chrome::Control::Close)) => {
-                self.update(Message::CloseRequested, effects);
+                self.handle(Message::CloseRequested, effects);
             },
             Message::Chrome(message) => effects.extend(self.chrome.update(message).map(Effect::Window)),
             Message::ButtonLayout(layout) => self.chrome.layout = layout,
@@ -173,8 +242,86 @@ impl App {
         self.window_state.ui_scale
     }
 
+    /// Starts the player when a video's route opens, and stops it (keeping its place) when it
+    /// closes, or another video's opens.
+    fn follow_route(&mut self, effects: &mut Vec<Effect>) {
+        let watching = match self.history.current().route {
+            Route::Watch(id, start) if self.session.screen == crate::session::Screen::Ready => Some((id as i64, start)),
+            _ => None,
+        };
+        let keep_pip = self.player.as_ref().is_some_and(|player| player.pip)
+            && self.session.screen == crate::session::Screen::Ready;
+        if self.player.as_ref().is_some_and(|player| Some(player.id) != watching.map(|(id, _)| id))
+            && !(keep_pip && watching.is_none())
+            && let Some(mut player) = self.player.take()
+        {
+            player.save(effects);
+            if watching.is_none() && self.chrome.fullscreen {
+                effects.push(Effect::Window(chrome::Action::Fullscreen(false)));
+            }
+        }
+        let (Some((id, start)), None) = (watching, &self.player) else { return };
+        let Some(api) = self.session.api.clone() else { return };
+        let server = self.session.config.active.unwrap_or_default();
+        let user = self.session.config.active().and_then(|server| server.user.as_ref()).map_or(0, |user| user.id);
+        self.players += 1;
+        let mut player = crate::player::Player::new(
+            self.players,
+            id,
+            start.map(f64::from),
+            api,
+            (server, user),
+            self.runtime.clone(),
+            effects,
+        );
+        player.fullscreen = self.chrome.fullscreen;
+        player.pip = keep_pip;
+        self.player = Some(player);
+    }
+
+    fn player_asks(&mut self, out: crate::player::Out, effects: &mut Vec<Effect>) {
+        use crate::player::Out;
+        match out {
+            Out::Back { title } => {
+                if self.chrome.fullscreen {
+                    effects.push(Effect::Window(chrome::Action::Fullscreen(false)));
+                }
+                if self.history.can_go_back() {
+                    self.shortcut(Shortcut::Back, effects);
+                } else {
+                    self.history.replace(title.map_or(Route::Home, |title| Route::Title(title as u64)));
+                }
+            },
+            Out::Go(id) => self.history.replace(Route::Watch(id as u64, None)),
+            Out::Fullscreen => {
+                if let Some(player) = &mut self.player
+                    && player.pip
+                {
+                    player.pip = false;
+                    self.history.replace(Route::Watch(player.id as u64, None));
+                    effects.push(Effect::PictureInPicture(false));
+                }
+                effects.push(Effect::Window(chrome::Action::Fullscreen(!self.chrome.fullscreen)));
+            },
+            Out::PictureInPicture(on) => {
+                if on && self.chrome.fullscreen {
+                    effects.push(Effect::Window(chrome::Action::Fullscreen(false)));
+                }
+                if !on && let Some(player) = &self.player {
+                    self.history.replace(Route::Watch(player.id as u64, None));
+                }
+                effects.push(Effect::PictureInPicture(on));
+            },
+            Out::PipWindow(action) => effects.push(Effect::PipWindow(action)),
+            Out::Clip(id) => self.navigate(Route::Clip(id as u64), effects),
+        }
+    }
+
     /// Whether something on screen moves without being asked to, so frames have to keep coming.
     pub fn animating(&self) -> bool {
+        if self.player.as_ref().is_some_and(|player| player.animating()) {
+            return true;
+        }
         let crossing = self
             .transition
             .as_ref()
@@ -188,6 +335,24 @@ impl App {
 
     /// Handles shell shortcuts, including search and Escape while a text field has focus.
     pub fn listen(&mut self, event: &Event, status: event::Status) -> Option<Message> {
+        let watching = matches!(self.history.current().route, Route::Watch(..));
+        self.listen_in(event, status, watching)
+    }
+
+    pub fn listen_in(&mut self, event: &Event, status: event::Status, watching: bool) -> Option<Message> {
+        if let Some(viewer) = &self.local_video {
+            return match event {
+                Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. })
+                    if status != event::Status::Captured
+                        && !modifiers.control()
+                        && !modifiers.alt()
+                        && !modifiers.logo() =>
+                {
+                    viewer.key(key).map(Message::LocalVideo)
+                },
+                _ => None,
+            };
+        }
         if let Event::Keyboard(keyboard::Event::KeyPressed { key, modified_key, modifiers, .. }) = event
             && let Some(shortcut) =
                 crate::keys::zoom(modified_key, *modifiers).or_else(|| crate::keys::zoom(key, *modifiers))
@@ -217,6 +382,21 @@ impl App {
                 Some(Message::Overlay(None))
             },
             _ if status == event::Status::Captured => None,
+            Event::Keyboard(keyboard::Event::KeyPressed { key, modified_key, modifiers, .. })
+                if watching && self.overlay.is_none() && !self.keys.leading() && self.player.is_some() =>
+            {
+                let fullscreen = self.chrome.fullscreen;
+                let player = self.player.as_mut()?;
+                match player.key(key, modified_key, *modifiers, fullscreen) {
+                    Some(message) => Some(Message::Player(player.serial, message)),
+                    None if player.clipping.is_some() => None,
+                    None => self.keys.press(modified_key, *modifiers, Instant::now()).map(Message::Shortcut),
+                }
+            },
+            Event::Mouse(mouse::Event::CursorMoved { .. }) if watching && self.player.is_some() => {
+                let player = self.player.as_ref()?;
+                Some(Message::Player(player.serial, crate::player::Message::Poke))
+            },
             Event::Keyboard(keyboard::Event::KeyPressed { modified_key: key, modifiers, .. }) => {
                 self.keys.press(key, *modifiers, Instant::now()).map(Message::Shortcut)
             },
@@ -310,6 +490,33 @@ mod tests {
             text: None,
             repeat: false,
         })
+    }
+
+    #[test]
+    fn video_activity_follows_pause_end_and_detached_navigation() {
+        use crate::player::Message as PlayerMessage;
+        let mut app = App::new(Route::Watch(1, None), WindowState::default());
+        app.session.screen = crate::session::Screen::Ready;
+        app.player = Some(crate::player::tests::player());
+        let serial = app.player.as_ref().unwrap().serial;
+        let mut effects = Vec::new();
+        app.update(Message::Player(serial, PlayerMessage::Poke), &mut effects);
+        assert!(effects.iter().any(|effect| matches!(effect, Effect::VideoActivity(true))));
+        effects.clear();
+        app.update(Message::Player(serial, PlayerMessage::Toggle), &mut effects);
+        assert!(effects.iter().any(|effect| matches!(effect, Effect::VideoActivity(false))));
+        effects.clear();
+        app.update(Message::Player(serial, PlayerMessage::Toggle), &mut effects);
+        app.player.as_mut().unwrap().pip = true;
+        effects.clear();
+        app.update(Message::Navigate(Route::Home), &mut effects);
+        assert!(app.player.is_some());
+        assert!(!effects.iter().any(|effect| matches!(effect, Effect::VideoActivity(_))));
+        app.player.as_mut().unwrap().time = 1799.0;
+        effects.clear();
+        app.player.as_mut().unwrap().ended = true;
+        app.update(Message::Player(serial, PlayerMessage::Tick), &mut effects);
+        assert!(effects.iter().any(|effect| matches!(effect, Effect::VideoActivity(false))));
     }
 
     #[test]

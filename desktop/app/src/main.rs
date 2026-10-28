@@ -14,6 +14,7 @@ mod images;
 mod keys;
 mod paths;
 mod platform;
+mod player;
 mod route;
 mod runner;
 mod secrets;
@@ -82,6 +83,19 @@ fn main() -> ExitCode {
     };
 
     let mut app = App::new(route, state);
+    app.runtime = Some(runtime.handle().clone());
+    if let Some(path) = &flags.video {
+        match path
+            .canonicalize()
+            .and_then(|path| if path.is_file() { Ok(path) } else { Err(std::io::Error::other("not a video file")) })
+        {
+            Ok(path) => app.local_file = Some(path),
+            Err(error) => {
+                tracing::error!("can't open local video: {error}");
+                return ExitCode::FAILURE;
+            },
+        }
+    }
     if let Some(link) = argument.filter(|arg| arg.contains("://")) {
         app.session.initial_link(link);
     }
@@ -155,7 +169,9 @@ fn main() -> ExitCode {
     })));
 
     let mut runner = Runner::new(app, settings, proxy, runtime.handle().clone());
-    match event_loop.run_app(&mut runner) {
+    let result = event_loop.run_app(&mut runner);
+    runtime.block_on(runner.finish());
+    match result {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             tracing::error!("{error}");
@@ -167,6 +183,7 @@ fn main() -> ExitCode {
 /// What the command line asks for: a route or link, and the development switches.
 struct Flags {
     argument: Option<String>,
+    video: Option<std::path::PathBuf>,
     /// `--gallery`: the design system's gallery instead of the app.
     gallery: bool,
     /// `--style flat|glass` and `--custom`, for the gallery.
@@ -224,6 +241,7 @@ impl Flags {
     fn parse() -> Self {
         let mut flags = Self {
             argument: None,
+            video: None,
             gallery: false,
             style: ui::Style::Layered,
             custom: false,
@@ -241,6 +259,7 @@ impl Flags {
         let mut args = std::env::args().skip(1);
         while let Some(arg) = args.next() {
             match arg.as_str() {
+                "--video" => flags.video = Some(args.next().unwrap_or_default().into()),
                 "--gallery" => flags.gallery = true,
                 "--click" => flags.click = true,
                 "--key" => flags.key = args.next(),

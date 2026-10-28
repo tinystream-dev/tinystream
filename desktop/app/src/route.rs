@@ -9,15 +9,20 @@ pub enum Route {
     Home,
     Calendar,
     Clips,
+    Clip(u64),
     Discover,
     Downloads,
     Requests,
     Settings,
     Wanted,
     Library(String),
-    Series { library: String, series: String },
+    Series {
+        library: String,
+        series: String,
+    },
     Title(u64),
-    Watch(u64),
+    /// A video, and where to start it (`?t=`), in seconds.
+    Watch(u64, Option<u32>),
     Artist(u64),
     Album(u64),
     Playlist(u64),
@@ -28,16 +33,26 @@ pub enum Route {
 }
 
 impl Route {
-    /// Parses a path like `/title/12`, ignoring any query or fragment.
+    /// Parses a path like `/title/12`, ignoring any query or fragment but a video's start (`t`).
     pub fn parse(path: &str) -> Option<Self> {
-        let path = path.split(['?', '#']).next().unwrap_or_default();
+        let path = path.split('#').next().unwrap_or_default();
+        let (path, query) = path.split_once('?').unwrap_or((path, ""));
+        let start = query
+            .split('&')
+            .find_map(|pair| pair.strip_prefix("t="))
+            .and_then(|t| t.parse::<f64>().ok())
+            .filter(|t| t.is_finite() && *t >= 0.0)
+            .map(|t| t as u32);
         let parts: Vec<String> = path.split('/').filter(|part| !part.is_empty()).map(decode).collect();
         let id = |s: &str| s.parse().ok();
 
         Some(match parts.iter().map(String::as_str).collect::<Vec<_>>()[..] {
             [] => Self::Home,
             ["calendar"] => Self::Calendar,
-            ["clips"] => Self::Clips,
+            ["clips"] => match query.split('&').find_map(|pair| pair.strip_prefix("clip=")).and_then(id) {
+                Some(clip) => Self::Clip(clip),
+                None => Self::Clips,
+            },
             ["discover"] => Self::Discover,
             ["downloads"] => Self::Downloads,
             ["requests"] => Self::Requests,
@@ -48,7 +63,7 @@ impl Route {
                 Self::Series { library: library.to_owned(), series: series.to_owned() }
             },
             ["title", n] => Self::Title(id(n)?),
-            ["watch", n] => Self::Watch(id(n)?),
+            ["watch", n] => Self::Watch(id(n)?, start),
             ["artist", n] => Self::Artist(id(n)?),
             ["album", n] => Self::Album(id(n)?),
             ["playlist", n] => Self::Playlist(id(n)?),
@@ -62,7 +77,7 @@ impl Route {
 
     /// Screens that take the whole window, without the sidebar, as on web.
     pub fn is_focus(&self) -> bool {
-        matches!(self, Self::Watch(_) | Self::Together(_) | Self::Listen(_))
+        matches!(self, Self::Watch(..) | Self::Together(_) | Self::Listen(_))
     }
 }
 
@@ -72,6 +87,7 @@ impl fmt::Display for Route {
             Self::Home => f.write_str("/"),
             Self::Calendar => f.write_str("/calendar"),
             Self::Clips => f.write_str("/clips"),
+            Self::Clip(id) => write!(f, "/clips?clip={id}"),
             Self::Discover => f.write_str("/discover"),
             Self::Downloads => f.write_str("/downloads"),
             Self::Requests => f.write_str("/requests"),
@@ -80,7 +96,8 @@ impl fmt::Display for Route {
             Self::Library(name) => write!(f, "/library/{}", encode(name)),
             Self::Series { library, series } => write!(f, "/library/{}/series/{}", encode(library), encode(series)),
             Self::Title(id) => write!(f, "/title/{id}"),
-            Self::Watch(id) => write!(f, "/watch/{id}"),
+            Self::Watch(id, None) => write!(f, "/watch/{id}"),
+            Self::Watch(id, Some(start)) => write!(f, "/watch/{id}?t={start}"),
             Self::Artist(id) => write!(f, "/artist/{id}"),
             Self::Album(id) => write!(f, "/album/{id}"),
             Self::Playlist(id) => write!(f, "/playlist/{id}"),
@@ -126,6 +143,14 @@ impl History {
         self.entries.push(Entry { route, scroll: 0.0 });
         self.forward.clear();
         true
+    }
+
+    /// Opens `route` in place of the current one, as the player moves between episodes.
+    pub fn replace(&mut self, route: Route) {
+        if let Some(entry) = self.entries.last_mut() {
+            *entry = Entry { route, scroll: 0.0 };
+        }
+        self.forward.clear();
     }
 
     pub fn back(&mut self) -> Option<&Entry> {
@@ -189,7 +214,8 @@ mod tests {
         assert_eq!(Route::parse("/"), Some(Route::Home));
         assert_eq!(Route::parse(""), Some(Route::Home));
         assert_eq!(Route::parse("/title/42"), Some(Route::Title(42)));
-        assert_eq!(Route::parse("/watch/7?t=30"), Some(Route::Watch(7)));
+        assert_eq!(Route::parse("/watch/7?t=30"), Some(Route::Watch(7, Some(30))));
+        assert_eq!(Route::parse("/watch/7?clip=2#x"), Some(Route::Watch(7, None)));
         assert_eq!(Route::parse("/library/Anime%20Shows"), Some(Route::Library("Anime Shows".into())));
         assert_eq!(
             Route::parse("/library/Books/series/Monogatari"),
@@ -207,6 +233,8 @@ mod tests {
             Route::Library("Films & Shows/日本".into()),
             Route::Series { library: "a b".into(), series: "100%".into() },
             Route::Together("AB12".into()),
+            Route::Watch(9, Some(95)),
+            Route::Clip(42),
             Route::Read(3),
         ] {
             assert_eq!(Route::parse(&route.to_string()), Some(route));

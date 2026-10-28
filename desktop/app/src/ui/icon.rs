@@ -24,7 +24,7 @@ pub(super) enum Step {
 /// `icon` at `size` pixels, with Lucide's stroke (2 in 24, scaled with the icon), in the colour
 /// text would have where it's put.
 pub fn icon(icon: Icon, size: f32) -> Glyph {
-    Glyph { icon, size, stroke: 2.0, color: None }
+    Glyph { icon, size, stroke: 2.0, color: None, filled: false }
 }
 
 pub struct Glyph {
@@ -32,11 +32,18 @@ pub struct Glyph {
     size: f32,
     stroke: f32,
     color: Option<Color>,
+    filled: bool,
 }
 
 impl Glyph {
     pub fn color(mut self, color: Color) -> Self {
         self.color = Some(color);
+        self
+    }
+
+    /// Fills its shapes as well as outlining them (`fill-current`).
+    pub fn filled(mut self) -> Self {
+        self.filled = true;
         self
     }
 
@@ -78,7 +85,16 @@ impl<Message> Widget<Message, Theme, Renderer> for Glyph {
     ) {
         let bounds = layout.bounds();
         let color = self.color.unwrap_or(style.text_color);
-        let key = [self.size, self.stroke, color.r, color.g, color.b, color.a, self.icon as u8 as f32];
+        let key = [
+            self.size,
+            self.stroke,
+            color.r,
+            color.g,
+            color.b,
+            color.a,
+            self.icon as u8 as f32,
+            f32::from(u8::from(self.filled)),
+        ];
         let geometry = tree.state.downcast_ref::<Keyed>().draw(renderer, bounds.size(), &key, |frame| {
             self.paint(frame, color, self.size / 24.0);
         });
@@ -95,7 +111,7 @@ impl Glyph {
             .with_line_join(LineJoin::Round);
         for (filled, steps) in self.icon.shapes() {
             let path = path(steps, scale);
-            if *filled {
+            if *filled || self.filled {
                 frame.fill(&path, color);
             }
             frame.stroke(&path, stroke);
