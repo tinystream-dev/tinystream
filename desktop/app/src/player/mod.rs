@@ -17,6 +17,7 @@ use crate::ui::video::Screen;
 
 mod clip;
 mod engine;
+pub mod local;
 pub mod stream;
 mod timeline;
 mod tracks;

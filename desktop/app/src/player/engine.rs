@@ -112,7 +112,7 @@ const HEIGHT: u64 = 8;
 
 pub struct Engine {
     pub mpv: Mpv,
-    opener: Opener,
+    opener: Option<Opener>,
     alive: Arc<AtomicBool>,
 }
 
@@ -122,6 +122,19 @@ impl Engine {
     }
 
     fn with_config(api: Api, runtime: tokio::runtime::Handle, config: Option<PathBuf>) -> Result<Self, String> {
+        let mpv = Self::configured(config)?;
+        let opener = Opener::new(api, runtime);
+        let open = opener.clone();
+        mpv.add_protocol(stream::PROTOCOL, move |uri| open.open(uri)).map_err(|error| error.to_string())?;
+
+        Ok(Self { mpv, opener: Some(opener), alive: Arc::new(AtomicBool::new(true)) })
+    }
+
+    pub(super) fn local() -> Result<Self, String> {
+        Ok(Self { mpv: Self::configured(config_file())?, opener: None, alive: Arc::new(AtomicBool::new(true)) })
+    }
+
+    fn configured(config: Option<PathBuf>) -> Result<Mpv, String> {
         let mut options: Vec<(&str, String)> = FORCED.iter().map(|&(name, value)| (name, value.to_owned())).collect();
         match config.as_ref().and_then(|file| file.parent()) {
             Some(dir) if config.as_ref().is_some_and(|file| file.is_file()) => {
@@ -138,10 +151,6 @@ impl Engine {
             }
         }
 
-        let opener = Opener::new(api, runtime);
-        let open = opener.clone();
-        mpv.add_protocol(stream::PROTOCOL, move |uri| open.open(uri)).map_err(|error| error.to_string())?;
-
         for (id, name, format) in [
             (TIME, "time-pos", Format::Double),
             (PAUSE, "pause", Format::Flag),
@@ -156,7 +165,7 @@ impl Engine {
         }
         mpv.request_log_messages("warn").map_err(|error| error.to_string())?;
 
-        Ok(Self { mpv, opener, alive: Arc::new(AtomicBool::new(true)) })
+        Ok(mpv)
     }
 
     /// Whether the engine is still around, for what runs beside it.
@@ -166,7 +175,8 @@ impl Engine {
 
     /// What sends mpv's news to `send`, from a thread of its own, until the engine is dropped.
     pub fn listener(&self) -> impl FnOnce(Box<dyn Fn(Update) + Send>) + Send + 'static + use<> {
-        let (mpv, alive, failure) = (self.mpv.clone(), self.alive.clone(), self.opener.failure.clone());
+        let failure = self.opener.as_ref().map(|opener| opener.failure.clone()).unwrap_or_default();
+        let (mpv, alive) = (self.mpv.clone(), self.alive.clone());
         move |send| listen(mpv, alive, failure, send)
     }
 
@@ -214,7 +224,7 @@ impl Engine {
         ranges.iter().filter_map(|range| Some((range.get("start")?.as_f64()?, range.get("end")?.as_f64()?))).collect()
     }
 
-    fn command(&self, args: &[&str]) {
+    pub(super) fn command(&self, args: &[&str]) {
         if let Err(error) = self.mpv.command_async(0, args) {
             tracing::warn!("mpv {}: {error}", args[0]);
         }

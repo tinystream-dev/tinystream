@@ -38,6 +38,8 @@ pub struct App {
     pub transition: Option<(Instant, Route)>,
     /// The video playing, while a `/watch` route is open.
     pub player: Option<crate::player::Player>,
+    pub local_file: Option<std::path::PathBuf>,
+    pub local_video: Option<crate::player::local::Viewer>,
     players: u64,
     video_active: bool,
     /// Where async work runs, for what needs it on other threads (mpv's streams).
@@ -69,6 +71,7 @@ pub enum Message {
     ReducedMotion(bool),
     /// For the player with this serial.
     Player(u64, crate::player::Message),
+    LocalVideo(crate::player::local::Message),
 }
 
 /// Sends the app a message from any thread.
@@ -107,6 +110,8 @@ impl App {
             reduce_motion: false,
             transition: None,
             player: None,
+            local_file: None,
+            local_video: None,
             players: 0,
             video_active: false,
             runtime: None,
@@ -127,6 +132,23 @@ impl App {
 
     fn handle(&mut self, message: Message, effects: &mut Vec<Effect>) {
         match message {
+            Message::LocalVideo(message) => {
+                use crate::player::local::Message as Local;
+                match message {
+                    Local::Fullscreen => {
+                        effects.push(Effect::Window(chrome::Action::Fullscreen(!self.chrome.fullscreen)))
+                    },
+                    Local::Close if self.chrome.fullscreen => {
+                        effects.push(Effect::Window(chrome::Action::Fullscreen(false)))
+                    },
+                    Local::Close => effects.push(Effect::Exit),
+                    message => {
+                        if let Some(viewer) = &mut self.local_video {
+                            viewer.update(message);
+                        }
+                    },
+                }
+            },
             Message::Player(serial, message) => {
                 let Some(player) = self.player.as_mut().filter(|player| player.serial == serial) else { return };
                 if let Some(out) = player.update(message, effects) {
@@ -318,6 +340,19 @@ impl App {
     }
 
     pub fn listen_in(&mut self, event: &Event, status: event::Status, watching: bool) -> Option<Message> {
+        if let Some(viewer) = &self.local_video {
+            return match event {
+                Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. })
+                    if status != event::Status::Captured
+                        && !modifiers.control()
+                        && !modifiers.alt()
+                        && !modifiers.logo() =>
+                {
+                    viewer.key(key).map(Message::LocalVideo)
+                },
+                _ => None,
+            };
+        }
         if let Event::Keyboard(keyboard::Event::KeyPressed { key, modified_key, modifiers, .. }) = event
             && let Some(shortcut) =
                 crate::keys::zoom(modified_key, *modifiers).or_else(|| crate::keys::zoom(key, *modifiers))

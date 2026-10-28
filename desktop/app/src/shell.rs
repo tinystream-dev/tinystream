@@ -45,6 +45,10 @@ const PAGES: &[(&str, Route, &str, Icon)] = &[
 ];
 
 pub fn view(app: &App) -> Element<'_, Message> {
+    if let Some(viewer) = &app.local_video {
+        let look = app.session.look();
+        return chrome(app, viewer.view(&look).map(Message::LocalVideo).boxed(), true, &look);
+    }
     if let Some(gallery) = &app.gallery {
         let look = gallery.look(app.reduce_motion);
         return chrome(app, gallery.view(&look).map(Message::Gallery).boxed(), true, &look);

@@ -121,6 +121,7 @@ impl Runner {
         self.pip = None;
         self.window = None;
         self.app.player = None;
+        self.app.local_video = None;
         let requests = std::mem::take(&mut self.requests);
         let _ = tokio::time::timeout(std::time::Duration::from_secs(5), futures::future::join_all(requests)).await;
     }
@@ -726,8 +727,18 @@ impl ApplicationHandler<UserEvent> for Runner {
                 let flags = window.flags();
                 window.raw.request_redraw();
                 self.window = Some(window);
+                if let Some(path) = self.app.local_file.take() {
+                    match crate::player::local::Viewer::open(&path, &mut self.effects) {
+                        Ok(viewer) => self.app.local_video = Some(viewer),
+                        Err(error) => {
+                            tracing::error!("can't play local video: {error}");
+                            event_loop.exit();
+                            return;
+                        },
+                    }
+                }
                 self.update(event_loop, flags);
-                if self.app.gallery.is_none() {
+                if self.app.gallery.is_none() && self.app.local_video.is_none() {
                     self.update(event_loop, Message::Session(crate::session::Message::Start));
                     let proxy = self.proxy.clone();
                     self.runtime.spawn(async move {

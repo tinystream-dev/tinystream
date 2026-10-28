@@ -77,6 +77,16 @@ Screenshot links preserve `/clips?clip=<id>` for #93's full Clips screen. The pl
 activity transitions for #92's idle inhibitor; actual OS inhibition and Watch Together (#88)
 remain in their own milestones.
 
+To visibly play a local file through the same mpv/GPU path, without a server:
+
+```sh
+cargo run --locked -- --video '/absolute/path/to/video.mkv'
+```
+
+Space pauses, Left/Right seek ten seconds, Up/Down change volume, M mutes, and F
+or double-click toggles fullscreen. Escape leaves fullscreen, then closes the viewer.
+This diagnostic viewer does not save server progress or offer server transcoding.
+
 The hardware checks are opt-in. From `desktop/`, the shared-texture test reads actual pixels
 back through Vulkan, opens consecutive players, reloads, and resizes their textures:
 
