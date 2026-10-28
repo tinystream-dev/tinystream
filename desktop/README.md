@@ -70,9 +70,12 @@ overlays, track/quality/speed menus, screenshot feedback and fullscreen controls
 An optional `mpv.conf` in the app's config directory can tune picture quality; Settings →
 Advanced shows its path. Playback, input, timing and text-subtitle options remain controlled by
 the app. Bitmap subtitles in the original file use mpv; text subtitle choices are remembered
-for rustyass in #87. Screenshot links preserve `/clips?clip=<id>` for #93's Clips screen.
-The clip editor (#93), Watch Together (#88), idle inhibition (#92), and picture in picture are
-not implemented in this milestone.
+for rustyass in #87. P opens a native picture-in-picture window using the same decoder and
+GPU device; closing it returns to the player. X opens a clip draft on that player, with frame
+stepping, range selection, server rendering and return to the original watch position.
+Screenshot links preserve `/clips?clip=<id>` for #93's full Clips screen. The player exposes
+activity transitions for #92's idle inhibitor; actual OS inhibition and Watch Together (#88)
+remain in their own milestones.
 
 The hardware checks are opt-in. From `desktop/`, the shared-texture test reads actual pixels
 back through Vulkan, opens consecutive players, reloads, and resizes their textures:
@@ -80,6 +83,7 @@ back through Vulkan, opens consecutive players, reloads, and resizes their textu
 ```sh
 cargo test --locked shares_decoded_frames_with_vulkan_across_players -- --ignored
 cargo test --locked player_chrome_and_menus_render_and_accept_input -- --ignored
+cargo test --locked picture_in_picture_keeps_one_player_and_survives_navigation -- --ignored
 ```
 
 `TINYSTREAM_TEST_VIDEO` can replace the bundled H.264 test pattern with a generated 10-bit AV1
@@ -93,10 +97,13 @@ cargo test --locked direct_play_seeks_tracks_and_transcodes -- --ignored
 ```
 
 That check exercises the HTTP protocol, hardware direct play, audio selection, seeking,
-pause-preserving 720p transcode and return to direct play. It makes no progress mutations.
-Local validation used generated 1080p 10-bit AV1 and 4K 10-bit HEVC patterns on AMD with VA-API.
-Real remux performance comparisons and NVIDIA/NVDEC validation still require those workloads
-and hardware; neither a release build nor a performance-parity claim is implied by these checks.
+pause-preserving 720p transcode, cached and uncached seeks, return to direct play and clip
+preview restoration. It makes no progress mutations. The same server variables enable real
+playback in the native PiP test. Local validation used generated 1080p 10-bit AV1 and 4K 10-bit
+HEVC patterns on AMD with VA-API. The [acceptance checklist](docs/player-validation.md) records
+measurements and the outstanding NVIDIA check; the [requirement audit](docs/player-completion.md)
+maps the issue to implementation and evidence. CI produces a debug test tarball with licenses
+and that checklist for the NVIDIA tester.
 
 ## Window behavior
 
