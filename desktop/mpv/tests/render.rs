@@ -261,3 +261,24 @@ fn has_no_libass() {
     let mpv = Mpv::new(&[("vo", "null"), ("ao", "null")]).unwrap();
     assert!(mpv.get_property::<i64>("libass-version").is_err());
 }
+
+#[test]
+fn reads_nodes() {
+    let mpv = Mpv::new(&[("vo", "null"), ("ao", "null"), ("pause", "yes")]).unwrap();
+    assert_eq!(mpv.get_property::<mpv::Node>("track-list").unwrap(), mpv::Node::Array(Vec::new()));
+    mpv.command(&["loadfile", CLIP]).unwrap();
+
+    let deadline = Instant::now() + Duration::from_secs(20);
+
+    while Instant::now() < deadline {
+        if let Some(Event::FileLoaded) = mpv.wait_event(0.1) {
+            let tracks = mpv.get_property::<mpv::Node>("track-list").unwrap();
+            let video =
+                tracks.as_array().iter().find(|track| track.get("type").and_then(|t| t.as_str()) == Some("video"));
+            assert_eq!(video.and_then(|track| track.get("demux-w")).and_then(|w| w.as_i64()), Some(320));
+            return;
+        }
+    }
+
+    panic!("the clip never loaded");
+}

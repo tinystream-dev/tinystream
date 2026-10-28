@@ -231,6 +231,107 @@ impl GetProperty for String {
     }
 }
 
+/// A structured value, like `track-list` or `demuxer-cache-state`.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Node {
+    None,
+    String(String),
+    Flag(bool),
+    Int64(i64),
+    Double(f64),
+    Array(Vec<Node>),
+    Map(Vec<(String, Node)>),
+}
+
+impl Node {
+    unsafe fn from_raw(node: &mpv_node) -> Node {
+        let text = |text: *const c_char| unsafe { CStr::from_ptr(text) }.to_string_lossy().into_owned();
+
+        unsafe {
+            match node.format {
+                MPV_FORMAT_STRING => Node::String(text(node.u.string)),
+                MPV_FORMAT_FLAG => Node::Flag(node.u.flag != 0),
+                MPV_FORMAT_INT64 => Node::Int64(node.u.int64),
+                MPV_FORMAT_DOUBLE => Node::Double(node.u.double_),
+                MPV_FORMAT_NODE_ARRAY | MPV_FORMAT_NODE_MAP => {
+                    let list = &*node.u.list;
+                    if list.num <= 0 {
+                        return if node.format == MPV_FORMAT_NODE_ARRAY {
+                            Node::Array(Vec::new())
+                        } else {
+                            Node::Map(Vec::new())
+                        };
+                    }
+                    let values = std::slice::from_raw_parts(list.values, list.num as usize);
+                    if node.format == MPV_FORMAT_NODE_ARRAY {
+                        Node::Array(values.iter().map(|value| Node::from_raw(value)).collect())
+                    } else {
+                        let keys = std::slice::from_raw_parts(list.keys, values.len());
+                        Node::Map(
+                            keys.iter().zip(values).map(|(&key, value)| (text(key), Node::from_raw(value))).collect(),
+                        )
+                    }
+                },
+                _ => Node::None,
+            }
+        }
+    }
+
+    /// The value under `key`, in a map.
+    pub fn get(&self, key: &str) -> Option<&Node> {
+        match self {
+            Node::Map(entries) => entries.iter().find(|(name, _)| name == key).map(|(_, value)| value),
+            _ => None,
+        }
+    }
+
+    pub fn as_f64(&self) -> Option<f64> {
+        match *self {
+            Node::Double(value) => Some(value),
+            Node::Int64(value) => Some(value as f64),
+            _ => None,
+        }
+    }
+
+    pub fn as_i64(&self) -> Option<i64> {
+        match *self {
+            Node::Int64(value) => Some(value),
+            _ => None,
+        }
+    }
+
+    pub fn as_str(&self) -> Option<&str> {
+        match self {
+            Node::String(value) => Some(value),
+            _ => None,
+        }
+    }
+
+    pub fn as_bool(&self) -> Option<bool> {
+        match *self {
+            Node::Flag(value) => Some(value),
+            _ => None,
+        }
+    }
+
+    pub fn as_array(&self) -> &[Node] {
+        match self {
+            Node::Array(values) => values,
+            _ => &[],
+        }
+    }
+}
+
+impl GetProperty for Node {
+    fn get(mpv: &Mpv, name: &CStr) -> Result<Self> {
+        let mut raw = mpv_node { u: mpv_node_u { int64: 0 }, format: MPV_FORMAT_NONE };
+        check(unsafe { mpv_get_property(mpv.handle(), name.as_ptr(), MPV_FORMAT_NODE, (&raw mut raw).cast()) })?;
+        let node = unsafe { Node::from_raw(&raw) };
+        unsafe { mpv_free_node_contents(&mut raw) };
+        Ok(node)
+    }
+}
+
 /// A property's value in an event.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
@@ -350,6 +451,12 @@ pub trait Stream: Send {
     /// The stream's length, if it's known.
     fn size(&mut self) -> Option<u64>;
 
+    /// Whether [`Stream::seek`] works. mpv only seeks a stream that can't within what it has
+    /// cached.
+    fn seekable(&self) -> bool {
+        true
+    }
+
     /// Something that makes a blocked [`Stream::read`] return early (with an error), called from
     /// another thread when mpv gives up on the stream.
     fn canceler(&self) -> Option<Box<dyn Fn() + Send + Sync>> {
@@ -373,13 +480,14 @@ unsafe extern "C" fn open_stream(user_data: *mut c_void, uri: *mut c_char, info:
     };
 
     let cancel = stream.canceler();
+    let seekable = stream.seekable();
     let cookie = Box::into_raw(Box::new(Cookie { stream, cancel }));
 
     unsafe {
         *info = mpv_stream_cb_info {
             cookie: cookie.cast(),
             read_fn: Some(read_stream),
-            seek_fn: Some(seek_stream),
+            seek_fn: if seekable { Some(seek_stream) } else { None },
             size_fn: Some(stream_size),
             close_fn: Some(close_stream),
             cancel_fn: Some(cancel_stream),
