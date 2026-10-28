@@ -61,7 +61,8 @@ most of its known duration remains. Progress is saved every ten seconds, on paus
 
 `platform::VideoSurface` keeps GPU sharing behind the platform boundary. Linux matches EGL and
 Vulkan device UUIDs, prefers Mesa's surfaceless display for VA-API imports, and falls back to
-device displays. mpv renders into three Vulkan-allocated images imported into OpenGL, which wgpu
+device displays. Hardware interop follows the matched GPU (VA-API on AMD/Intel, CUDA on
+NVIDIA), avoiding unrelated driver probes. mpv renders into three Vulkan-allocated images imported into OpenGL, which wgpu
 samples directly. The render thread finishes OpenGL before handing over a frame and waits for
 the preceding Vulkan submission before reusing its memory. The player also draws the ambient
 light, chapter timeline and previews, skip buttons, episode countdown, paused and finale
@@ -86,6 +87,12 @@ cargo run --locked -- --video '/absolute/path/to/video.mkv'
 Space pauses, Left/Right seek ten seconds, Up/Down change volume, M mutes, and F
 or double-click toggles fullscreen. Escape leaves fullscreen, then closes the viewer.
 This diagnostic viewer does not save server progress or offer server transcoding.
+Its opt-in hardware check opens the real window, requires hardware decoding and a drawn
+frame, and rejects unrelated CUDA-load diagnostics:
+
+```sh
+TINYSTREAM_TEST_VIDEO='/absolute/path/to/video.mkv' cargo test --locked --test local_video -- --ignored
+```
 
 The hardware checks are opt-in. From `desktop/`, the shared-texture test reads actual pixels
 back through Vulkan, opens consecutive players, reloads, and resizes their textures:
