@@ -22,6 +22,10 @@ pub trait Desktop {
 
     fn picture_in_picture_opened() {}
 
+    /// Playback activity transitions, including detached video. OS integration (#92) owns the
+    /// idle-inhibition guard; pausing, ending, leaving or exiting releases it.
+    fn video_activity(_playing: bool) {}
+
     fn open_url(_url: String) -> BoxFuture<'static, Result<(), String>> {
         Box::pin(async { Err("Opening links is not supported on this platform.".into()) })
     }

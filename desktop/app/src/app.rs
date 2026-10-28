@@ -39,6 +39,7 @@ pub struct App {
     /// The video playing, while a `/watch` route is open.
     pub player: Option<crate::player::Player>,
     players: u64,
+    video_active: bool,
     /// Where async work runs, for what needs it on other threads (mpv's streams).
     pub runtime: Option<tokio::runtime::Handle>,
     keys: Keys,
@@ -83,6 +84,7 @@ pub enum Effect {
     Request(futures::future::BoxFuture<'static, Message>),
     Scale(f32),
     PictureInPicture(bool),
+    VideoActivity(bool),
     PipWindow(chrome::Action),
     /// Starts something that sends messages for as long as it likes, like mpv's events.
     Listen(Box<dyn FnOnce(Sender) + Send>),
@@ -106,6 +108,7 @@ impl App {
             transition: None,
             player: None,
             players: 0,
+            video_active: false,
             runtime: None,
             keys: Keys::default(),
             window_state,
@@ -115,6 +118,11 @@ impl App {
     pub fn update(&mut self, message: Message, effects: &mut Vec<Effect>) {
         self.handle(message, effects);
         self.follow_route(effects);
+        let active = self.player.as_ref().is_some_and(crate::player::Player::playback_active);
+        if active != self.video_active {
+            self.video_active = active;
+            effects.push(Effect::VideoActivity(active));
+        }
     }
 
     fn handle(&mut self, message: Message, effects: &mut Vec<Effect>) {
@@ -443,6 +451,33 @@ mod tests {
             text: None,
             repeat: false,
         })
+    }
+
+    #[test]
+    fn video_activity_follows_pause_end_and_detached_navigation() {
+        use crate::player::Message as PlayerMessage;
+        let mut app = App::new(Route::Watch(1, None), WindowState::default());
+        app.session.screen = crate::session::Screen::Ready;
+        app.player = Some(crate::player::tests::player());
+        let serial = app.player.as_ref().unwrap().serial;
+        let mut effects = Vec::new();
+        app.update(Message::Player(serial, PlayerMessage::Poke), &mut effects);
+        assert!(effects.iter().any(|effect| matches!(effect, Effect::VideoActivity(true))));
+        effects.clear();
+        app.update(Message::Player(serial, PlayerMessage::Toggle), &mut effects);
+        assert!(effects.iter().any(|effect| matches!(effect, Effect::VideoActivity(false))));
+        effects.clear();
+        app.update(Message::Player(serial, PlayerMessage::Toggle), &mut effects);
+        app.player.as_mut().unwrap().pip = true;
+        effects.clear();
+        app.update(Message::Navigate(Route::Home), &mut effects);
+        assert!(app.player.is_some());
+        assert!(!effects.iter().any(|effect| matches!(effect, Effect::VideoActivity(_))));
+        app.player.as_mut().unwrap().time = 1799.0;
+        effects.clear();
+        app.player.as_mut().unwrap().ended = true;
+        app.update(Message::Player(serial, PlayerMessage::Tick), &mut effects);
+        assert!(effects.iter().any(|effect| matches!(effect, Effect::VideoActivity(false))));
     }
 
     #[test]

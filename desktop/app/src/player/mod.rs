@@ -344,6 +344,11 @@ impl Player {
         effects.push(Effect::Request(Box::pin(async move { AppMessage::Player(serial, future.await) })));
     }
 
+    /// Whether video playback should keep the desktop awake, including picture in picture.
+    pub fn playback_active(&self) -> bool {
+        self.playing && self.started && !self.ended && self.failure().is_none()
+    }
+
     pub fn duration(&self) -> f64 {
         self.pb.as_ref().and_then(|pb| pb.media.duration).unwrap_or(0.0)
     }

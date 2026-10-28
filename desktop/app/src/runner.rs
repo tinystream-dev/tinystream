@@ -113,6 +113,7 @@ impl Runner {
     }
 
     pub async fn finish(&mut self) {
+        platform::Current::video_activity(false);
         self.pip = None;
         self.window = None;
         self.app.player = None;
@@ -305,6 +306,7 @@ impl Runner {
 
         for effect in std::mem::take(&mut self.effects) {
             match effect {
+                Effect::VideoActivity(active) => platform::Current::video_activity(active),
                 Effect::PipWindow(action) => {
                     if let Some(window) = &self.pip {
                         window.act(action);
@@ -340,6 +342,7 @@ impl Runner {
                     }
                 },
                 Effect::Exit => {
+                    platform::Current::video_activity(false);
                     if let Some((_, task)) = self.live.take() {
                         task.abort();
                     }
