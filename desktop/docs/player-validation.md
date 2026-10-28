@@ -87,5 +87,6 @@ check that new video frames continue to be drawn after chrome fades.
 
 David's library is primarily 1080p 10-bit AV1; no commercial 4K HEVC remux is
 available. The public sample supplies the high-bitrate HEVC acceptance workload.
-NVIDIA/NVDEC remains pending the friend's CI-build result. Keep #86 open until
-that result is recorded.
+On 2026-10-28, David confirmed that playback also works on the NVIDIA tester's
+machine and accepted the result. This records the tester-reported acceptance;
+the NVIDIA run was performed externally, not in the AMD development environment.

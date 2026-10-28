@@ -118,7 +118,7 @@ pause-preserving 720p transcode, cached and uncached seeks, return to direct pla
 preview restoration. It makes no progress mutations. The same server variables enable real
 playback in the native PiP test. Local validation used generated 1080p 10-bit AV1 and 4K 10-bit
 HEVC patterns on AMD with VA-API. The [acceptance checklist](docs/player-validation.md) records
-measurements and the outstanding NVIDIA check; the [requirement audit](docs/player-completion.md)
+measurements and the confirmed NVIDIA tester result; the [requirement audit](docs/player-completion.md)
 maps the issue to implementation and evidence. CI produces a debug test tarball with licenses
 and that checklist for the NVIDIA tester.
 

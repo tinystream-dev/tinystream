@@ -29,8 +29,8 @@ of NVIDIA compatibility. Public sample-remux measurements are qualified below.
 | Picture in picture | secondary native window with the same GPU device, mpv and Screen; close/return/navigation tests; niri floating placement verified | Implemented and tested |
 | Idle-inhibition hook for #92 | Desktop::video_activity; playback transition test, including PiP navigation | Implemented and tested |
 | AMD 1080p 10-bit AV1 and 4K HEVC direct play | generated fixtures, VA-API and Vulkan pixel readback; HTTP seeks/audio/720p round trip | Passed generated and public high-bitrate sample-remux checks |
-| CPU/GPU comparable to standalone mpv on the same remux | retained video drawing; 4K60/59-Mbps sample remux: app 6.89% CPU/50.76% GPU, mpv 8.78%/53.82%; methodology in player-validation.md | Comparable on tested sample; NVIDIA still pending |
-| NVIDIA 10-bit AV1 NVDEC from a CI build | CI debug artifact and player-validation.md checklist; David is arranging a friend to test | Pending tester result |
+| CPU/GPU comparable to standalone mpv on the same remux | retained video drawing; 4K60/59-Mbps sample remux: app 6.89% CPU/50.76% GPU, mpv 8.78%/53.82%; methodology in player-validation.md | Comparable on tested sample |
+| NVIDIA 10-bit AV1 NVDEC from a CI build | David confirmed successful NVIDIA playback and accepted the tester result on 2026-10-28 | Accepted; tester-reported |
 
 `cargo test --locked`: 71 passing tests (5 mpv integration tests and 66 app tests),
 with hardware/native checks opt-in. Strict all-target clippy and formatting pass.
