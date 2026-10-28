@@ -125,6 +125,7 @@ struct Gpu {
     device: ash::Device,
     memory_fd: khr::external_memory_fd::Device,
     uuid: [u8; 16],
+    interop: &'static str,
 }
 
 impl Gpu {
@@ -142,9 +143,14 @@ impl Gpu {
         let mut id = vk::PhysicalDeviceIDProperties::default();
         let mut properties = vk::PhysicalDeviceProperties2::default().push_next(&mut id);
         unsafe { instance.get_physical_device_properties2(physical, &mut properties) };
+        let interop = match properties.properties.vendor_id {
+            0x10DE => "cuda",
+            0x1002 | 0x8086 => "vaapi",
+            _ => "auto",
+        };
         let uuid = id.device_uuid;
 
-        Ok(Self { instance, physical, device: raw, memory_fd, uuid })
+        Ok(Self { instance, physical, device: raw, memory_fd, uuid, interop })
     }
 
     fn memory_type(&self, bits: u32) -> Option<u32> {
@@ -173,6 +179,7 @@ fn render(
     // VA-API decodes on the same GPU, through its render node.
     let node = egl.render_node.as_deref().and_then(|path| File::options().read(true).write(true).open(path).ok());
 
+    mpv.set_property("gpu-hwdec-interop", gpu.interop).map_err(|error| error.to_string())?;
     let lookup = |name: &CStr| egl.proc(name);
     let init = mpv::GlInit { get_proc_address: &lookup, drm_render_fd: node.as_ref().map(AsRawFd::as_raw_fd) };
     let mut context = mpv::RenderContext::new_gl(mpv, init).map_err(|error| error.to_string())?;
