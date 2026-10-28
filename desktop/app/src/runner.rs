@@ -868,6 +868,7 @@ mod tests {
             serial: u64,
             rendered: bool,
             fullscreen_requested: bool,
+            retained_frame: Option<u64>,
         }
         impl ApplicationHandler<UserEvent> for Test {
             fn resumed(&mut self, event_loop: &ActiveEventLoop) {
@@ -910,6 +911,16 @@ mod tests {
 
             fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
                 if Instant::now() < self.until {
+                    if self.retained_frame.is_none() && self.until - Instant::now() < std::time::Duration::from_secs(1)
+                    {
+                        self.retained_frame = self
+                            .runner
+                            .app
+                            .player
+                            .as_ref()
+                            .and_then(|player| player.screen.as_ref())
+                            .map(|screen| screen.drawn_frame());
+                    }
                     event_loop.set_control_flow(ControlFlow::WaitUntil(self.until));
                     return;
                 }
@@ -923,6 +934,10 @@ mod tests {
                     let player = self.runner.app.player.as_ref().unwrap();
                     assert!(player.started, "the detached decoder did not start");
                     assert!(player.failure().is_none(), "{:?}", player.failure());
+                    assert!(
+                        player.screen.as_ref().unwrap().drawn_frame() > self.retained_frame.unwrap(),
+                        "retained rendering stopped displaying new video frames"
+                    );
                 }
                 if std::env::var_os("NIRI_SOCKET").is_some() {
                     let output =
@@ -973,6 +988,7 @@ mod tests {
             serial,
             rendered: false,
             fullscreen_requested: false,
+            retained_frame: None,
         };
         event_loop.run_app(&mut test).unwrap();
         runtime.block_on(test.runner.finish());

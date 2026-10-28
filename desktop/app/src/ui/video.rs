@@ -28,6 +28,8 @@ const SAMPLE: Duration = Duration::from_millis(150);
 pub struct Screen {
     mpv: mpv::Mpv,
     surface: OnceLock<Result<Box<dyn VideoSurface>, String>>,
+    #[cfg(test)]
+    drawn: std::sync::atomic::AtomicU64,
 }
 
 impl fmt::Debug for Screen {
@@ -38,11 +40,21 @@ impl fmt::Debug for Screen {
 
 impl Screen {
     pub fn new(mpv: mpv::Mpv) -> Arc<Self> {
-        let screen = Arc::new(Self { mpv, surface: OnceLock::new() });
+        let screen = Arc::new(Self {
+            mpv,
+            surface: OnceLock::new(),
+            #[cfg(test)]
+            drawn: std::sync::atomic::AtomicU64::new(0),
+        });
         if let Some(device) = DEVICE.get() {
             screen.surface(device);
         }
         screen
+    }
+
+    #[cfg(test)]
+    pub fn drawn_frame(&self) -> u64 {
+        self.drawn.load(std::sync::atomic::Ordering::Relaxed)
     }
 
     /// Why the video can't be drawn, if it can't.
@@ -201,6 +213,8 @@ impl Primitive for Picture {
         let fitted = contain(stage, aspect);
         surface.resize(fitted.width as u32, fitted.height as u32);
         let Some(frame) = surface.frame() else { return };
+        #[cfg(test)]
+        self.screen.drawn.store(frame.id, std::sync::atomic::Ordering::Relaxed);
         DRAWN.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).push(self.screen.clone());
 
         let view = frame.texture.create_view(&Default::default());
