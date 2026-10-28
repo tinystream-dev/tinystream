@@ -16,6 +16,12 @@ mod linux;
 pub trait Desktop {
     fn secrets() -> crate::secrets::Store;
 
+    fn picture_in_picture_attributes() -> iced_winit::winit::window::WindowAttributes {
+        pip_attributes()
+    }
+
+    fn picture_in_picture_opened() {}
+
     fn open_url(_url: String) -> BoxFuture<'static, Result<(), String>> {
         Box::pin(async { Err("Opening links is not supported on this platform.".into()) })
     }
@@ -106,4 +112,15 @@ impl crate::secrets::Secrets for UnavailableSecrets {
     fn set(&self, _: u64, _: Option<crate::api::Token>) -> BoxFuture<'_, anyhow::Result<bool>> {
         Box::pin(async { anyhow::bail!("Credential storage is not supported on this platform.") })
     }
+}
+
+fn pip_attributes() -> iced_winit::winit::window::WindowAttributes {
+    use iced_winit::winit::dpi::LogicalSize;
+    use iced_winit::winit::window::{Window, WindowLevel};
+    Window::default_attributes()
+        .with_title("Picture in picture — tinystream")
+        .with_inner_size(LogicalSize::new(480.0, 270.0))
+        .with_min_inner_size(LogicalSize::new(240.0, 135.0))
+        .with_decorations(false)
+        .with_window_level(WindowLevel::AlwaysOnTop)
 }

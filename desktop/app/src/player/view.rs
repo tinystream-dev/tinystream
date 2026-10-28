@@ -29,6 +29,25 @@ const FINALE: Size = Size { px: 30.0, line: 37.5 };
 const RESTING: Size = Size { px: 52.0, line: 54.6 };
 
 pub fn view<'a>(player: &'a Player, look: &Look) -> Element<'a, Message> {
+    if player.pip {
+        return container(
+            column![
+                text("Playing in picture in picture", type_::S15, look.media_ink),
+                chrome_button(
+                    (Icon::Maximize, 20.0, false),
+                    "Return to player (p)",
+                    Some(Message::PictureInPicture),
+                    false,
+                    1.0,
+                    look
+                ),
+            ]
+            .spacing(16)
+            .align_x(Alignment::Center),
+        )
+        .center(Fill)
+        .boxed();
+    }
     let l = *look;
     let alpha = if look.reduce_motion { f32::from(player.show_chrome()) } else { player.chrome_alpha() };
     let chrome = alpha > 0.0;
@@ -151,6 +170,71 @@ pub fn view<'a>(player: &'a Player, look: &Look) -> Element<'a, Message> {
     } else {
         stage.interaction(mouse::Interaction::Hidden).boxed()
     }
+}
+
+/// The detached window uses the same screen and mpv instance as the main player.
+pub fn pip_view<'a>(player: &'a Player, look: &Look) -> Element<'a, Message> {
+    let mut layers = Vec::new();
+    if let Some(screen) = &player.screen {
+        layers.push(video(screen, player.aspect).boxed());
+    }
+    if player.waiting {
+        layers.push(container(media_spinner(look)).center(Fill).boxed());
+    }
+    if player.show_chrome() {
+        let controls = row![
+            chrome_button(
+                (if player.playing { Icon::Pause } else { Icon::Play }, 20.0, true),
+                "Play or pause (k)",
+                Some(Message::Toggle),
+                false,
+                1.0,
+                look
+            ),
+            chrome_button(
+                (Icon::RotateCcw, 18.0, false),
+                "Back 10 seconds (j)",
+                Some(Message::SeekBy(-10.0)),
+                false,
+                1.0,
+                look
+            ),
+            chrome_button(
+                (Icon::RotateCw, 18.0, false),
+                "Forward 10 seconds (l)",
+                Some(Message::SeekBy(10.0)),
+                false,
+                1.0,
+                look
+            ),
+            space().width(Fill),
+            chrome_button(
+                (Icon::Maximize, 18.0, false),
+                "Return to player (p)",
+                Some(Message::PictureInPicture),
+                false,
+                1.0,
+                look
+            ),
+        ]
+        .spacing(2);
+        layers.push(container(controls).align_bottom(Fill).padding(8).boxed());
+    }
+    let drag =
+        mouse_area(container(space()).width(Fill).height(20)).on_press(Message::PipWindow(crate::chrome::Action::Drag));
+    layers.push(container(drag).align_top(Fill).boxed());
+    layers.push(
+        crate::chrome::Chrome::default()
+            .edges()
+            .map(|message| match message {
+                crate::chrome::Message::Resize(direction) => {
+                    Message::PipWindow(crate::chrome::Action::Resize(direction))
+                },
+                _ => Message::Poke,
+            })
+            .boxed(),
+    );
+    mouse_area(Stack::with_children(layers).width(Fill).height(Fill)).on_double_click(Message::PictureInPicture).boxed()
 }
 
 fn media_spinner<'a>(look: &Look) -> Element<'a, Message> {
@@ -279,6 +363,22 @@ fn controls<'a>(player: &'a Player, alpha: f32, look: &Look) -> Element<'a, Mess
             look,
         ));
     }
+    buttons = buttons.push(chrome_button(
+        (Icon::RotateCcw, 20.0, false),
+        "Back 10 seconds (j)",
+        Some(Message::SeekBy(-10.0)),
+        false,
+        alpha,
+        look,
+    ));
+    buttons = buttons.push(chrome_button(
+        (Icon::RotateCw, 20.0, false),
+        "Forward 10 seconds (l)",
+        Some(Message::SeekBy(10.0)),
+        false,
+        alpha,
+        look,
+    ));
     buttons = buttons.push(volume_control(player, alpha, look));
     buttons = buttons.push(
         container(
@@ -332,6 +432,14 @@ fn controls<'a>(player: &'a Player, alpha: f32, look: &Look) -> Element<'a, Mess
             look,
         ));
     }
+    buttons = buttons.push(chrome_button(
+        (Icon::PictureInPicture2, 20.0, false),
+        "Picture in picture (p)",
+        Some(Message::PictureInPicture),
+        false,
+        alpha,
+        look,
+    ));
     let fullscreen = player.fullscreen;
     buttons = buttons.push(chrome_button(
         (if fullscreen { Icon::Minimize } else { Icon::Maximize }, 20.0, false),
@@ -691,7 +799,7 @@ fn hud_view<'a>(kind: &HudKind, at: Instant, look: &Look) -> Element<'a, Message
             .padding([10, 16]);
             top_center(pill.boxed())
         },
-        HudKind::Speed(words) => {
+        HudKind::Speed(words) | HudKind::Notice(words) => {
             let pill = squircle(text(words.clone(), type_::SM, ink).font(MEDIUM), 18.0, look)
                 .round()
                 .fill(shade.scale_alpha(0.55))

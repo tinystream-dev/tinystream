@@ -24,7 +24,7 @@ mod view;
 pub use engine::config_file;
 use engine::{Engine, Source, Update};
 use tracks::Prefs;
-pub use view::view;
+pub use view::{pip_view, view};
 
 /// How long the controls stay after the pointer stops.
 const IDLE: Duration = Duration::from_millis(2600);
@@ -63,6 +63,7 @@ pub enum HudKind {
     Play,
     Pause,
     Speed(String),
+    Notice(String),
 }
 
 #[derive(Debug, Clone)]
@@ -121,6 +122,9 @@ pub enum Message {
     Drag(f64),
     VolumeHover(bool),
     Fullscreen,
+    PictureInPicture,
+    PipWindow(crate::chrome::Action),
+    PipFailed(String),
     Back,
     Go(i64),
     Skip,
@@ -137,7 +141,7 @@ impl std::fmt::Debug for Message {
 }
 
 /// What the player asks of the rest of the app.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub enum Out {
     /// Leave, back to where it was opened from, or the title.
     Back {
@@ -146,6 +150,8 @@ pub enum Out {
     /// Play this video instead, in place of this one in history.
     Go(i64),
     Fullscreen,
+    PictureInPicture(bool),
+    PipWindow(crate::chrome::Action),
     /// Open a clip in Clips.
     Clip(i64),
 }
@@ -163,6 +169,7 @@ pub struct Player {
     pub can_clip: bool,
     /// Whether the window is full screen, for the button.
     pub fullscreen: bool,
+    pub pip: bool,
     prefs: Prefs,
     start_at: Option<f64>,
     base: String,
@@ -259,6 +266,7 @@ impl Player {
             vaapi: false,
             can_clip: false,
             fullscreen: false,
+            pip: false,
             volume: prefs.f64("volume").unwrap_or(1.0).clamp(0.0, 1.0),
             rate: prefs.f64("rate").unwrap_or(1.0).clamp(0.25, 3.0),
             prefs,
@@ -552,6 +560,15 @@ impl Player {
             },
             Message::Drag(at) => self.drag = Some(at),
             Message::VolumeHover(open) => self.volume_open = open,
+            Message::PictureInPicture => {
+                self.pip = !self.pip;
+                return Some(Out::PictureInPicture(self.pip));
+            },
+            Message::PipWindow(action) => return Some(Out::PipWindow(action)),
+            Message::PipFailed(error) => {
+                self.pip = false;
+                self.flash(HudKind::Notice(error));
+            },
             Message::Fullscreen => return Some(Out::Fullscreen),
             Message::Back => {
                 self.save(effects);
@@ -1027,6 +1044,7 @@ impl Player {
             (_, Key::Character(">")) => Message::Rate(self.rate + 0.25),
             (_, Key::Character("<")) => Message::Rate(self.rate - 0.25),
             (_, Key::Character("S")) if self.can_clip => Message::Screenshot,
+            (Key::Character("p" | "P"), _) => Message::PictureInPicture,
             (Key::Character("f" | "F"), _) => Message::Fullscreen,
             (Key::Character("n" | "N"), _) if pb.is_some_and(|pb| pb.next.is_some()) => {
                 Message::Go(pb.and_then(|pb| pb.next.as_ref()).map(|next| next.id)?)
@@ -1036,6 +1054,7 @@ impl Player {
                 self.cycle_subtitles();
                 return Some(Message::Poke);
             },
+            (Key::Named(key::Named::Escape), _) if self.pip => Message::PictureInPicture,
             (Key::Named(key::Named::Escape), _) if fullscreen => Message::Fullscreen,
             (Key::Named(key::Named::Escape), _) => return Some(Message::Back),
             (Key::Character(digit), _) if digit.len() == 1 && digit.as_bytes()[0].is_ascii_digit() => {
@@ -1125,10 +1144,10 @@ pub fn number(value: f64) -> String {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
-    pub(super) fn player() -> Player {
+    pub(crate) fn player() -> Player {
         use playback::*;
 
         let mut player = Player::create(

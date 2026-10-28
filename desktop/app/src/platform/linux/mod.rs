@@ -8,6 +8,7 @@ use super::{Desktop, VideoSurface};
 use crate::chrome::ButtonLayout;
 
 mod gpu;
+mod pip;
 mod portal;
 mod secrets;
 mod video;
@@ -29,6 +30,15 @@ impl Desktop for Linux {
                 .then_some(())
                 .ok_or_else(|| "Couldn't open the link.".into())
         })
+    }
+
+    fn picture_in_picture_attributes() -> iced_winit::winit::window::WindowAttributes {
+        use iced_winit::winit::platform::wayland::WindowAttributesExtWayland;
+        super::pip_attributes().with_name(pip::APP_ID, "tinystream-pip")
+    }
+
+    fn picture_in_picture_opened() {
+        pip::opened();
     }
 
     fn request_device(

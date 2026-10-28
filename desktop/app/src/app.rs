@@ -82,6 +82,8 @@ pub enum Effect {
     Live(Option<crate::api::Api>, u64),
     Request(futures::future::BoxFuture<'static, Message>),
     Scale(f32),
+    PictureInPicture(bool),
+    PipWindow(chrome::Action),
     /// Starts something that sends messages for as long as it likes, like mpv's events.
     Listen(Box<dyn FnOnce(Sender) + Send>),
 }
@@ -141,6 +143,10 @@ impl App {
                     effects.push(Effect::Operate(Box::new(operation::focusable::focus(target.into()))));
                 }
                 if self.session.generation != generation {
+                    if let Some(player) = &mut self.player {
+                        player.pip = false;
+                    }
+                    effects.push(Effect::PictureInPicture(false));
                     self.history = History::new(Route::Home);
                     self.overlay = None;
                     self.query.clear();
@@ -213,7 +219,10 @@ impl App {
             Route::Watch(id, start) if self.session.screen == crate::session::Screen::Ready => Some((id as i64, start)),
             _ => None,
         };
+        let keep_pip = self.player.as_ref().is_some_and(|player| player.pip)
+            && self.session.screen == crate::session::Screen::Ready;
         if self.player.as_ref().is_some_and(|player| Some(player.id) != watching.map(|(id, _)| id))
+            && !(keep_pip && watching.is_none())
             && let Some(mut player) = self.player.take()
         {
             player.save(effects);
@@ -236,6 +245,7 @@ impl App {
             effects,
         );
         player.fullscreen = self.chrome.fullscreen;
+        player.pip = keep_pip;
         self.player = Some(player);
     }
 
@@ -253,7 +263,23 @@ impl App {
                 }
             },
             Out::Go(id) => self.history.replace(Route::Watch(id as u64, None)),
-            Out::Fullscreen => effects.push(Effect::Window(chrome::Action::Fullscreen(!self.chrome.fullscreen))),
+            Out::Fullscreen => {
+                if let Some(player) = &mut self.player
+                    && player.pip
+                {
+                    player.pip = false;
+                    self.history.replace(Route::Watch(player.id as u64, None));
+                    effects.push(Effect::PictureInPicture(false));
+                }
+                effects.push(Effect::Window(chrome::Action::Fullscreen(!self.chrome.fullscreen)));
+            },
+            Out::PictureInPicture(on) => {
+                if !on && let Some(player) = &self.player {
+                    self.history.replace(Route::Watch(player.id as u64, None));
+                }
+                effects.push(Effect::PictureInPicture(on));
+            },
+            Out::PipWindow(action) => effects.push(Effect::PipWindow(action)),
             Out::Clip(id) => self.navigate(Route::Clip(id as u64), effects),
         }
     }
@@ -276,6 +302,11 @@ impl App {
 
     /// Handles shell shortcuts, including search and Escape while a text field has focus.
     pub fn listen(&mut self, event: &Event, status: event::Status) -> Option<Message> {
+        let watching = matches!(self.history.current().route, Route::Watch(..));
+        self.listen_in(event, status, watching)
+    }
+
+    pub fn listen_in(&mut self, event: &Event, status: event::Status, watching: bool) -> Option<Message> {
         if let Event::Keyboard(keyboard::Event::KeyPressed { key, modified_key, modifiers, .. }) = event
             && let Some(shortcut) =
                 crate::keys::zoom(modified_key, *modifiers).or_else(|| crate::keys::zoom(key, *modifiers))
@@ -306,7 +337,7 @@ impl App {
             },
             _ if status == event::Status::Captured => None,
             Event::Keyboard(keyboard::Event::KeyPressed { key, modified_key, modifiers, .. })
-                if self.overlay.is_none() && !self.keys.leading() && self.player.is_some() =>
+                if watching && self.overlay.is_none() && !self.keys.leading() && self.player.is_some() =>
             {
                 let fullscreen = self.chrome.fullscreen;
                 let player = self.player.as_mut()?;
@@ -315,7 +346,7 @@ impl App {
                     None => self.keys.press(modified_key, *modifiers, Instant::now()).map(Message::Shortcut),
                 }
             },
-            Event::Mouse(mouse::Event::CursorMoved { .. }) if self.player.is_some() => {
+            Event::Mouse(mouse::Event::CursorMoved { .. }) if watching && self.player.is_some() => {
                 let player = self.player.as_ref()?;
                 Some(Message::Player(player.serial, crate::player::Message::Poke))
             },

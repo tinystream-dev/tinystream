@@ -13,6 +13,7 @@ use iced_core::window::RedrawRequest;
 use iced_core::{Event, Size, Theme, clipboard, mouse, renderer, shell, window};
 use iced_wgpu::graphics::{Shell, Viewport};
 use iced_wgpu::{Engine, Renderer, wgpu};
+use iced_widget::Widget;
 use iced_winit::runtime::user_interface::{self, UserInterface};
 use iced_winit::winit::application::ApplicationHandler;
 use iced_winit::winit::event::{StartCause, WindowEvent};
@@ -58,11 +59,15 @@ pub struct Runner {
     proxy: EventLoopProxy<UserEvent>,
     theme: Theme,
     window: Option<Window>,
+    pip: Option<Window>,
     clipboard: Clipboard,
     effects: Vec<Effect>,
 }
 
 struct Window {
+    instance: wgpu::Instance,
+    adapter: wgpu::Adapter,
+    pip: bool,
     raw: Arc<winit::window::Window>,
     surface: wgpu::Surface<'static>,
     device: wgpu::Device,
@@ -101,12 +106,14 @@ impl Runner {
             proxy,
             theme: crate::ui::Look::default().theme(),
             window: None,
+            pip: None,
             clipboard: Clipboard::new(),
             effects: Vec::new(),
         }
     }
 
     pub async fn finish(&mut self) {
+        self.pip = None;
         self.window = None;
         self.app.player = None;
         let requests = std::mem::take(&mut self.requests);
@@ -207,6 +214,9 @@ impl Runner {
 
         let proxy = self.proxy.clone();
         let mut window = Window {
+            instance,
+            adapter,
+            pip: false,
             raw,
             surface,
             device,
@@ -232,12 +242,98 @@ impl Runner {
         Ok(window)
     }
 
+    fn open_pip(&self, event_loop: &ActiveEventLoop) -> Result<Window, String> {
+        let main = self.window.as_ref().ok_or("the main window is unavailable")?;
+        let attributes = platform::Current::picture_in_picture_attributes();
+        let raw = Arc::new(event_loop.create_window(attributes).map_err(|error| error.to_string())?);
+        let surface = main.instance.create_surface(raw.clone()).map_err(|error| error.to_string())?;
+        let capabilities = surface.get_capabilities(&main.adapter);
+        if !capabilities.formats.contains(&main.format) {
+            return Err("the display cannot show the shared video format".into());
+        }
+        let engine = Engine::new(
+            &main.adapter,
+            main.device.clone(),
+            main.queue.clone(),
+            main.format,
+            None,
+            Shell::new(RendererNotifier(self.proxy.clone())),
+        );
+        let renderer = Renderer::new(
+            engine,
+            renderer::Settings { line_height: iced_core::text::LineHeight::Relative(1.5), ..Default::default() },
+        );
+        let size = raw.inner_size();
+        let viewport = Viewport::with_physical_size(
+            Size::new(size.width, size.height),
+            renderer::Scale { window: raw.scale_factor() as f32, application: 1.0 },
+        );
+        let proxy = self.proxy.clone();
+        let mut window = Window {
+            instance: main.instance.clone(),
+            adapter: main.adapter.clone(),
+            pip: true,
+            raw,
+            surface,
+            device: main.device.clone(),
+            queue: main.queue.clone(),
+            format: main.format,
+            readback: false,
+            frame: None,
+            alpha_mode: wgpu::CompositeAlphaMode::Auto,
+            renderer,
+            viewport,
+            cache: user_interface::Cache::new(),
+            cursor: mouse::Cursor::Unavailable,
+            modifiers: ModifiersState::default(),
+            events: Vec::new(),
+            operations: Vec::new(),
+            waker: shell::Waker::new(move || {
+                let _ = proxy.send_event(UserEvent::Wake);
+            }),
+            redraw_at: None,
+            resized: false,
+        };
+        window.configure();
+        platform::Current::picture_in_picture_opened();
+        Ok(window)
+    }
+
     /// Runs `message` through the app and carries out what it asks for.
     fn update(&mut self, event_loop: &ActiveEventLoop, message: Message) {
         self.app.update(message, &mut self.effects);
 
         for effect in std::mem::take(&mut self.effects) {
             match effect {
+                Effect::PipWindow(action) => {
+                    if let Some(window) = &self.pip {
+                        window.act(action);
+                    }
+                },
+                Effect::PictureInPicture(on) => {
+                    if on && self.pip.is_none() {
+                        match self.open_pip(event_loop) {
+                            Ok(window) => {
+                                window.raw.request_redraw();
+                                self.pip = Some(window);
+                            },
+                            Err(error) => {
+                                if let Some(player) = &self.app.player {
+                                    let serial = player.serial;
+                                    self.update(
+                                        event_loop,
+                                        Message::Player(serial, crate::player::Message::PipFailed(error)),
+                                    );
+                                }
+                            },
+                        }
+                    } else if !on {
+                        self.pip = None;
+                        if let Some(window) = &self.window {
+                            window.raw.focus_window();
+                        }
+                    }
+                },
                 Effect::Scale(scale) => {
                     if let Some(window) = &mut self.window {
                         window.rescale(scale);
@@ -306,14 +402,17 @@ impl Runner {
             }
         }
 
-        if let Some(window) = &self.window {
+        if !self.app.player.as_ref().is_some_and(|player| player.pip) {
+            self.pip = None;
+        }
+        for window in self.window.iter().chain(self.pip.iter()) {
             window.raw.request_redraw();
         }
     }
 
     /// Feeds the window's pending events to the widgets, and their messages to the app.
-    fn process(&mut self, event_loop: &ActiveEventLoop) {
-        let Some(window) = &mut self.window else { return };
+    fn process(&mut self, event_loop: &ActiveEventLoop, pip: bool) {
+        let Some(window) = (if pip { &mut self.pip } else { &mut self.window }) else { return };
         if window.events.is_empty() && window.operations.is_empty() {
             return;
         }
@@ -321,7 +420,7 @@ impl Runner {
         let events = std::mem::take(&mut window.events);
         let mut messages = shell::Bus::new();
         let mut interface = UserInterface::build(
-            self.app.view(),
+            window_view(&self.app, pip),
             window.viewport.logical_size(),
             std::mem::take(&mut window.cache),
             &mut window.renderer,
@@ -352,7 +451,11 @@ impl Runner {
         let shortcuts = events
             .iter()
             .zip(statuses)
-            .filter_map(|(event, status)| self.app.listen(event, status))
+            .filter_map(
+                |(event, status)| {
+                    if pip { self.app.listen_in(event, status, true) } else { self.app.listen(event, status) }
+                },
+            )
             .collect::<Vec<_>>();
 
         for message in messages.into_iter().chain(shortcuts) {
@@ -360,9 +463,9 @@ impl Runner {
         }
     }
 
-    fn redraw(&mut self, event_loop: &ActiveEventLoop) {
-        self.process(event_loop);
-        let Some(window) = &mut self.window else { return };
+    fn redraw(&mut self, event_loop: &ActiveEventLoop, pip: bool) {
+        self.process(event_loop, pip);
+        let Some(window) = (if pip { &mut self.pip } else { &mut self.window }) else { return };
         self.app.session.system_dark = window.raw.theme() != Some(winit::window::Theme::Light);
         let look = match &self.app.gallery {
             Some(gallery) => gallery.look(self.app.reduce_motion),
@@ -379,7 +482,7 @@ impl Runner {
         }
 
         let mut interface = UserInterface::build(
-            self.app.view(),
+            window_view(&self.app, pip),
             window.viewport.logical_size(),
             std::mem::take(&mut window.cache),
             &mut window.renderer,
@@ -401,7 +504,7 @@ impl Runner {
             window.resized = true;
             window.raw.request_redraw();
         }
-        if self.app.animating() {
+        if self.app.animating() && (pip || !self.app.player.as_ref().is_some_and(|player| player.pip)) {
             window.raw.request_redraw();
         }
 
@@ -467,7 +570,9 @@ impl Window {
                     view_formats: &[],
                 })
             });
-            crate::ui::backdrop::set_frame(self.frame.clone());
+            if !self.pip {
+                crate::ui::backdrop::set_frame(self.frame.clone());
+            }
         }
         self.resized = false;
     }
@@ -613,31 +718,46 @@ impl ApplicationHandler<UserEvent> for Runner {
     }
 
     fn new_events(&mut self, _event_loop: &ActiveEventLoop, cause: StartCause) {
-        if let StartCause::ResumeTimeReached { .. } = cause
-            && let Some(window) = &mut self.window
-        {
-            window.redraw_at = None;
-            window.raw.request_redraw();
+        if let StartCause::ResumeTimeReached { .. } = cause {
+            for window in self.window.iter_mut().chain(self.pip.iter_mut()) {
+                window.redraw_at = None;
+                window.raw.request_redraw();
+            }
         }
     }
 
-    fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
-        let Some(window) = &mut self.window else { return };
+    fn window_event(&mut self, event_loop: &ActiveEventLoop, id: WindowId, event: WindowEvent) {
+        let pip = self.pip.as_ref().is_some_and(|window| window.raw.id() == id);
+        if !pip && !self.window.as_ref().is_some_and(|window| window.raw.id() == id) {
+            return;
+        }
+        let Some(window) = (if pip { &mut self.pip } else { &mut self.window }) else { return };
 
         match &event {
             WindowEvent::RedrawRequested => {
-                self.redraw(event_loop);
+                self.redraw(event_loop, pip);
                 return;
             },
             WindowEvent::CloseRequested => {
-                self.update(event_loop, Message::CloseRequested);
+                if pip {
+                    if let Some(player) = &self.app.player {
+                        self.update(
+                            event_loop,
+                            Message::Player(player.serial, crate::player::Message::PictureInPicture),
+                        );
+                    }
+                } else {
+                    self.update(event_loop, Message::CloseRequested);
+                }
                 return;
             },
             WindowEvent::Resized(_) | WindowEvent::ScaleFactorChanged { .. } => {
                 window.resized = true;
                 window.configure();
-                let flags = window.flags();
-                self.update(event_loop, flags);
+                if !pip {
+                    let flags = window.flags();
+                    self.update(event_loop, flags);
+                }
             },
             WindowEvent::CursorMoved { position, .. } => {
                 window.cursor =
@@ -648,11 +768,11 @@ impl ApplicationHandler<UserEvent> for Runner {
             _ => {},
         }
 
-        let Some(window) = &mut self.window else { return };
+        let Some(window) = (if pip { &mut self.pip } else { &mut self.window }) else { return };
         if let Some(event) = conversion::window_event(event, window.viewport.scale_factor(), window.modifiers) {
             window.events.push(event);
         }
-        self.process(event_loop);
+        self.process(event_loop, pip);
     }
 
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: UserEvent) {
@@ -662,10 +782,10 @@ impl ApplicationHandler<UserEvent> for Runner {
                 if let Some(window) = &mut self.window {
                     window.events.push(event);
                 }
-                self.process(event_loop);
+                self.process(event_loop, false);
             },
             UserEvent::Wake => {
-                if let Some(window) = &self.window {
+                if let Some(window) = self.pip.as_ref().or(self.window.as_ref()) {
                     window.raw.request_redraw();
                 }
             },
@@ -673,9 +793,131 @@ impl ApplicationHandler<UserEvent> for Runner {
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
-        match self.window.as_ref().and_then(|window| window.redraw_at) {
+        match self.window.iter().chain(self.pip.iter()).filter_map(|window| window.redraw_at).min() {
             Some(at) => event_loop.set_control_flow(ControlFlow::WaitUntil(at)),
             None => event_loop.set_control_flow(ControlFlow::Wait),
         }
+    }
+}
+
+fn window_view(app: &App, pip: bool) -> iced_widget::Element<'_, Message> {
+    if pip && let Some(player) = &app.player {
+        let serial = player.serial;
+        return crate::player::pip_view(player, &app.session.look())
+            .map(move |message| Message::Player(serial, message))
+            .boxed();
+    }
+    app.view()
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod tests {
+    use winit::event_loop::EventLoop;
+    use winit::platform::wayland::EventLoopBuilderExtWayland;
+
+    use super::*;
+    use crate::player::Message as PlayerMessage;
+    use crate::route::Route;
+
+    #[test]
+    #[ignore = "opens native windows; requires a Wayland compositor and Vulkan"]
+    fn picture_in_picture_keeps_one_player_and_survives_navigation() {
+        struct Test {
+            runner: Runner,
+            until: Instant,
+            serial: u64,
+            rendered: bool,
+            fullscreen_requested: bool,
+        }
+        impl ApplicationHandler<UserEvent> for Test {
+            fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+                let window = self.runner.open(event_loop).unwrap();
+                self.runner.window = Some(window);
+                self.runner.update(event_loop, Message::Player(self.serial, PlayerMessage::PictureInPicture));
+                let main = self.runner.window.as_ref().unwrap();
+                let pip = self.runner.pip.as_ref().unwrap();
+                assert_eq!(main.device, pip.device);
+                assert_ne!(main.raw.id(), pip.raw.id());
+                self.runner.update(event_loop, Message::Navigate(Route::Home));
+                assert!(self.runner.pip.is_some());
+                assert_eq!(self.runner.app.player.as_ref().unwrap().serial, self.serial);
+            }
+
+            fn window_event(&mut self, event_loop: &ActiveEventLoop, id: WindowId, event: WindowEvent) {
+                if matches!(event, WindowEvent::RedrawRequested)
+                    && self.runner.pip.as_ref().is_some_and(|window| window.raw.id() == id)
+                {
+                    self.rendered = true;
+                }
+                self.runner.window_event(event_loop, id, event);
+            }
+
+            fn user_event(&mut self, event_loop: &ActiveEventLoop, event: UserEvent) {
+                self.runner.user_event(event_loop, event);
+            }
+
+            fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+                if Instant::now() < self.until {
+                    event_loop.set_control_flow(ControlFlow::WaitUntil(self.until));
+                    return;
+                }
+                if self.fullscreen_requested {
+                    assert!(self.runner.window.as_ref().unwrap().raw.fullscreen().is_some());
+                    event_loop.exit();
+                    return;
+                }
+                assert!(self.rendered, "PiP did not present a frame");
+                if std::env::var_os("NIRI_SOCKET").is_some() {
+                    let output =
+                        std::process::Command::new("niri").args(["msg", "--json", "windows"]).output().unwrap();
+                    let windows: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+                    let window = windows
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .find(|window| {
+                            window["pid"].as_u64() == Some(u64::from(std::process::id()))
+                                && window["app_id"] == "dev.tinystream.Tinystream.PiP"
+                        })
+                        .unwrap();
+                    assert_eq!(window["is_floating"], true);
+                }
+                let id = self.runner.pip.as_ref().unwrap().raw.id();
+                self.runner.window_event(event_loop, id, WindowEvent::CloseRequested);
+                assert!(self.runner.pip.is_none());
+                assert!(matches!(self.runner.app.history.current().route, Route::Watch(1, _)));
+                assert_eq!(self.runner.app.player.as_ref().unwrap().serial, self.serial);
+                self.runner.update(event_loop, Message::Player(self.serial, PlayerMessage::PictureInPicture));
+                assert!(self.runner.pip.is_some());
+                self.runner.update(event_loop, Message::Player(self.serial, PlayerMessage::Fullscreen));
+                assert!(self.runner.pip.is_none());
+                self.fullscreen_requested = true;
+                self.until = Instant::now() + std::time::Duration::from_millis(500);
+                event_loop.set_control_flow(ControlFlow::WaitUntil(self.until));
+            }
+        }
+        let mut builder = EventLoop::<UserEvent>::with_user_event();
+        EventLoopBuilderExtWayland::with_any_thread(&mut builder, true);
+        let event_loop = builder.build().unwrap();
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let mut app = App::new(Route::Watch(1, None), crate::window_state::WindowState::default());
+        app.session.screen = crate::session::Screen::Ready;
+        app.player = Some(crate::player::tests::player());
+        let serial = app.player.as_ref().unwrap().serial;
+        let runner = Runner::new(
+            app,
+            window::Settings { decorations: false, size: Size::new(960.0, 600.0), ..Default::default() },
+            event_loop.create_proxy(),
+            runtime.handle().clone(),
+        );
+        let mut test = Test {
+            runner,
+            until: Instant::now() + std::time::Duration::from_secs(2),
+            serial,
+            rendered: false,
+            fullscreen_requested: false,
+        };
+        event_loop.run_app(&mut test).unwrap();
+        runtime.block_on(test.runner.finish());
     }
 }
