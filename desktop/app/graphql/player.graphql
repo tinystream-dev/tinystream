@@ -22,3 +22,15 @@ query PlayerOverview($id: Int!, $videoId: Int!) {
   title(id: $id) { overview }
   video(id: $videoId) { overview }
 }
+
+query PlayerClipAllowance {
+  clipAllowance { canClip canLink maxLength customDefaultFont }
+}
+
+mutation PlayerCreateClip($input: NewClip!) {
+  createClip(input: $input) { id }
+}
+
+query PlayerClipStatus($id: Int!) {
+  clip(id: $id) { id state progress error }
+}

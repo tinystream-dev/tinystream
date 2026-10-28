@@ -29,6 +29,9 @@ const FINALE: Size = Size { px: 30.0, line: 37.5 };
 const RESTING: Size = Size { px: 52.0, line: 54.6 };
 
 pub fn view<'a>(player: &'a Player, look: &Look) -> Element<'a, Message> {
+    if let Some(editor) = &player.clipping {
+        return super::clip::view(player, editor, look);
+    }
     if player.pip {
         return container(
             column![
@@ -423,6 +426,14 @@ fn controls<'a>(player: &'a Player, alpha: f32, look: &Look) -> Element<'a, Mess
             buttons.push(chrome_button((Icon::Settings2, 20.0, false), "Quality", Some(toggle), open, alpha, look));
     }
     if player.can_clip && pb.is_some() {
+        buttons = buttons.push(chrome_button(
+            (Icon::Scissors, 20.0, false),
+            "Clip (x)",
+            Some(Message::MakeClip),
+            false,
+            alpha,
+            look,
+        ));
         buttons = buttons.push(chrome_button(
             (Icon::Camera, 20.0, false),
             "Screenshot (shift+s)",

@@ -15,6 +15,7 @@ use crate::api::{self, Api, playback, player_overview, player_schedule, save_pro
 use crate::app::{Effect, Message as AppMessage};
 use crate::ui::video::Screen;
 
+mod clip;
 mod engine;
 pub mod stream;
 mod timeline;
@@ -130,6 +131,8 @@ pub enum Message {
     Skip,
     Screenshot,
     OpenShot,
+    MakeClip,
+    Editor(clip::Message),
     Retry,
     Convert,
 }
@@ -199,6 +202,7 @@ pub struct Player {
     pub idle_since: Option<Instant>,
     pub hud: Option<Hud>,
     pub shot: Option<Shot>,
+    pub clipping: Option<clip::Editor>,
     shots: u64,
     pub menu: Option<Menu>,
     pub hover: Option<Hover>,
@@ -290,6 +294,7 @@ impl Player {
             idle_since: Some(Instant::now()),
             hud: None,
             shot: None,
+            clipping: None,
             shots: 0,
             menu: None,
             hover: None,
@@ -583,6 +588,15 @@ impl Player {
                     self.seek(end);
                 }
             },
+            Message::MakeClip => {
+                let pip = self.pip;
+                self.pip = false;
+                self.start_clip(effects);
+                if pip {
+                    return Some(Out::PictureInPicture(false));
+                }
+            },
+            Message::Editor(message) => self.edit_clip(message, effects),
             Message::Screenshot => self.screenshot(effects),
             Message::OpenShot => {
                 if let Some(id) = self.shot.take().and_then(|shot| shot.clip).map(|(id, _)| id) {
@@ -590,6 +604,13 @@ impl Player {
                 }
             },
             Message::Retry => {
+                if self.info_error.take().is_some() {
+                    let (api, id) = (self.api.clone(), self.id);
+                    self.request(effects, async move {
+                        Message::Info(api.request::<api::Playback>(playback::Variables { id }).await.map(Arc::new))
+                    });
+                    return None;
+                }
                 self.error = None;
                 self.retries = 0;
                 self.rebuild();
@@ -636,6 +657,13 @@ impl Player {
                 }
             },
             Update::Waiting(waiting) => self.waiting = waiting,
+            Update::Eof(true) if self.clipping.is_some() => {
+                if self.playing
+                    && let Some((start, _)) = self.clipping.as_ref().and_then(|editor| editor.range(self.duration()))
+                {
+                    self.seek(start);
+                }
+            },
             Update::Eof(true) => self.reached_end(effects),
             Update::Eof(false) => {},
             Update::Cached(at) => self.cached = at,
@@ -690,6 +718,7 @@ impl Player {
     }
 
     fn tick(&mut self, effects: &mut Vec<Effect>) -> Option<Out> {
+        self.tick_clip(effects);
         let now = Instant::now();
         if self.hud.as_ref().is_some_and(|hud| now.duration_since(hud.at) >= HUD) {
             self.hud = None;
@@ -716,7 +745,8 @@ impl Player {
             && !self.ended
             && !self.waiting
             && self.error.is_none()
-            && self.pb.is_some();
+            && self.pb.is_some()
+            && self.clipping.is_none();
         match (resting, self.resting_since) {
             (true, None) => self.resting_since = Some(now),
             (false, Some(_)) => self.resting_since = None,
@@ -949,7 +979,7 @@ impl Player {
     pub fn save(&mut self, effects: &mut Vec<Effect>) {
         self.last_save = Instant::now();
         let duration = self.duration();
-        if duration <= 0.0 || self.time < 1.0 || !self.started {
+        if self.clipping.is_some() || duration <= 0.0 || self.time < 1.0 || !self.started {
             return;
         }
         let (api, video_id, position) = (self.api.clone(), self.id, self.time);
@@ -974,7 +1004,7 @@ impl Player {
             video_id: self.id,
             at: self.time,
             subtitles: self.subtitle.clone(),
-            room: None,
+            room: self.room().map(str::to_owned),
         };
         let api = self.api.clone();
         self.request(effects, async move {
@@ -1004,13 +1034,28 @@ impl Player {
         });
     }
 
+    fn room(&self) -> Option<&str> {
+        self.base.strip_prefix("api/together/")?.split('/').next()
+    }
+
     /// What a key press does here, as the web player's keys go; `None` leaves it to the shell.
     pub fn key(&mut self, key: &Key, modified: &Key, modifiers: Modifiers, fullscreen: bool) -> Option<Message> {
-        if self.menu.is_some() {
-            return matches!(key, Key::Named(key::Named::Escape)).then_some(Message::Menu(None));
-        }
         if modifiers.control() || modifiers.alt() || modifiers.logo() {
             return None;
+        }
+        if self.clipping.is_some() {
+            return match key.as_ref() {
+                Key::Named(key::Named::Escape) => Some(Message::Editor(clip::Message::Close)),
+                Key::Named(key::Named::Space) | Key::Character("k" | "K") => Some(Message::Toggle),
+                Key::Character("i" | "I") => Some(Message::Editor(clip::Message::In)),
+                Key::Character("o" | "O") => Some(Message::Editor(clip::Message::Out)),
+                Key::Character(",") => Some(Message::Editor(clip::Message::Step(true))),
+                Key::Character(".") => Some(Message::Editor(clip::Message::Step(false))),
+                _ => None,
+            };
+        }
+        if self.menu.is_some() {
+            return matches!(key, Key::Named(key::Named::Escape)).then_some(Message::Menu(None));
         }
         let pb = self.pb.as_ref();
         let message = match (key.as_ref(), modified.as_ref()) {
@@ -1044,6 +1089,7 @@ impl Player {
             (_, Key::Character(">")) => Message::Rate(self.rate + 0.25),
             (_, Key::Character("<")) => Message::Rate(self.rate - 0.25),
             (_, Key::Character("S")) if self.can_clip => Message::Screenshot,
+            (Key::Character("x" | "X"), _) if self.can_clip => Message::MakeClip,
             (Key::Character("p" | "P"), _) => Message::PictureInPicture,
             (Key::Character("f" | "F"), _) => Message::Fullscreen,
             (Key::Character("n" | "N"), _) if pb.is_some_and(|pb| pb.next.is_some()) => {
@@ -1249,6 +1295,8 @@ pub(crate) mod tests {
         player.rested = None;
         player.pb.as_mut().unwrap().next = None;
         draw(&mut app, "finale.png", None, &[]);
+        app.player.as_mut().unwrap().start_clip(&mut Vec::new());
+        draw(&mut app, "editor.png", None, &[]);
     }
 
     #[test]

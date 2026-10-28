@@ -176,6 +176,10 @@ impl Engine {
         self.command(&["loadfile", &stream::url(path), "replace", "-1", &options]);
     }
 
+    pub fn frame_step(&self, back: bool) {
+        self.command(&[if back { "frame-back-step" } else { "frame-step" }]);
+    }
+
     pub fn seek(&self, to: f64) {
         self.command(&["seek", &format!("{to:.3}"), "absolute"]);
     }
