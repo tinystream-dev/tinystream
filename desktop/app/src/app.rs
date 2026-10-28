@@ -282,6 +282,9 @@ impl App {
                 effects.push(Effect::Window(chrome::Action::Fullscreen(!self.chrome.fullscreen)));
             },
             Out::PictureInPicture(on) => {
+                if on && self.chrome.fullscreen {
+                    effects.push(Effect::Window(chrome::Action::Fullscreen(false)));
+                }
                 if !on && let Some(player) = &self.player {
                     self.history.replace(Route::Watch(player.id as u64, None));
                 }
@@ -351,6 +354,7 @@ impl App {
                 let player = self.player.as_mut()?;
                 match player.key(key, modified_key, *modifiers, fullscreen) {
                     Some(message) => Some(Message::Player(player.serial, message)),
+                    None if player.clipping.is_some() => None,
                     None => self.keys.press(modified_key, *modifiers, Instant::now()).map(Message::Shortcut),
                 }
             },

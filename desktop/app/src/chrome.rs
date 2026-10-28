@@ -202,17 +202,37 @@ impl Chrome {
     }
 
     /// The controls in their floating pill, of the same material as menus.
-    pub fn pill<'a>(&self, side: Side, look: &Look) -> Option<Element<'a, Message>> {
-        self.controls(side, look).map(|controls| {
-            squircle(controls, 17.0, look)
+    pub fn pill<'a>(&self, side: Side, look: &Look, alpha: f32) -> Option<Element<'a, Message>> {
+        let alpha = alpha.clamp(0.0, 1.0);
+        if alpha == 0.0 {
+            return None;
+        }
+        let material = look.material().map(|mut material| {
+            material.blur *= alpha;
+            material.saturate = 1.0 + (material.saturate - 1.0) * alpha;
+            material.tint = material.tint.scale_alpha(alpha);
+            material.bezel *= alpha;
+            material
+        });
+        let mut look = *look;
+        for color in [
+            &mut look.float,
+            &mut look.ink,
+            &mut look.ink_2,
+            &mut look.canvas,
+            &mut look.hover,
+            &mut look.press,
+            &mut look.danger,
+            &mut look.glow,
+            &mut look.line_strong,
+            &mut look.shade,
+        ] {
+            *color = color.scale_alpha(alpha);
+        }
+        self.controls(side, &look).map(|controls| {
+            squircle(controls, 17.0, &look)
                 .round()
-                .paint(Paint {
-                    fill: Some(look.float),
-                    material: look.material(),
-                    edge: true,
-                    lift: true,
-                    ..Paint::NONE
-                })
+                .paint(Paint { fill: Some(look.float), material, edge: true, lift: true, ..Paint::NONE })
                 .padding(3)
                 .boxed()
         })

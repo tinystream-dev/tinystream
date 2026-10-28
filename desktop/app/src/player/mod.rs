@@ -449,6 +449,9 @@ impl Player {
 
     /// Whether something on screen moves by itself, so frames have to keep coming.
     pub fn animating(&self) -> bool {
+        if self.failure().is_some() {
+            return false;
+        }
         self.hud.is_some()
             || self.shot.is_some()
             || self.countdown.is_some()
@@ -1239,6 +1242,12 @@ pub(crate) mod tests {
             },
         });
         player
+    }
+
+    pub(crate) fn live_player(api: Api, id: i64, runtime: tokio::runtime::Handle, effects: &mut Vec<Effect>) -> Player {
+        let mut prefs = Prefs::default();
+        prefs.set("volume", "0");
+        Player::create(1, id, Some(1.0), api, Some(runtime), prefs, effects)
     }
 
     #[test]

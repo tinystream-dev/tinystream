@@ -33,7 +33,7 @@ pub fn view<'a>(player: &'a Player, look: &Look) -> Element<'a, Message> {
         return super::clip::view(player, editor, look);
     }
     if player.pip {
-        return container(
+        let placeholder = container(
             column![
                 text("Playing in picture in picture", type_::S15, look.media_ink),
                 chrome_button(
@@ -50,6 +50,7 @@ pub fn view<'a>(player: &'a Player, look: &Look) -> Element<'a, Message> {
         )
         .center(Fill)
         .boxed();
+        return Stack::with_children([placeholder, top_bar(player, 1.0, look)]).width(Fill).height(Fill).boxed();
     }
     let l = *look;
     let alpha = if look.reduce_motion { f32::from(player.show_chrome()) } else { player.chrome_alpha() };
@@ -184,7 +185,8 @@ pub fn pip_view<'a>(player: &'a Player, look: &Look) -> Element<'a, Message> {
     if player.waiting {
         layers.push(container(media_spinner(look)).center(Fill).boxed());
     }
-    if player.show_chrome() {
+    let alpha = if look.reduce_motion { f32::from(player.show_chrome()) } else { player.chrome_alpha() };
+    if alpha > 0.0 {
         let controls = row![
             chrome_button(
                 (if player.playing { Icon::Pause } else { Icon::Play }, 20.0, true),
@@ -226,6 +228,22 @@ pub fn pip_view<'a>(player: &'a Player, look: &Look) -> Element<'a, Message> {
     let drag =
         mouse_area(container(space()).width(Fill).height(20)).on_press(Message::PipWindow(crate::chrome::Action::Drag));
     layers.push(container(drag).align_top(Fill).boxed());
+    if alpha > 0.0 {
+        layers.push(
+            container(chrome_button(
+                (Icon::X, 18.0, false),
+                "Close picture in picture",
+                Some(Message::PictureInPicture),
+                false,
+                alpha,
+                look,
+            ))
+            .align_top(Fill)
+            .align_right(Fill)
+            .padding(6)
+            .boxed(),
+        );
+    }
     layers.push(
         crate::chrome::Chrome::default()
             .edges()
