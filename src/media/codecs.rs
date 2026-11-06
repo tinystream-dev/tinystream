@@ -23,8 +23,11 @@ pub fn video_codec_string(par: &ffi::AVCodecParameters) -> Option<String> {
 
             format!("hvc1.{profile}.{compat}.L{level}.B0")
         })),
-        ffi::AV_CODEC_ID_AV1 => Some(av1(extradata).unwrap_or_else(|| "av01.0.08M.08".into())),
-        ffi::AV_CODEC_ID_VP9 => Some("vp09.00.40.08".into()),
+        ffi::AV_CODEC_ID_AV1 => Some(av1(extradata).unwrap_or_else(|| format!("av01.0.08M.{:02}", bit_depth(par)))),
+        ffi::AV_CODEC_ID_VP9 => Some(match bit_depth(par) {
+            8 => "vp09.00.40.08".into(),
+            depth => format!("vp09.02.40.{depth:02}"),
+        }),
         _ => None,
     }
 }
@@ -42,6 +45,11 @@ pub fn audio_codec_string(par: &ffi::AVCodecParameters) -> Option<String> {
         ffi::AV_CODEC_ID_EAC3 => Some("ec-3".into()),
         _ => None,
     }
+}
+
+pub fn bit_depth(par: &ffi::AVCodecParameters) -> i32 {
+    let desc = unsafe { ffi::av_pix_fmt_desc_get(par.format) };
+    if desc.is_null() { 8 } else { unsafe { (*desc).comp[0].depth } }
 }
 
 fn extradata(par: &ffi::AVCodecParameters) -> &[u8] {
@@ -119,6 +127,21 @@ mod tests {
     fn hevc_main10() {
         let ed = [1u8, 0x02, 0x20, 0, 0, 0, 0x90, 0, 0, 0, 0, 0, 153];
         assert_eq!(hevc(&ed).unwrap(), "hvc1.2.4.L153.90");
+    }
+
+    #[test]
+    fn av1_main10() {
+        assert_eq!(av1(&[0x81, 0x08, 0x4C, 0]).unwrap(), "av01.0.08M.10");
+    }
+
+    #[test]
+    fn fallbacks_keep_bit_depth() {
+        let mut par: ffi::AVCodecParameters = unsafe { std::mem::zeroed() };
+        par.format = ffi::AV_PIX_FMT_YUV420P10LE;
+        par.codec_id = ffi::AV_CODEC_ID_AV1;
+        assert_eq!(video_codec_string(&par).unwrap(), "av01.0.08M.10");
+        par.codec_id = ffi::AV_CODEC_ID_VP9;
+        assert_eq!(video_codec_string(&par).unwrap(), "vp09.02.40.10");
     }
 
     #[test]

@@ -126,8 +126,6 @@ pub fn probe(path: &Path) -> anyhow::Result<MediaInfo> {
 
         match par.codec_type {
             ffi::AVMEDIA_TYPE_VIDEO if index as i32 == best_video => {
-                let desc = unsafe { ffi::av_pix_fmt_desc_get(par.format) };
-                let bit_depth = if desc.is_null() { 8 } else { unsafe { (*desc).comp[0].depth } };
                 let fps = ff::q2d(if st.avg_frame_rate.num > 0 { st.avg_frame_rate } else { st.r_frame_rate });
 
                 info.video = Some(VideoTrack {
@@ -137,7 +135,7 @@ pub fn probe(path: &Path) -> anyhow::Result<MediaInfo> {
                     width: par.width,
                     height: par.height,
                     fps,
-                    bit_depth,
+                    bit_depth: codecs::bit_depth(par),
                     hdr: matches!(par.color_trc, ffi::AVCOL_TRC_SMPTE2084 | ffi::AVCOL_TRC_ARIB_STD_B67),
                 });
             },
