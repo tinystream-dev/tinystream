@@ -27,7 +27,7 @@ import { clock, language } from '@tinystream/shared/format'
 import { Shortcuts } from '../components/Shell'
 import { Squircle } from '../components/Squircle'
 import { MenuItem, Panel, Popover, Segmented, Spinner, useTip } from '../components/ui'
-import { toastError } from '../components/feedback'
+import { toast, toastError } from '../components/feedback'
 import { graphql } from '../gql'
 import { type Chapter, type Clip, type Playback, request } from '../lib/api'
 import { fetchClip } from '../lib/clips'
@@ -35,7 +35,7 @@ import type { SeriesGlimpse } from '../components/SeriesPanel'
 import { airs, episodeCode } from '../lib/downloads'
 import { useCanClip, useMe } from '../lib/hooks'
 import { ClipEditor } from './ClipEditor'
-import { StreamEngine, plan } from './engine'
+import { FAILED, type Failure, type Frames, StreamEngine, directVideo, forgetFailure, plan, rememberFailure, videoKind } from './engine'
 import { type RoomContext, RoomButton, RoomNotices, TapToJoin, controlledBy, useRoomSnapshot } from './Room'
 import { SubtitleRenderer } from './subtitles'
 import {
@@ -89,6 +89,12 @@ function defaultAudio(pb: Playback): number | null {
     (lang && pb.media.audio.find((t) => t.language === lang)) ||
     pb.media.audio.find((t) => t.default)
   return a?.index ?? null
+}
+
+/** The quality picked last for this show, so a conversion that works carries on to the next episode. */
+function defaultQuality(pb: Playback): Quality {
+  const q = Number(pref.get(`quality.${pb.title.id}`))
+  return q === 1080 || q === 720 || q === 480 ? q : 'auto'
 }
 
 /** The subtitles picked last for this show, or anywhere when it's new. */
@@ -235,7 +241,7 @@ export function Player({ mediaId, room, editClip, startAt }: { mediaId: number; 
   const [time, setTime] = useState(0)
   const [buffered, setBuffered] = useState<[number, number][]>([])
   const [waiting, setWaiting] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+  const [failure, setFailure] = useState<Failure | null>(null)
   const [volume, setVolume] = useState(() => Number(pref.get('volume') ?? 1))
   const [muted, setMuted] = useState(false)
   const [fullscreen, setFullscreen] = useState(false)
@@ -249,7 +255,7 @@ export function Player({ mediaId, room, editClip, startAt }: { mediaId: number; 
   const [ownSubtitle, setOwnSubtitle] = useState(false)
   const [trackScope, setTrackScope] = useState<'everyone' | 'me'>('everyone')
   const scope = room && controls ? trackScope : 'me'
-  const [quality, setQuality] = useState<Quality>('auto')
+  const [quality, setQuality] = useState<Quality | undefined>(undefined)
   const [ended, setEnded] = useState(false)
   const [countdown, setCountdown] = useState<number | null>(null)
   const [rate, setRate] = useState(() => Number(pref.get('rate') ?? 1))
@@ -277,9 +283,18 @@ export function Player({ mediaId, room, editClip, startAt }: { mediaId: number; 
   useEffect(() => () => clearTimeout(hudTimer.current), [])
 
   const duration = pb?.media.duration ?? 0
+  const { data: directIssue } = useQuery({
+    queryKey: ['direct', mediaId],
+    queryFn: () => directVideo(pb!.media.video),
+    enabled: !!pb,
+    staleTime: Infinity,
+  })
   const streamPlan = useMemo(
-    () => (pb && audioIndex !== undefined ? plan(pb, audioIndex, quality) : null),
-    [pb, audioIndex, quality],
+    () =>
+      pb && audioIndex !== undefined && quality !== undefined && directIssue !== undefined
+        ? plan(pb, audioIndex, quality, directIssue)
+        : null,
+    [pb, audioIndex, quality, directIssue],
   )
 
   // Pick initial tracks once the file's info arrives. (Rooms pick below.)
@@ -288,6 +303,22 @@ export function Player({ mediaId, room, editClip, startAt }: { mediaId: number; 
     setAudioIndex(defaultAudio(pb))
     setSubtitle(defaultSubtitle(pb))
   }, [pb, room])
+
+  useEffect(() => {
+    if (pb) setQuality(defaultQuality(pb))
+  }, [pb])
+  const chooseQuality = (q: Quality) => {
+    resumeAt.current = videoRef.current?.currentTime ?? null
+    setQuality(q)
+    if (pb) pref.set(`quality.${pb.title.id}`, String(q))
+  }
+  /** Forgets that this kind of video failed to play directly, and tries again. */
+  const retryDirect = () => {
+    if (!pb?.media.video) return
+    resumeAt.current = videoRef.current?.currentTime ?? null
+    forgetFailure(pb.media.video)
+    void qc.invalidateQueries({ queryKey: ['direct', mediaId] })
+  }
 
   // In a room, follow its tracks unless we've picked our own.
   const shared = room && pb && rs ? pickShared(pb, rs.tracks) : null
@@ -356,10 +387,19 @@ export function Player({ mediaId, room, editClip, startAt }: { mediaId: number; 
     // In a room, start wherever the room is; it takes over from there.
     const start = room ? room.client.target() : (resumeAt.current ?? (!pb.finished && pb.position && pb.position > 5 ? pb.position : 0))
     const wasPaused = !!room || (resumeAt.current !== null && resumePaused.current)
-    setError(null)
+    setFailure(null)
     setWaiting(true)
     const e = new StreamEngine(video, `/api${apiBase}/media/${pb.id}`, pb.media.duration, streamPlan, (ev) => {
-      if (ev.error) setError(ev.error)
+      const f = ev.failure
+      if (!f) return
+      console.warn('playback', f.kind, f.message, streamPlan, e.stats())
+      // Converting may well work where the browser couldn't take the video as it is.
+      const v = pb.media.video
+      if (streamPlan.video === 'copy' && f.kind !== 'network' && v) {
+        rememberFailure(v, f.kind)
+        qc.setQueryData(['direct', pb.id], f.kind)
+        toast({ title: 'Converting this video', body: `${videoKind(v)} didn’t play directly here: ${f.message}`, tone: 'quiet' })
+      } else setFailure(f)
     })
     engine.current = e
     void e.start(start).then(() => {
@@ -373,7 +413,7 @@ export function Player({ mediaId, room, editClip, startAt }: { mediaId: number; 
       resumePaused.current = loaded ? video.paused : wasPaused
       e.destroy()
     }
-  }, [pb, streamPlan, room, apiBase])
+  }, [pb, streamPlan, room, apiBase, qc])
 
   // Hand the video to the room to steer.
   useEffect(() => {
@@ -760,7 +800,7 @@ export function Player({ mediaId, room, editClip, startAt }: { mediaId: number; 
   }, [])
 
   // Paused and left alone for a while: the frame recedes and what's playing steps forward.
-  const resting = !playing && idle && started && !ended && !waiting && !error && !!pb && !snap?.blocked
+  const resting = !playing && idle && started && !ended && !waiting && !failure && !!pb && !snap?.blocked
   const [rested, setRested] = useState(false)
   useEffect(() => {
     setRested(false)
@@ -775,7 +815,7 @@ export function Player({ mediaId, room, editClip, startAt }: { mediaId: number; 
   })
   const overview = details?.video?.overview ?? details?.title?.overview ?? null
 
-  const showChrome = ((!playing && !rested) || !idle || !!error) && !clipping
+  const showChrome = ((!playing && !rested) || !idle || !!failure) && !clipping
   // The skip button shows for a while as its chapter starts, then only with the controls.
   const skipAt = skippable?.start ?? null
   const [skipFresh, setSkipFresh] = useState<number | null>(null)
@@ -843,7 +883,6 @@ export function Player({ mediaId, room, editClip, startAt }: { mediaId: number; 
           for (let i = 0; i < b.length; i++) r.push([b.start(i), b.end(i)])
           setBuffered(r)
         }}
-        onError={() => setError('the browser could not play this stream')}
       />
 
       {/* The still holds the frame until the video has one of its own; the one clicked grows into it. */}
@@ -857,7 +896,7 @@ export function Player({ mediaId, room, editClip, startAt }: { mediaId: number; 
 
       {pb && <Resting pb={pb} line={subtitleLine} overview={overview} time={time} duration={duration} shown={rested} />}
 
-      {(waiting || !pb) && !error && (
+      {(waiting || !pb) && !failure && (
         <div className="pointer-events-none absolute inset-0 grid place-items-center text-media-ink/80">
           <Spinner className="size-9" />
         </div>
@@ -868,17 +907,17 @@ export function Player({ mediaId, room, editClip, startAt }: { mediaId: number; 
       {room && <RoomNotices client={room.client} />}
       {room && snap?.blocked && <TapToJoin client={room.client} title={[pb?.title.name, pb?.label].filter(Boolean).join(' · ')} />}
 
-      {(error || infoError) && (
+      {(failure || infoError) && (
         <div className="absolute inset-0 grid place-items-center p-6">
           <Panel className="max-w-md p-5">
-            <p className="text-[15px] font-medium">This video can't play right now</p>
-            <p className="mt-1.5 text-sm leading-relaxed text-ink-2">{error ?? (infoError as Error).message}</p>
+            <p className="text-[15px] font-medium">{failure ? FAILED[failure.kind] : "This video can't play right now"}</p>
+            <p className="mt-1.5 text-sm leading-relaxed text-ink-2">{failure?.message ?? (infoError as Error).message}</p>
             <div className="mt-4 flex gap-2">
               <button className="text-sm text-ink underline-offset-4 hover:underline" onClick={() => location.reload()}>
                 Try again
               </button>
               <span className="text-ink-3">or</span>
-              <button className="text-sm text-ink underline-offset-4 hover:underline" onClick={() => setQuality(720)}>
+              <button className="text-sm text-ink underline-offset-4 hover:underline" onClick={() => chooseQuality(720)}>
                 convert it to 720p
               </button>
             </div>
@@ -1058,21 +1097,31 @@ export function Player({ mediaId, room, editClip, startAt }: { mediaId: number; 
                     ))}
                   </div>
                   <div className="my-1 h-px bg-line" />
-                  <p className="px-2.5 pt-1.5 pb-2 text-xs leading-relaxed text-ink-3">{streamPlan.describe}</p>
+                  <p className="px-2.5 pt-1.5 text-xs leading-relaxed text-ink-3">{streamPlan.describe}</p>
+                  <FrameCount engine={engine} label={pb.media.video ? videoKind(pb.media.video) : null} />
                   {(['auto', 1080, 720, 480] as Quality[]).map((q) => (
                     <MenuItem
                       key={q}
                       active={quality === q}
                       hint={q === 'auto' ? 'best for this browser' : undefined}
                       onClick={() => {
-                        resumeAt.current = videoRef.current?.currentTime ?? null
-                        setQuality(q)
+                        chooseQuality(q)
                         close()
                       }}
                     >
                       {q === 'auto' ? 'Automatic' : `${q}p`}
                     </MenuItem>
                   ))}
+                  {quality === 'auto' && directIssue && directIssue !== 'unsupported' && (
+                    <MenuItem
+                      onClick={() => {
+                        retryDirect()
+                        close()
+                      }}
+                    >
+                      Try playing it directly again
+                    </MenuItem>
+                  )}
                 </Panel>
               )}
             </Popover>
@@ -1112,6 +1161,7 @@ export function Player({ mediaId, room, editClip, startAt }: { mediaId: number; 
           at={clipping.at}
           audio={audioIndex ?? null}
           subtitle={subtitle}
+          directIssue={directIssue ?? null}
           editing={clipping.editing}
           onClose={closeClip}
           onPreviewPlaying={room ? setDucked : undefined}
@@ -1119,6 +1169,22 @@ export function Player({ mediaId, room, editClip, startAt }: { mediaId: number; 
       )}
     </div>
   )
+}
+
+/** What the video is and how its frames are doing, for telling playback problems apart. */
+function FrameCount({ engine, label }: { engine: RefObject<StreamEngine | null>; label: string | null }) {
+  const [frames, setFrames] = useState<Frames | null>(null)
+  useEffect(() => {
+    const read = () => setFrames(engine.current?.stats() ?? null)
+    read()
+    const id = setInterval(read, 1000)
+    return () => clearInterval(id)
+  }, [engine])
+  const counts = frames && [
+    frames.shown === null ? `${frames.decoded} decoded` : `${frames.shown} shown`,
+    `${frames.dropped} dropped`,
+  ]
+  return <p className="px-2.5 pb-2 text-2xs text-ink-3 tabular">{[label, ...(counts ?? [])].filter(Boolean).join(' · ')}</p>
 }
 
 type Shot = { key: number; clip?: Clip; error?: string }

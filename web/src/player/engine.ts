@@ -32,17 +32,87 @@ const TRANSCODED_AUDIO = 'mp4a.40.2'
 
 const supported = (mime: string) => typeof MediaSource !== 'undefined' && MediaSource.isTypeSupported(mime)
 
+type VideoInfo = NonNullable<Playback['media']['video']>
+
+/**
+ * Where playback broke: fetching the stream, reading the container, decoding
+ * the video, or getting decoded frames on screen.
+ */
+export type FailureKind = 'network' | 'demux' | 'decode' | 'present'
+export type Failure = { kind: FailureKind; message: string }
+
+export const FAILED: Record<FailureKind, string> = {
+  network: 'The stream was interrupted',
+  demux: 'The browser couldn’t read this stream',
+  decode: 'The browser couldn’t decode this video',
+  present: 'The browser isn’t showing this video’s frames',
+}
+
+/** Why the video can't go to the browser as it is: it says it can't play it, or it failed to before. */
+export type DirectIssue = 'unsupported' | FailureKind
+
+/** What a decoder cares about, e.g. "AV1 10-bit". Failures are remembered by this, so they carry over to other episodes. */
+export const videoKind = (v: VideoInfo) => `${v.codec.toUpperCase()} ${v.bitDepth}-bit${v.hdr ? ' HDR' : ''}`
+
+const FAILURES = 'tinystream.directFailures'
+
+function failures(): Record<string, FailureKind> {
+  try {
+    return JSON.parse(localStorage.getItem(FAILURES) ?? '{}')
+  } catch {
+    return {}
+  }
+}
+
+/** Remembers that this browser couldn't play this kind of video as it is, so Automatic converts it from now on. */
+export function rememberFailure(v: VideoInfo, kind: FailureKind) {
+  try {
+    localStorage.setItem(FAILURES, JSON.stringify({ ...failures(), [videoKind(v)]: kind }))
+  } catch {}
+}
+
+export function forgetFailure(v: VideoInfo) {
+  const { [videoKind(v)]: _, ...rest } = failures()
+  try {
+    localStorage.setItem(FAILURES, JSON.stringify(rest))
+  } catch {}
+}
+
+/**
+ * Whether the video can be sent as it is. Asks with its real size, frame
+ * rate and bit depth rather than just its codec, and only takes yes for an
+ * answer when the browser expects to keep up.
+ */
+export async function directVideo(v: VideoInfo | null): Promise<DirectIssue | null> {
+  const contentType = `video/mp4; codecs="${v?.codecString}"`
+  if (!v?.codecString || !supported(contentType)) return 'unsupported'
+  const failed = failures()[videoKind(v)]
+  if (failed) return failed
+  if (!navigator.mediaCapabilities) return null
+  const framerate = v.fps || 24
+  try {
+    const r = await navigator.mediaCapabilities.decodingInfo({
+      type: 'media-source',
+      // The real bitrate isn't known here; this is a generous guess.
+      video: { contentType, width: v.width, height: v.height, framerate, bitrate: v.width * v.height * framerate * 0.1 },
+    })
+    return r.supported && r.smooth ? null : 'unsupported'
+  } catch {
+    return null
+  }
+}
+
 /**
  * Picks the cheapest way to play: as-is if the browser can decode it,
  * otherwise re-encode only what it can't.
  */
-export function plan(pb: Playback, audioIndex: number | null, maxHeight: number | 'auto'): StreamPlan {
+export function plan(pb: Playback, audioIndex: number | null, maxHeight: number | 'auto', issue: DirectIssue | null): StreamPlan {
   const v = pb.media.video
   const a = pb.media.audio.find((t) => t.index === audioIndex) ?? pb.media.audio.find((t) => t.default) ?? null
 
   let video: 'copy' | 'transcode' = 'transcode'
   let vCodec = TRANSCODED_VIDEO
-  if (maxHeight === 'auto' && v?.codecString && supported(`video/mp4; codecs="${v.codecString}"`)) {
+  if (maxHeight === 'auto' && v?.codecString && !issue) {
     video = 'copy'
     vCodec = v.codecString
   }
@@ -61,16 +131,33 @@ export function plan(pb: Playback, audioIndex: number | null, maxHeight: number 
   }
 
   const hw = pb.transcoding.vaapi ? 'VA-API' : 'software'
+  const why = maxHeight === 'auto' && v && issue && issue !== 'unsupported' ? `, as ${videoKind(v)} didn’t play directly here` : ''
   const describe =
     video === 'copy'
       ? audioMode === 'copy'
         ? 'Direct play'
         : 'Direct video, converting audio'
-      : `Converting to ${height}p (${hw})`
+      : `Converting to ${height}p (${hw})${why}`
   return { mime, video, height, audio: a?.index ?? null, audioMode, describe }
 }
 
-type Listener = (e: { error?: string; loading?: boolean }) => void
+function mediaFailure(e: MediaError | null): Failure {
+  const fallback = ['playback failed', 'playback was aborted', 'the network failed', 'the video couldn’t be decoded', 'the format isn’t supported']
+  const message = e?.message || fallback[e?.code ?? 0]
+  // Browsers report container errors as decode errors, and only say which in the message.
+  if (/demux|append|parse|metadata/i.test(e?.message ?? '')) return { kind: 'demux', message }
+  if (e?.code === MediaError.MEDIA_ERR_NETWORK) return { kind: 'network', message }
+  return { kind: 'decode', message }
+}
+
+/** Seconds of playback without a new frame before the video counts as stuck. */
+const FRAME_STALL = 6
+/** Frames looked at together when judging how many are dropped. */
+const DROP_WINDOW = 240
+
+export type Frames = { shown: number | null; decoded: number; dropped: number }
+
+type Listener = (e: { failure?: Failure; loading?: boolean }) => void
 
 export class StreamEngine {
   private ms = new MediaSource()
@@ -87,6 +174,12 @@ export class StreamEngine {
   /** SourceBuffer operations, one at a time (see `exclusive`). */
   private queue = Promise.resolve()
   private onSeeking = () => this.seeked()
+  private onError = () => this.fail(mediaFailure(this.video.error))
+  private failed = false
+  /** Frames the browser says it put on screen (null where it can't say). */
+  private shown: number | null = null
+  private frameCallback = 0
+  private watch: ReturnType<typeof setInterval> | undefined
 
   constructor(
     private video: HTMLVideoElement,
@@ -108,7 +201,9 @@ export class StreamEngine {
     if (this.duration) this.ms.duration = this.duration
     this.sb = this.ms.addSourceBuffer(this.streamPlan.mime)
     this.video.addEventListener('seeking', this.onSeeking)
+    this.video.addEventListener('error', this.onError)
     this.video.currentTime = start
+    this.watchFrames()
     void this.load(start)
   }
 
@@ -116,10 +211,76 @@ export class StreamEngine {
     this.destroyed = true
     this.generation++
     this.ctrl?.abort()
+    clearInterval(this.watch)
+    this.video.cancelVideoFrameCallback?.(this.frameCallback)
     this.video.removeEventListener('seeking', this.onSeeking)
+    this.video.removeEventListener('error', this.onError)
     this.video.removeAttribute('src')
     this.video.load()
     URL.revokeObjectURL(this.objectUrl)
+  }
+
+  /** Tells the listener once, however many ways the same breakage shows up. */
+  private fail(f: Failure) {
+    if (this.failed || this.destroyed) return
+    this.failed = true
+    clearInterval(this.watch)
+    this.listener({ failure: f })
+  }
+
+  stats(): Frames {
+    const q = this.video.getVideoPlaybackQuality()
+    return { shown: this.shown, decoded: q.totalVideoFrames, dropped: q.droppedVideoFrames }
+  }
+
+  /**
+   * Watches frames come through while playback moves on. A video sent as it
+   * is can be accepted and then never show anything, with the sound playing
+   * on and no error at all. Going by frame counts, not pixels, keeps
+   * scenes that are meant to be black from looking broken.
+   */
+  private watchFrames() {
+    const v = this.video
+    if (v.requestVideoFrameCallback) {
+      this.shown = 0
+      const next = () => {
+        this.frameCallback = v.requestVideoFrameCallback(() => {
+          this.shown!++
+          next()
+        })
+      }
+      next()
+    }
+    let last = { time: v.currentTime, ...this.stats() }
+    let sinceDecoded = 0
+    let sinceShown = 0
+    let span = { decoded: 0, dropped: 0 }
+    this.watch = setInterval(() => {
+      const now = { time: v.currentTime, ...this.stats() }
+      const dt = now.time - last.time
+      // Seeks jump, and hidden pages may stop drawing.
+      const watching = !v.paused && !v.seeking && v.readyState >= v.HAVE_FUTURE_DATA && document.visibilityState === 'visible' && dt > 0 && dt < 3
+      sinceDecoded = now.decoded !== last.decoded ? 0 : sinceDecoded + (watching ? dt : 0)
+      sinceShown = now.shown !== last.shown ? 0 : sinceShown + (watching ? dt : 0)
+      if (watching) {
+        span.decoded += now.decoded - last.decoded
+        span.dropped += now.dropped - last.dropped
+      }
+      last = now
+      // Converted video is as good as it gets, so there's nothing to fall back to.
+      if (this.streamPlan.video !== 'copy') return
+      if (sinceDecoded > FRAME_STALL) {
+        const message = v.videoWidth ? `no new video frame in ${FRAME_STALL} s of playback` : `no video frame in ${FRAME_STALL} s of playback`
+        this.fail({ kind: 'decode', message })
+      } else if (now.shown !== null && sinceShown > FRAME_STALL) {
+        this.fail({ kind: 'present', message: `frames are decoded but none were shown in ${FRAME_STALL} s of playback` })
+      } else if (span.decoded >= DROP_WINDOW) {
+        if (span.dropped >= span.decoded * 0.95) {
+          this.fail({ kind: 'present', message: `${Math.round((span.dropped / span.decoded) * 100)}% of frames were dropped` })
+        }
+        span = { decoded: 0, dropped: 0 }
+      }
+    }, 1000)
   }
 
   private isBuffered(t: number) {
@@ -257,6 +418,8 @@ export class StreamEngine {
     const ctrl = new AbortController()
     this.ctrl = ctrl
     this.endReached = false
+    // Whatever goes wrong while fetching is the network's; while appending, the container's.
+    let stage: FailureKind = 'network'
 
     try {
       // The previous stream may have stopped mid-fragment; reset the parser.
@@ -276,7 +439,9 @@ export class StreamEngine {
       while (gen === this.generation) {
         const { done, value } = await reader.read()
         if (done) break
+        stage = 'demux'
         await this.append(value, gen)
+        stage = 'network'
       }
       reader.cancel().catch(() => {})
       if (gen === this.generation) {
@@ -287,7 +452,8 @@ export class StreamEngine {
     } catch (e) {
       if (gen !== this.generation || (e as Error).name === 'AbortError') return
       this.activeFrom = null
-      this.listener({ error: (e as Error).message || 'playback failed' })
+      // An append fails once the video has, so the video knows better why.
+      this.fail(this.video.error ? mediaFailure(this.video.error) : { kind: stage, message: (e as Error).message || 'playback failed' })
     }
   }
 
