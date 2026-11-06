@@ -137,6 +137,12 @@ async-graphql-axum = "7.2.1"
 [target.'cfg(target_vendor = "apple")'.dependencies]
 libc = "0.2"
 
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false
+
 [profile.release]
 lto = "thin"
 codegen-units = 1

@@ -9,6 +9,12 @@ license = "AGPL-3.0-or-later"
 authors = ["Phrolova <me@phrolova.moe>"]
 repository = "https://github.com/phrolova/tinystream"
 
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false
+
 [profile.release]
 lto = "thin"
 codegen-units = 1
