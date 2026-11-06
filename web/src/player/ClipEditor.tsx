@@ -59,7 +59,7 @@ import { bytes } from '../lib/downloads'
 import { language } from '@tinystream/shared/format'
 import { onArrival, useMarkRead } from '../lib/notifications'
 import { ClipPlayer } from './ClipPlayer'
-import { StreamEngine, plan } from './engine'
+import { type DirectIssue, StreamEngine, plan } from './engine'
 import { SubtitleRenderer } from './subtitles'
 
 /** Where the preview's first stretch starts when nothing says otherwise. */
@@ -78,6 +78,8 @@ type Props = {
   at: number
   audio: number | null
   subtitle: string | null
+  /** Why the player isn't sending the video as it is, if it isn't. */
+  directIssue: DirectIssue | null
   /** Changing an existing clip instead of making one. */
   editing?: Clip
   onClose: () => void
@@ -108,7 +110,7 @@ export function ClipEditor(props: Props) {
   )
 }
 
-function Editor({ pb, mediaBase, room, at, audio: startAudio, subtitle: startSubtitle, editing, onClose, onPreviewPlaying, you, onMade }: Props & {
+function Editor({ pb, mediaBase, room, at, audio: startAudio, subtitle: startSubtitle, directIssue, editing, onClose, onPreviewPlaying, you, onMade }: Props & {
   you: ClipAllowance
   onMade: (id: number) => void
 }) {
@@ -158,7 +160,7 @@ function Editor({ pb, mediaBase, room, at, audio: startAudio, subtitle: startSub
   useEffect(() => {
     const v = video.current
     if (!v) return
-    const e = new StreamEngine(v, mediaBase, pb.media.duration, plan(pb, audio, 'auto'), (ev) => ev.error && setError(ev.error))
+    const e = new StreamEngine(v, mediaBase, pb.media.duration, plan(pb, audio, 'auto', directIssue), (ev) => ev.failure && setError(ev.failure.message))
     engine.current = e
     setError(null)
     setLoading(true)
@@ -176,7 +178,7 @@ function Editor({ pb, mediaBase, room, at, audio: startAudio, subtitle: startSub
       engine.current = null
       e.destroy()
     }
-  }, [pb, mediaBase, audio])
+  }, [pb, mediaBase, audio, directIssue])
 
   const subs = useRef<SubtitleRenderer | null>(null)
   useEffect(() => {
