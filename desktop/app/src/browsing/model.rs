@@ -2,7 +2,13 @@
 
 //! Shared view models for selections used by multiple browsing operations.
 
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
+
+/// `null` read as the type's default, for fields the schema lets be null where the web treats
+/// null as false.
+fn null_as_default<'de, D: Deserializer<'de>, T: Default + Deserialize<'de>>(deserializer: D) -> Result<T, D::Error> {
+    Ok(Option::deserialize(deserializer)?.unwrap_or_default())
+}
 
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
@@ -156,6 +162,7 @@ pub struct Video {
     pub custom_still: bool,
     pub duration: Option<f64>,
     pub position: Option<f64>,
+    #[serde(deserialize_with = "null_as_default")]
     pub finished: bool,
     pub season: Option<i64>,
     pub episode: Option<i64>,
@@ -233,7 +240,7 @@ pub struct Album {
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Track {
-    pub album_id: i64,
+    pub album_id: Option<i64>,
     pub cover: Option<String>,
     pub id: i64,
     pub title: String,
@@ -402,7 +409,7 @@ pub struct Notice {
 pub struct Series {
     pub id: i64,
     pub monitor: String,
-    pub status: String,
+    pub status: Option<String>,
     pub name: String,
     pub library: String,
     pub managed: bool,

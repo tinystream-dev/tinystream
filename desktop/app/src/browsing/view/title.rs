@@ -422,7 +422,7 @@ fn series_panel<'a>(b: &'a Browsing, s: &'a Series, season: i64, look: &Look) ->
     );
     raised(
         column![
-            row![text("Download automatically", ty::S15, look.ink).font(SEMIBOLD).width(Fill), state(&s.status, look)],
+            text("Download automatically", ty::S15, look.ink).font(SEMIBOLD),
             monitors,
             text(format!("{} of {} in library · {} downloading · {} to find · {} missing · {} not aired yet · {} skipped · {}",s.counts.have,s.counts.total,s.counts.grabbed,s.counts.wanted,s.counts.missing,s.counts.upcoming,s.counts.skipped,s.effective_profile),ty::XS,look.ink_3),
             line(vec![

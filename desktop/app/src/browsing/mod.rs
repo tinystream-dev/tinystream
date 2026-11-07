@@ -1225,6 +1225,24 @@ mod tests {
     }
 
     #[test]
+    fn titles_with_unwatched_videos_and_unknown_series_status_decode() {
+        let d: Document = serde_json::from_value(json!({
+            "title": {
+                "seasons": [{"number": 1, "name": "Season 1", "episodes": [{"id": 1, "finished": null}, {"id": 2, "finished": true}]}],
+                "nextUp": {"resuming": false, "video": {"id": 1, "finished": null}},
+                "series": {"id": 3, "status": null},
+            },
+            "musicSearch": {"artists": [], "albums": [], "tracks": [{"id": 4, "albumId": null}]},
+        }))
+        .unwrap();
+        let t = d.title.unwrap();
+        assert!(!t.seasons[0].episodes[0].finished);
+        assert!(t.seasons[0].episodes[1].finished);
+        assert!(t.series.unwrap().status.is_none());
+        assert!(d.music_search.unwrap().tracks[0].album_id.is_none());
+    }
+
+    #[test]
     fn null_optional_request_and_download_fields_decode() {
         let d:Document=serde_json::from_value(json!({"requests":[{"library":null}],"downloads":[{"source":null,"size":null,"seedGoal":{"ratio":null,"seconds":null}}],"books":[{"reading":{"position":1,"progress":0.5,"finished":false,"updatedAt":9}}]})).unwrap();
         assert!(d.requests[0].library.is_none());

@@ -121,8 +121,9 @@ impl Api {
         &self,
         variables: Q::Variables,
     ) -> Result<T, Error> {
-        let mut request =
-            self.http.post(self.origin.join("api/graphql").expect("validated origin")).json(&Q::build_query(variables));
+        let body = Q::build_query(variables);
+        let operation = body.operation_name;
+        let mut request = self.http.post(self.origin.join("api/graphql").expect("validated origin")).json(&body);
         if let Some(token) = &self.token {
             request = request.bearer_auth(&token.0);
         }
@@ -136,8 +137,16 @@ impl Api {
         if !response.status().is_success() {
             return Err(Error::message(format!("The server returned HTTP {}.", response.status().as_u16())));
         }
-        let body: Response<T> =
-            response.json().await.map_err(|_| Error::message("The server sent something unexpected."))?;
+        let bytes = response.bytes().await.map_err(|_| Error::message("The server sent something unexpected."))?;
+        let body: Response<T> = serde_json::from_slice(&bytes).map_err(|error| {
+            let at = bytes.len().min(
+                bytes.split(|b| *b == b'\n').take(error.line().saturating_sub(1)).map(|l| l.len() + 1).sum::<usize>()
+                    + error.column(),
+            );
+            let near = String::from_utf8_lossy(&bytes[at.saturating_sub(80)..(at + 40).min(bytes.len())]).into_owned();
+            tracing::warn!(operation, %error, near, "can't read the server's response");
+            Error::message("The server sent something unexpected.")
+        })?;
         decode(body)
     }
 

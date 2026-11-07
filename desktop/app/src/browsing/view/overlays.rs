@@ -117,9 +117,10 @@ pub fn palette(app: &App) -> Vec<PaletteItem> {
                 });
             }
             for t in &s.tracks {
+                let Some(album) = t.album_id else { continue };
                 items.push(PaletteItem {
                     label: format!("{} · {}", t.title, t.artist),
-                    target: PaletteTarget::Route(Route::Album(t.album_id as u64)),
+                    target: PaletteTarget::Route(Route::Album(album as u64)),
                     group: "Songs",
                     image: t.cover.clone(),
                 });
