@@ -8,6 +8,7 @@ pub mod context_menu;
 pub mod controls;
 pub mod credits;
 pub mod effects;
+pub mod fill;
 pub mod gallery;
 pub mod icon;
 pub mod layout;

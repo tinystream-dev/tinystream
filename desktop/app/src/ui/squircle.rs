@@ -17,6 +17,7 @@ use iced_widget::canvas::{self, Cache, Frame, LineDash, Path, Stroke};
 use iced_widget::{Element, Renderer};
 
 use super::backdrop::{self, Backdrop};
+use super::fill::Fill;
 use super::theme::{Look, Material};
 
 /// The outline of a `size` box at `origin`, as `squirclePath` draws it.
@@ -81,10 +82,9 @@ impl Keyed {
     }
 }
 
-/// A squircle's tessellated fill and edge.
+/// A squircle's tessellated edge.
 #[derive(Default)]
 pub struct Painted {
-    fill: Keyed,
     edge: Keyed,
 }
 
@@ -100,14 +100,7 @@ pub struct Outline {
 }
 
 /// Draws what's under a squircle's content: its lift, and its fill or material.
-pub fn draw_under(
-    renderer: &mut Renderer,
-    painted: &Painted,
-    outline: Outline,
-    paint: &Paint,
-    look: &Look,
-    viewport: &Rectangle,
-) {
+pub fn draw_under(renderer: &mut Renderer, outline: Outline, paint: &Paint, look: &Look, viewport: &Rectangle) {
     let Outline { bounds, radius, smoothing } = outline;
     if bounds.width <= 0.0 || bounds.height <= 0.0 {
         return;
@@ -129,14 +122,7 @@ pub fn draw_under(
             (material, _) => {
                 let fill = if material.is_some() { Some(look.solid_material()) } else { paint.fill };
                 if let Some(fill) = fill.filter(|c| c.a > 0.0) {
-                    let mut key = vec![bounds.width, bounds.height, radius, smoothing];
-                    key.extend(rgba(fill));
-                    let geometry = painted.fill.draw(renderer, bounds.size(), &key, |frame| {
-                        frame.fill(&path(Point::ORIGIN, bounds.size(), radius, smoothing), fill);
-                    });
-                    renderer.with_translation(Vector::new(bounds.x, bounds.y), |renderer| {
-                        renderer.draw_geometry(geometry);
-                    });
+                    renderer.draw_primitive(Fill::bounds(bounds), Fill::new(fill, radius, smoothing));
                 }
             },
         }
@@ -366,7 +352,7 @@ impl<Message> Widget<Message, Theme, Renderer> for Squircle<'_, Message> {
         let painted = tree.state.downcast_ref::<Painted>();
         let radius = if self.exact { self.radius } else { self.look.radius(self.radius) };
         let smoothing = self.smoothing.unwrap_or(self.look.corners().1);
-        draw_under(renderer, painted, Outline { bounds, radius, smoothing }, &self.paint, &self.look, viewport);
+        draw_under(renderer, Outline { bounds, radius, smoothing }, &self.paint, &self.look, viewport);
         let (layout, tree) = layout.iter(&tree.children).next().expect("content");
         renderer.with_layer(*viewport, |renderer| {
             self.content.draw(tree, renderer, theme, style, layout, cursor, viewport);

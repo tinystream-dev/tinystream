@@ -265,14 +265,7 @@ impl<'a, Message: Clone + 'a> Widget<Message, Theme, Renderer> for Pressable<'a,
         }
         let radius = if self.scaled { self.look.radius(self.radius) } else { self.radius };
         let smoothing = self.smoothing.unwrap_or(self.look.corners().1);
-        draw_under(
-            renderer,
-            &state.painted,
-            Outline { bounds, radius, smoothing },
-            &appearance.paint,
-            &self.look,
-            viewport,
-        );
+        draw_under(renderer, Outline { bounds, radius, smoothing }, &appearance.paint, &self.look, viewport);
         let (layout, tree) = layout.iter(&tree.children).next().expect("content");
         renderer.with_layer(*viewport, |renderer| {
             self.content.draw(

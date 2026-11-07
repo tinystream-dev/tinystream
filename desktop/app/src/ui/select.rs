@@ -216,7 +216,7 @@ impl<T: Clone, Message: Clone> Widget<Message, Theme, Renderer> for Select<'_, T
             ring: state.focused.then_some(self.look.focus),
             ..Paint::NONE
         };
-        draw_under(renderer, &state.painted, shape, &paint, &self.look, viewport);
+        draw_under(renderer, shape, &paint, &self.look, viewport);
         let (child, tree) = layout.iter(&tree.children).next().expect("field");
         renderer.with_layer(*viewport, |renderer| {
             self.content.draw(
