@@ -1,8 +1,8 @@
 # tinystream desktop
 
 The Linux desktop client lives in its own Cargo workspace. It provides the window, navigation
-shell, server connections, sign-in, live API events and the video player. Browsing pages and
-other media players arrive in later parts of [#80](https://github.com/tinystream-dev/tinystream/issues/80).
+shell, server connections, sign-in, live API events, browsing and the video player. Other media
+players, settings and admin screens arrive in later parts of [#80](https://github.com/tinystream-dev/tinystream/issues/80).
 
 From `desktop/`:
 
@@ -18,6 +18,45 @@ The root `rust-toolchain.toml` and `rustfmt.toml` apply here too. On Ubuntu, ins
 `libwayland-dev`, `libxkbcommon-dev`, `libx11-dev` and `libvulkan-dev`, plus a working Vulkan driver.
 Wayland is preferred when available; winit falls back to X11. An optional path argument opens a
 page, for example `cargo run --locked -- '/watch/12?t=90'` to play from 90 seconds.
+
+## Browsing
+
+The browsing routes in `app/src/browsing/` follow the desktop web routes: Home, the search
+palette, Discover, video and book libraries and book series, titles and their seasons,
+Calendar, Requests, Wanted and server Downloads. Music shelves on Home lead into #91's
+routes; clips and book readers remain #93 and #94. Account switching and the shortcuts sheet
+are part of the shell. The current web title route and shared schema have no cast selection;
+the desktop uses the same available title metadata.
+
+Generated operations come from `app/graphql/browsing.graphql` and the shared fragments and
+schema. Shared view models keep the repeated selections consistent across screens. Cached
+pages keep their filters and scroll position on back/forward navigation. Server/profile
+changes discard those caches and reject late replies. Reconnect acknowledgements invalidate
+all cached pages; download events invalidate their related screens without refetching an
+unrelated library. Progress saves also invalidate watched state after the player has closed.
+Download, calendar and request polling fills the gaps between events.
+
+Artwork is requested on entering the scroll viewport, with at most six fetch/decode jobs at
+once, keeps at most 256 decoded pictures, and uses the existing disk cache. Artwork uploads use the FileChooser desktop portal
+behind `Desktop::choose_image`, then the authenticated GraphQL multipart upload protocol.
+Recent title IDs are kept locally per server and account and checked against the server before
+appearing in search. No download sources are supplied by the client.
+
+The existing headless renderer accepts browsing scenes as well as sign-in scenes:
+
+```sh
+cargo run --locked -- --scene home --snapshot /tmp/home.png --size 1440x1000
+cargo run --locked -- --scene title --scroll 650 --snapshot /tmp/episodes.png
+cargo run --locked -- --scene library --pointer 320,240 --right-click --snapshot /tmp/menu.png
+cargo run --locked -- --scene search --key ArrowDown --snapshot /tmp/search.png
+cargo run --locked -- --scene downloads --style glass --custom --reduce-motion --snapshot /tmp/downloads.png
+```
+
+Browsing scenes include `home`, `library`, `title`, `discover`, `calendar`, `requests`,
+`wanted`, `downloads`, `notifications`, `search`, `books`, `series`, `add`, `releases` and
+`series-settings`. They reset application zoom in memory, so the requested logical size is
+reproducible. `--style flat|glass`, `--custom`, `--reduce-motion` and `--scroll` also apply.
+The fixtures are local; they do not connect to a server or perform the actions shown.
 
 ## Rendering and dependencies
 
