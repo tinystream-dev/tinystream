@@ -28,6 +28,7 @@ const SAMPLE: Duration = Duration::from_millis(150);
 pub struct Screen {
     mpv: mpv::Mpv,
     surface: OnceLock<Result<Box<dyn VideoSurface>, String>>,
+    subtitles: Mutex<Option<Arc<crate::player::subtitles::Document>>>,
     #[cfg(test)]
     drawn: std::sync::atomic::AtomicU64,
 }
@@ -43,6 +44,7 @@ impl Screen {
         let screen = Arc::new(Self {
             mpv,
             surface: OnceLock::new(),
+            subtitles: Mutex::new(None),
             #[cfg(test)]
             drawn: std::sync::atomic::AtomicU64::new(0),
         });
@@ -50,6 +52,14 @@ impl Screen {
             screen.surface(device);
         }
         screen
+    }
+
+    pub fn subtitles(&self, document: Option<Arc<crate::player::subtitles::Document>>) {
+        let mut current = self.subtitles.lock().unwrap();
+        *current = document;
+        if let Some(Ok(surface)) = self.surface.get() {
+            surface.subtitles(current.clone());
+        }
     }
 
     #[cfg(test)]
@@ -69,6 +79,7 @@ impl Screen {
         let surface = self.surface.get_or_init(|| {
             let wake = WAKE.get().cloned().unwrap_or_else(|| Arc::new(|| {}));
             platform::Current::video(device, &self.mpv, wake)
+                .inspect(|surface| surface.subtitles(self.subtitles.lock().unwrap().clone()))
                 .inspect_err(|error| tracing::error!("can't show video: {error}"))
         });
         surface.as_ref().ok().map(|surface| &**surface)
@@ -311,7 +322,53 @@ impl Primitive for Picture {
         if !self.ambient {
             pipeline.warm = false;
         }
-        pipeline.prepared = Some(Prepared { picture, ambient });
+        let subtitles = frame.subtitles.as_ref().map(|image| {
+            if pipeline.subtitle.as_ref().is_none_or(|uploaded| !Arc::ptr_eq(&uploaded.image, image)) {
+                let texture = pipeline
+                    .subtitle
+                    .as_ref()
+                    .filter(|uploaded| {
+                        uploaded.texture.width() == image.width && uploaded.texture.height() == image.height
+                    })
+                    .map(|uploaded| uploaded.texture.clone())
+                    .unwrap_or_else(|| {
+                        device.create_texture(&wgpu::TextureDescriptor {
+                            label: Some("tinystream subtitles"),
+                            size: wgpu::Extent3d { width: image.width, height: image.height, depth_or_array_layers: 1 },
+                            mip_level_count: 1,
+                            sample_count: 1,
+                            dimension: wgpu::TextureDimension::D2,
+                            format: wgpu::TextureFormat::Rgba8Unorm,
+                            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                            view_formats: &[],
+                        })
+                    });
+                queue.write_texture(
+                    texture.as_image_copy(),
+                    &image.pixels,
+                    wgpu::TexelCopyBufferLayout {
+                        offset: 0,
+                        bytes_per_row: Some(image.width * 4),
+                        rows_per_image: None,
+                    },
+                    texture.size(),
+                );
+                pipeline.subtitle = Some(Uploaded { image: image.clone(), texture });
+            }
+            let uploaded = pipeline.subtitle.as_ref().unwrap();
+            let rect = Rectangle {
+                x: shown.x + image.x as f32 * grow,
+                y: shown.y + image.y as f32 * grow,
+                width: image.width as f32 * grow,
+                height: image.height as f32 * grow,
+            };
+            queue.write_buffer(&pipeline.params[3], 0, &params(rect, size, 1.0, 0.0));
+            group(&pipeline.params[3], &uploaded.texture.create_view(&Default::default()))
+        });
+        if frame.subtitles.is_none() {
+            pipeline.subtitle = None;
+        }
+        pipeline.prepared = Some(Prepared { picture, ambient, subtitles });
     }
 
     fn render(
@@ -344,6 +401,11 @@ impl Primitive for Picture {
         pass.set_pipeline(&pipeline.video);
         pass.set_bind_group(0, &prepared.picture, &[]);
         pass.draw(0..4, 0..1);
+        if let Some(subtitles) = &prepared.subtitles {
+            pass.set_pipeline(&pipeline.subtitles);
+            pass.set_bind_group(0, subtitles, &[]);
+            pass.draw(0..4, 0..1);
+        }
     }
 }
 
@@ -351,20 +413,28 @@ fn bytes(values: &[f32]) -> Vec<u8> {
     values.iter().flat_map(|v| v.to_ne_bytes()).collect()
 }
 
+struct Uploaded {
+    image: Arc<tinystream_subtitle_renderer::Frame>,
+    texture: wgpu::Texture,
+}
+
 struct Prepared {
     picture: wgpu::BindGroup,
     ambient: Option<wgpu::BindGroup>,
+    subtitles: Option<wgpu::BindGroup>,
 }
 
 pub struct Pipeline {
     layout: wgpu::BindGroupLayout,
     sampler: wgpu::Sampler,
     video: wgpu::RenderPipeline,
+    subtitles: wgpu::RenderPipeline,
+    subtitle: Option<Uploaded>,
     ambient: wgpu::RenderPipeline,
     accumulate: wgpu::RenderPipeline,
     blur: wgpu::RenderPipeline,
     /// The picture's, the ambient light's samples' and the ambient light's parameters.
-    params: [wgpu::Buffer; 3],
+    params: [wgpu::Buffer; 4],
     /// The ambient light as sampled, and blurred.
     light: [wgpu::TextureView; 2],
     /// When the ambient light last took in the picture, and which frame.
@@ -480,6 +550,8 @@ impl primitive::Pipeline for Pipeline {
         });
         Self {
             video: pipeline("video", format, Some(wgpu::BlendState::REPLACE)),
+            subtitles: pipeline("subtitles", format, Some(wgpu::BlendState::ALPHA_BLENDING)),
+            subtitle: None,
             ambient: pipeline("ambient", format, Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING)),
             accumulate: pipeline("accumulate", light, Some(wgpu::BlendState { color: over, alpha: over })),
             blur: pipeline("blur", light, None),
@@ -506,5 +578,115 @@ mod tests {
         let tall = Rectangle { x: 10.0, y: 0.0, width: 1000.0, height: 1000.0 };
         assert_eq!(contain(tall, 2.0), Rectangle { x: 10.0, y: 250.0, width: 1000.0, height: 500.0 });
         assert_eq!(contain(stage, 4.0 / 3.0).width, 1600.0);
+    }
+    #[test]
+    #[ignore = "requires Vulkan/OpenGL external memory; renders native subtitles and reads the composited pixels"]
+    fn subtitle_overlay_matches_shared_renderer_at_fractional_scale() {
+        use primitive::Pipeline as _;
+
+        use crate::player::subtitles::Overlay;
+        use crate::player::subtitles::tests::document;
+        use crate::test_support::texture_pixels;
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+            backends: wgpu::Backends::VULKAN,
+            ..wgpu::InstanceDescriptor::new_without_display_handle()
+        });
+        let adapter = futures::executor::block_on(instance.request_adapter(&Default::default())).unwrap();
+        let (device, queue) = platform::Current::request_device(&adapter, &Default::default()).unwrap();
+        let mpv =
+            mpv::Mpv::new(&[("vo", "libmpv"), ("ao", "null"), ("pause", "yes"), ("sid", "no"), ("keep-open", "yes")])
+                .unwrap();
+        assert!(mpv.get_property::<String>("libass-version").is_err());
+        let screen = Screen::new(mpv.clone());
+        let surface = screen.surface(&device).unwrap();
+        surface.resize(800, 450);
+        let document = document();
+        screen.subtitles(Some(document.clone()));
+        mpv.command(&["loadfile", concat!(env!("CARGO_MANIFEST_DIR"), "/../mpv/tests/data/testsrc.mp4")]).unwrap();
+        let wait = |after, subtitles: bool| {
+            let deadline = Instant::now() + Duration::from_secs(10);
+            loop {
+                assert!(surface.failure().is_none(), "{:?}", surface.failure());
+                if let Some(frame) = surface.frame() {
+                    surface.presented();
+                    if frame.id > after && frame.texture.size().width == 800 && frame.subtitles.is_some() == subtitles {
+                        return frame;
+                    }
+                }
+                assert!(Instant::now() < deadline, "no subtitle/video frame");
+                std::thread::sleep(Duration::from_millis(5));
+            }
+        };
+        let first = wait(0, true);
+        mpv.command(&["seek", "0.3", "absolute+exact"]).unwrap();
+        let mut sought = wait(first.id, true);
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while (mpv.get_property::<f64>("time-pos").unwrap() - 0.3).abs() > 0.05 {
+            sought = wait(sought.id, true);
+            assert!(Instant::now() < deadline);
+        }
+        let time = mpv.get_property::<f64>("time-pos").unwrap();
+        let expected =
+            Overlay::default().render(Some(document.clone()), [800, 450, 320, 180, 0, 0, 0, 0], time).unwrap();
+        assert_eq!(sought.subtitles.as_ref().unwrap().pixels, expected.pixels);
+        mpv.set_property("speed", 2.0).unwrap();
+        assert!(mpv.get_property::<bool>("pause").unwrap());
+
+        let picture =
+            Picture { screen: screen.clone(), aspect: Some(16.0 / 9.0), recede: 0.0, ambient: false, paused: true };
+        let viewport =
+            Viewport::with_physical_size(Size::new(800, 600), renderer::Scale { window: 1.25, application: 1.0 });
+        let bounds = Rectangle { x: 0.0, y: 0.0, width: 640.0, height: 480.0 };
+        let mut pipeline = Pipeline::new(&device, &queue, wgpu::TextureFormat::Rgba8Unorm);
+        let target = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("subtitle composite test"),
+            size: wgpu::Extent3d { width: 800, height: 600, depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        picture.prepare(&mut pipeline, &device, &queue, &bounds, &viewport);
+        let uploaded = pipeline.subtitle.as_ref().unwrap().texture.clone();
+        picture.prepare(&mut pipeline, &device, &queue, &bounds, &viewport);
+        assert_eq!(pipeline.subtitle.as_ref().unwrap().texture, uploaded, "unchanged subtitles uploaded again");
+        let mut encoder = device.create_command_encoder(&Default::default());
+        picture.render(
+            &pipeline,
+            &mut encoder,
+            &target.create_view(&Default::default()),
+            &Rectangle { x: 0, y: 0, width: 800, height: 600 },
+        );
+        queue.submit([encoder.finish()]);
+        let pixels = texture_pixels(&device, &queue, &target);
+        let image = &pipeline.subtitle.as_ref().unwrap().image;
+        let mut checked = 0;
+        for (i, rgba) in image.pixels.as_chunks::<4>().0.iter().enumerate().filter(|(_, rgba)| rgba[3] == 255) {
+            let x = image.x as usize + i % image.width as usize;
+            let y = 75 + image.y as usize + i / image.width as usize;
+            assert_eq!(&pixels[(y * 800 + x) * 4..(y * 800 + x + 1) * 4], rgba);
+            checked += 1;
+        }
+        assert!(checked > 100, "subtitle pixels didn't reach the physical video rect");
+        assert!(pixels[..75 * 800 * 4].iter().all(|value| *value == 0));
+
+        screen.subtitles(None);
+        let cleared = wait(sought.id, false);
+        screen.subtitles(Some(document));
+        let restored = wait(cleared.id, true);
+        assert_eq!(restored.subtitles.unwrap().pixels, expected.pixels);
+        surface.resize(400, 225);
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            if let Some(frame) = surface.frame().filter(|f| f.texture.width() == 400) {
+                assert!(frame.subtitles.is_some());
+                break;
+            }
+            assert!(Instant::now() < deadline, "paused subtitles didn't resize");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        presented();
     }
 }

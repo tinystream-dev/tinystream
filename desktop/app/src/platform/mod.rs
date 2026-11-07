@@ -75,6 +75,9 @@ pub trait VideoSurface: Send + Sync {
     /// Asks for frames `width` by `height` physical pixels from now on.
     fn resize(&self, width: u32, height: u32);
 
+    /// Replaces the text overlay without reloading or seeking the video.
+    fn subtitles(&self, _document: Option<Arc<crate::player::subtitles::Document>>) {}
+
     /// The newest finished frame. It's not drawn into again until a newer one has been taken.
     fn frame(&self) -> Option<VideoFrame>;
 
@@ -90,6 +93,7 @@ pub struct VideoFrame {
     pub texture: wgpu::Texture,
     /// Counts up with each frame mpv renders.
     pub id: u64,
+    pub subtitles: Option<Arc<tinystream_subtitle_renderer::Frame>>,
 }
 
 #[cfg(target_os = "linux")]

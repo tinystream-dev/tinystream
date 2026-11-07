@@ -416,13 +416,13 @@ source = "git+https://github.com/hecrj/cosmic-text.git?rev=6adc2364289fd241daed7
 dependencies = [
  "bitflags",
  "fontdb",
- "harfrust",
+ "harfrust 0.12.0",
  "linebender_resource_handle",
  "log",
  "rangemap",
  "rustc-hash 2.1.3",
  "self_cell",
- "skrifa",
+ "skrifa 0.44.0",
  "smol_str",
  "swash",
  "sys-locale",
@@ -1093,7 +1093,19 @@ checksum = "c03d949a14aa089bbb282f7dd76a498a7f684428e4257202efc119ec010376f9"
 dependencies = [
  "bitflags",
  "bytemuck",
- "read-fonts",
+ "read-fonts 0.41.0",
+ "smallvec",
+]
+
+[[package]]
+name = "harfrust"
+version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "86aa776d6d32b072119e1f1650f4db843ff4382a4aaa6a2c9c4e35703cd377cb"
+dependencies = [
+ "bitflags",
+ "bytemuck",
+ "read-fonts 0.45.0",
  "smallvec",
 ]
 
@@ -2725,6 +2737,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "read-fonts"
+version = "0.45.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8a5b7bed3d16ab428d8fa533640ab805ff50e7ad8a4d00649de1259e70023282"
+dependencies = [
+ "bytemuck",
+ "font-types",
+ "once_cell",
+ "yoke",
+]
+
+[[package]]
 name = "redox_syscall"
 version = "0.5.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2909,6 +2933,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf54715a573b99ac80df0bc206da022bcd442c974952c7b9720069370852e21f"
 
 [[package]]
+name = "rustyass"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8287a4499ebd759ad95cf201800651eb91fb0fea734e0aa7cc5a9ccd8cc22488"
+dependencies = [
+ "harfrust 0.14.0",
+ "rustc-hash 2.1.3",
+ "skrifa 0.48.0",
+ "unicode-bidi",
+]
+
+[[package]]
 name = "ryu"
 version = "1.0.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3078,7 +3114,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "819ab7d62b1d3e72d9d9dea5650bac30424f9111364bb94928dbf5ecad1baa68"
 dependencies = [
  "bytemuck",
- "read-fonts",
+ "read-fonts 0.41.0",
+]
+
+[[package]]
+name = "skrifa"
+version = "0.48.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a5213b4825bac3587046330052d61bfac7bd3bd0d203c758d7c2ef726fcea034"
+dependencies = [
+ "bytemuck",
+ "read-fonts 0.45.0",
 ]
 
 [[package]]
@@ -3214,7 +3260,7 @@ version = "0.2.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6c2499c2d826531388872b2268718aed907a39bd785ab0dcfe57fab26283f92e"
 dependencies = [
- "skrifa",
+ "skrifa 0.44.0",
  "yazi",
  "zeno",
 ]
@@ -3402,6 +3448,7 @@ dependencies = [
  "serde_json",
  "syn 1.0.109",
  "tinystream-squircle",
+ "tinystream-subtitle-renderer",
  "tinystream-theme",
  "tokio",
  "tokio-tungstenite",
@@ -3415,6 +3462,13 @@ dependencies = [
 [[package]]
 name = "tinystream-squircle"
 version = "0.38.0"
+
+[[package]]
+name = "tinystream-subtitle-renderer"
+version = "0.38.0"
+dependencies = [
+ "rustyass",
+]
 
 [[package]]
 name = "tinystream-theme"

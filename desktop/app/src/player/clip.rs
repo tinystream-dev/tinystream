@@ -150,7 +150,11 @@ impl Player {
         if matches!(message, Message::Close) {
             if let Some(editor) = self.clipping.take() {
                 self.audio = editor.audio_before;
+                let subtitle_changed = self.subtitle != editor.subtitle_before;
                 self.subtitle = editor.subtitle_before;
+                if subtitle_changed {
+                    self.load_subtitle(effects);
+                }
                 self.quality = editor.quality;
                 self.play_from(editor.at, true);
                 self.poke();
@@ -177,6 +181,7 @@ impl Player {
             Message::Subtitle(id) => {
                 editor.subtitle = id.clone();
                 self.subtitle = id;
+                self.load_subtitle(effects);
                 self.apply_subtitle();
             },
             Message::In => editor.start = format!("{:.3}", self.time),

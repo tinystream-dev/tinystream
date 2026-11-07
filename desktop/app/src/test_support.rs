@@ -110,3 +110,42 @@ pub async fn http(
 pub fn connection(signed_in: bool) -> Value {
     json!({"data":{"server":{"version":"0.38.0","signInStyle":"PROFILES","setupRequired":false,"email":true},"appearance":{"mode":"SINGLE","style":"LAYERED","mediaTint":false,"light":{"palette":{"tokens":[]}},"dark":{"palette":{"tokens":[]}}},"signInProfiles":[{"key":"opaque-profile","avatar":null}],"viewer": if signed_in { json!({"id":1,"username":"David","avatar":null}) } else { Value::Null }}})
 }
+
+pub fn texture_pixels(
+    device: &iced_wgpu::wgpu::Device,
+    queue: &iced_wgpu::wgpu::Queue,
+    texture: &iced_wgpu::wgpu::Texture,
+) -> Vec<u8> {
+    use iced_wgpu::wgpu;
+    let size = texture.size();
+    let row = (size.width * 4).div_ceil(256) * 256;
+    let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("test readback"),
+        size: (row * size.height) as u64,
+        usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
+    let mut encoder = device.create_command_encoder(&Default::default());
+    encoder.copy_texture_to_buffer(
+        texture.as_image_copy(),
+        wgpu::TexelCopyBufferInfo {
+            buffer: &buffer,
+            layout: wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(row), rows_per_image: None },
+        },
+        size,
+    );
+    queue.submit([encoder.finish()]);
+    let (send, recv) = std::sync::mpsc::channel();
+    buffer.map_async(wgpu::MapMode::Read, .., move |result| send.send(result).unwrap());
+    device
+        .poll(wgpu::PollType::Wait { submission_index: None, timeout: Some(std::time::Duration::from_secs(5)) })
+        .unwrap();
+    recv.recv().unwrap().unwrap();
+    buffer
+        .get_mapped_range(..)
+        .unwrap()
+        .chunks(row as usize)
+        .flat_map(|line| &line[..size.width as usize * 4])
+        .copied()
+        .collect()
+}

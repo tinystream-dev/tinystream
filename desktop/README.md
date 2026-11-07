@@ -109,8 +109,10 @@ overlays, track/quality/speed menus, screenshot feedback and fullscreen controls
 
 An optional `mpv.conf` in the app's config directory can tune picture quality; Settings →
 Advanced shows its path. Playback, input, timing and text-subtitle options remain controlled by
-the app. Bitmap subtitles in the original file use mpv; text subtitle choices are remembered
-for rustyass in #87. P opens a native picture-in-picture window using the same decoder and
+the app. Text subtitles use the shared `subtitles/` rustyass renderer with the same fonts as
+web, timed to the rendered video frame. Bitmap subtitles use mpv during direct play and are
+disabled on transcodes. Track choices are remembered; switching never reloads the video.
+P opens a native picture-in-picture window using the same decoder and
 GPU device; closing it returns to the player. X opens a clip draft on that player, with frame
 stepping, range selection, server rendering and return to the original watch position.
 Screenshot links preserve `/clips?clip=<id>` for #93's full Clips screen. The player exposes

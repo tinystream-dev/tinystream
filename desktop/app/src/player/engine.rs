@@ -20,6 +20,9 @@ const FORCED: &[(&str, &str)] = &[
     ("hwdec", "auto-safe"),
     // rustyass draws text subtitles (#87), and there's no OSD.
     ("sid", "no"),
+    ("secondary-sid", "no"),
+    ("sub-auto", "no"),
+    ("sub-visibility", "yes"),
     ("osd-level", "0"),
     ("input-default-bindings", "no"),
     ("input-builtin-bindings", "no"),
@@ -486,5 +489,82 @@ mod tests {
             Source::Transcode { height: 480, start: 0.0 }.path(base, None, Some("dts")),
             "api/media/12/stream?start=0.000&video=transcode&height=480&audioMode=aac"
         );
+    }
+    #[cfg(target_os = "linux")]
+    #[test]
+    #[ignore = "requires Vulkan/OpenGL external memory; verifies PGS and VobSub without libass"]
+    fn embedded_bitmaps_render_by_stream_index_without_libass() {
+        use iced_wgpu::wgpu;
+
+        use crate::platform::{Current, Desktop};
+        use crate::test_support::texture_pixels;
+        let engine = Engine::local().unwrap();
+        engine.set("ao", "null");
+        engine.set("pause", true);
+        assert!(engine.mpv.get_property::<String>("libass-version").is_err());
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+            backends: wgpu::Backends::VULKAN,
+            ..wgpu::InstanceDescriptor::new_without_display_handle()
+        });
+        let adapter = futures::executor::block_on(instance.request_adapter(&Default::default())).unwrap();
+        let (device, queue) = Current::request_device(&adapter, &Default::default()).unwrap();
+        let surface = Current::video(&device, &engine.mpv, Arc::new(|| {})).unwrap();
+        surface.resize(320, 180);
+        engine
+            .mpv
+            .command(&[
+                "loadfile",
+                concat!(env!("CARGO_MANIFEST_DIR"), "/../mpv/tests/data/bitmap.mkv"),
+                "replace",
+                "-1",
+                "pause=yes,start=0.5",
+            ])
+            .unwrap();
+        let wait = |after| {
+            let deadline = Instant::now() + Duration::from_secs(10);
+            loop {
+                assert!(surface.failure().is_none(), "{:?}", surface.failure());
+                if let Some(frame) = surface.frame() {
+                    surface.presented();
+                    if frame.id > after {
+                        return frame;
+                    }
+                }
+                assert!(Instant::now() < deadline, "bitmap frame didn't arrive");
+                std::thread::sleep(Duration::from_millis(5));
+            }
+        };
+        let mut frame = wait(0);
+        let baseline = texture_pixels(&device, &queue, &frame.texture);
+        for index in [1, 2] {
+            engine.bitmap_subtitle(Some(index));
+            let tracks = engine.mpv.get_property::<Node>("track-list").unwrap();
+            let id = tracks
+                .as_array()
+                .iter()
+                .find(|track| track.get("ff-index").and_then(Node::as_i64) == Some(index))
+                .unwrap()
+                .get("id")
+                .and_then(Node::as_i64)
+                .unwrap();
+            assert_eq!(engine.mpv.get_property::<i64>("sid").unwrap(), id);
+            engine.mpv.command(&["seek", "0.5", "absolute+exact"]).unwrap();
+            let deadline = Instant::now() + Duration::from_secs(10);
+            loop {
+                frame = wait(frame.id);
+                let pixels = texture_pixels(&device, &queue, &frame.texture);
+                let white = (80..100)
+                    .flat_map(|y| (100..200).map(move |x| (y * 320 + x) * 4))
+                    .filter(|&i| pixels[i..i + 3].iter().all(|c| *c > 230))
+                    .count();
+                if white > 1500 {
+                    assert_ne!(pixels, baseline);
+                    break;
+                }
+                assert!(Instant::now() < deadline, "bitmap stream {index} didn't draw its rectangle");
+            }
+            engine.bitmap_subtitle(None);
+            assert_eq!(engine.mpv.get_property::<String>("sid").unwrap(), "no");
+        }
     }
 }

@@ -993,7 +993,7 @@ fn tracks_menu<'a>(player: &'a Player, look: &Look) -> Element<'a, Message> {
             format!("Track {}", &track.id[1.min(track.id.len())..])
         };
         let name = super::tracks::track_name(track.title.as_deref(), track.language.as_deref(), &fallback);
-        let message = super::tracks::usable(track).then(|| Message::Subtitle(Some(track.id.clone())));
+        let message = player.subtitle_usable(track).then(|| Message::Subtitle(Some(track.id.clone())));
         subtitles = subtitles.push(menu_item(
             None,
             inherit(name, type_::S13),

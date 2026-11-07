@@ -14,6 +14,8 @@ pub fn credits<'a, Message: Clone + 'a>(close: Message, look: &Look) -> Element<
     let notices = column![
         text("Geist Variable", type_::S15, look.ink).font(SEMIBOLD),
         text(include_str!("../../assets/Geist-OFL.txt"), type_::XS, look.ink_2),
+        text("Noto Sans", type_::S15, look.ink).font(SEMIBOLD),
+        text(include_str!("../../../../assets/fonts/OFL.txt"), type_::XS, look.ink_2),
         text("Lucide 1.48.0", type_::S15, look.ink).font(SEMIBOLD),
         text(include_str!("../../assets/lucide/LICENSE"), type_::XS, look.ink_2),
     ]

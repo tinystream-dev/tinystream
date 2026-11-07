@@ -19,6 +19,7 @@ mod clip;
 mod engine;
 pub mod local;
 pub mod stream;
+pub mod subtitles;
 mod timeline;
 mod tracks;
 mod view;
@@ -117,6 +118,8 @@ pub enum Message {
     Mute,
     Audio(i64),
     Subtitle(Option<String>),
+    CycleSubtitles,
+    SubtitleLoaded(u64, Result<Arc<subtitles::Document>, String>),
     Quality(Quality),
     Rate(f64),
     Menu(Option<Menu>),
@@ -182,6 +185,7 @@ pub struct Player {
     pub quality: Quality,
     pub audio: Option<i64>,
     pub subtitle: Option<String>,
+    subtitle_loader: subtitles::Loader,
     /// mpv's audio tracks as (its id, FFmpeg's stream index).
     tracks: Vec<(i64, i64)>,
     pub playing: bool,
@@ -280,6 +284,7 @@ impl Player {
             quality: Quality::Auto,
             audio: None,
             subtitle: None,
+            subtitle_loader: subtitles::Loader::default(),
             tracks: Vec::new(),
             playing: false,
             time: 0.0,
@@ -487,7 +492,20 @@ impl Player {
                 for path in wanted {
                     self.picture(path, effects);
                 }
+                self.load_subtitle(effects);
                 self.play_from(start, false);
+            },
+            Message::SubtitleLoaded(revision, result) => {
+                if revision == self.subtitle_loader.revision() {
+                    match result {
+                        Ok(document) => {
+                            if let Some(screen) = &self.screen {
+                                screen.subtitles(Some(document));
+                            }
+                        },
+                        Err(error) => self.flash(HudKind::Notice(format!("Couldn't load subtitles: {error}"))),
+                    }
+                }
             },
             Message::Info(Err(error)) => self.info_error = Some(error.message),
             Message::Mpv(update) => return self.mpv(update, effects),
@@ -547,9 +565,10 @@ impl Player {
                 self.menu = None;
                 self.choose_audio(index);
             },
+            Message::CycleSubtitles => self.cycle_subtitles(effects),
             Message::Subtitle(id) => {
                 self.menu = None;
-                self.choose_subtitle(id);
+                self.choose_subtitle(id, effects);
             },
             Message::Quality(quality) => {
                 self.menu = None;
@@ -948,15 +967,39 @@ impl Player {
         }
     }
 
-    fn choose_subtitle(&mut self, id: Option<String>) {
+    fn choose_subtitle(&mut self, id: Option<String>, effects: &mut Vec<Effect>) {
         let Some(pb) = &self.pb else { return };
         let track = id.as_ref().and_then(|id| pb.media.subtitles.iter().find(|s| &s.id == id));
-        if id.is_some() && !track.is_some_and(tracks::usable) {
+        if id.is_some() && !track.is_some_and(|s| self.subtitle_usable(s)) {
             return;
         }
         tracks::remember_subtitle(pb, track, &mut self.prefs);
         self.subtitle = id;
+        self.load_subtitle(effects);
         self.apply_subtitle();
+    }
+
+    fn load_subtitle(&mut self, effects: &mut Vec<Effect>) {
+        self.subtitle_loader.cancel();
+        if let Some(screen) = &self.screen {
+            screen.subtitles(None);
+        }
+        let Some(pb) = &self.pb else { return };
+        let Some(track) = pb.media.subtitles.iter().find(|s| Some(&s.id) == self.subtitle.as_ref()) else { return };
+        if !track.supported || tracks::bitmap(track) {
+            return;
+        }
+        let future = self.subtitle_loader.load(
+            self.api.clone(),
+            self.base.clone(),
+            track.id.clone(),
+            pb.media.fonts.iter().map(|font| font.index).collect(),
+        );
+        self.request(effects, future);
+    }
+
+    fn subtitle_usable(&self, track: &playback::PlaybackMediaSubtitles) -> bool {
+        track.supported || self.source == Source::Direct && tracks::bitmap(track)
     }
 
     fn apply_subtitle(&self) {
@@ -974,14 +1017,15 @@ impl Player {
     }
 
     /// The next usable subtitle track, then off (`c`).
-    fn cycle_subtitles(&mut self) {
+    fn cycle_subtitles(&mut self, effects: &mut Vec<Effect>) {
         let Some(pb) = &self.pb else { return };
-        let usable: Vec<&String> = pb.media.subtitles.iter().filter(|s| tracks::usable(s)).map(|s| &s.id).collect();
+        let usable: Vec<&String> =
+            pb.media.subtitles.iter().filter(|s| self.subtitle_usable(s)).map(|s| &s.id).collect();
         let next = match usable.iter().position(|id| Some(*id) == self.subtitle.as_ref()) {
             Some(i) => usable.get(i + 1).map(|id| (*id).clone()),
             None => usable.first().map(|id| (*id).clone()),
         };
-        self.choose_subtitle(next);
+        self.choose_subtitle(next, effects);
     }
 
     /// Saves where playback is, so pages behind the player and other devices pick it up.
@@ -1105,10 +1149,7 @@ impl Player {
                 Message::Go(pb.and_then(|pb| pb.next.as_ref()).map(|next| next.id)?)
             },
             (Key::Character("s"), _) if self.skippable().is_some() => Message::Skip,
-            (Key::Character("c" | "C"), _) if pb.is_some() => {
-                self.cycle_subtitles();
-                return Some(Message::Poke);
-            },
+            (Key::Character("c" | "C"), _) if pb.is_some() => Message::CycleSubtitles,
             (Key::Named(key::Named::Escape), _) if self.pip => Message::PictureInPicture,
             (Key::Named(key::Named::Escape), _) if fullscreen => Message::Fullscreen,
             (Key::Named(key::Named::Escape), _) => return Some(Message::Back),
@@ -1399,5 +1440,43 @@ pub(crate) mod tests {
         assert_eq!(number(1.0), "1");
         assert_eq!(number(1.25), "1.25");
         assert_eq!(number(0.5), "0.5");
+    }
+    #[test]
+    fn subtitle_choices_respect_direct_play_and_ignore_stale_loads() {
+        let mut player = player();
+        let track = |id: &str, codec: &str, supported| playback::PlaybackMediaSubtitles {
+            id: id.into(),
+            codec: codec.into(),
+            language: Some("eng".into()),
+            title: None,
+            default: true,
+            forced: false,
+            supported,
+        };
+        player.pb.as_mut().unwrap().media.subtitles = vec![
+            track("s1", "hdmv_pgs_subtitle", false),
+            track("s2", "dvd_subtitle", false),
+            track("s3", "ass", true),
+            track("s4", "unknown", false),
+        ];
+        let mut effects = Vec::new();
+        player.choose_subtitle(Some("s1".into()), &mut effects);
+        assert_eq!(player.subtitle.as_deref(), Some("s1"));
+        assert!(effects.is_empty());
+        let remembered = player.prefs.get("subtitleTrack").unwrap().to_owned();
+        player.source = Source::Transcode { height: 720, start: 0.0 };
+        assert!(!player.subtitle_usable(&player.pb.as_ref().unwrap().media.subtitles[0]));
+        player.choose_subtitle(Some("s2".into()), &mut effects);
+        assert_eq!(player.subtitle.as_deref(), Some("s1"));
+        assert_eq!(player.prefs.get("subtitleTrack"), Some(remembered.as_str()));
+        player.cycle_subtitles(&mut effects);
+        assert_eq!(player.subtitle.as_deref(), Some("s3"));
+        assert_eq!(effects.len(), 1);
+        let revision = player.subtitle_loader.revision();
+        player.choose_subtitle(None, &mut effects);
+        player.update(Message::SubtitleLoaded(revision, Err("obsolete failure".into())), &mut effects);
+        assert!(player.hud.is_none());
+        assert!(player.subtitle.is_none());
+        assert_eq!(player.prefs.get("subtitles.7"), Some("off"));
     }
 }

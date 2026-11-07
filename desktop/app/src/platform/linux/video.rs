@@ -19,6 +19,7 @@ use ash::{khr, vk};
 use wgpu::hal::api::Vulkan;
 
 use crate::platform::{VideoFrame, VideoSurface};
+use crate::player::subtitles::{Document, Overlay};
 
 /// How many frames go round: the one on screen, the newest finished one and the one being drawn.
 const RING: usize = 3;
@@ -37,6 +38,9 @@ struct Shared {
 struct State {
     /// The ring's textures, all of `size`.
     textures: Vec<wgpu::Texture>,
+    overlays: Vec<Option<Arc<tinystream_subtitle_renderer::Frame>>>,
+    document: Option<Arc<Document>>,
+    subtitle_revision: u64,
     size: (u32, u32),
     wanted: (u32, u32),
     /// The newest finished frame and the one the UI took last, as indices into `textures`.
@@ -96,6 +100,13 @@ impl VideoSurface for Surface {
         }
     }
 
+    fn subtitles(&self, document: Option<Arc<Document>>) {
+        let mut state = self.shared.state.lock().unwrap();
+        state.document = document;
+        state.subtitle_revision += 1;
+        self.shared.changed.notify_all();
+    }
+
     fn frame(&self) -> Option<VideoFrame> {
         let mut state = self.shared.state.lock().unwrap();
         if let Some(ready) = state.ready.take() {
@@ -105,7 +116,7 @@ impl VideoSurface for Surface {
             self.shared.changed.notify_all();
         }
         let texture = state.textures.get(state.shown?)?.clone();
-        Some(VideoFrame { texture, id: state.shown_id })
+        Some(VideoFrame { texture, id: state.shown_id, subtitles: state.overlays.get(state.shown?).cloned().flatten() })
     }
 
     fn presented(&self) {
@@ -192,8 +203,10 @@ fn render(
 
     let mut slots: Vec<Slot> = Vec::new();
     let mut redraw = false;
+    let mut overlay = Overlay::default();
+    let mut subtitle_revision = 0;
     loop {
-        let (wanted, swaps, frame, target) = {
+        let (wanted, swaps, frame, target, document) = {
             let mut state = shared.state.lock().unwrap();
             loop {
                 if state.quit {
@@ -205,13 +218,23 @@ fn render(
                     return Ok(());
                 }
                 let free = (0..slots.len()).find(|i| state.ready != Some(*i) && state.shown != Some(*i));
+                if state.subtitle_revision != subtitle_revision {
+                    subtitle_revision = state.subtitle_revision;
+                    redraw = true;
+                }
                 if state.swaps > 0 || state.wanted != state.size || ((state.update || redraw) && free.is_some()) {
                     break;
                 }
                 state = shared.changed.wait(state).unwrap();
             }
             let free = (0..slots.len()).find(|i| state.ready != Some(*i) && state.shown != Some(*i));
-            (state.wanted, std::mem::take(&mut state.swaps), std::mem::take(&mut state.update), free)
+            (
+                state.wanted,
+                std::mem::take(&mut state.swaps),
+                std::mem::take(&mut state.update),
+                free,
+                state.document.clone(),
+            )
         };
 
         for _ in 0..swaps {
@@ -232,6 +255,7 @@ fn render(
                 }
             }
             let mut state = shared.state.lock().unwrap();
+            state.overlays = vec![None; textures.len()];
             state.textures = textures;
             state.size = wanted;
             state.ready = None;
@@ -263,7 +287,39 @@ fn render(
             .map_err(|error| error.to_string())?;
         unsafe { (gl.finish)() };
 
+        let subtitles = if document.is_none() {
+            overlay.clear();
+            None
+        } else {
+            mpv.get_property::<f64>("time-pos").ok().filter(|time| time.is_finite()).and_then(|time| {
+                let params = mpv.get_property::<mpv::Node>("video-params").ok();
+                let dimensions = mpv.get_property::<mpv::Node>("osd-dimensions").ok();
+                let value = |node: &Option<mpv::Node>, key: &str, fallback: i32| {
+                    node.as_ref()
+                        .and_then(|node| node.get(key))
+                        .and_then(mpv::Node::as_i64)
+                        .and_then(|v| i32::try_from(v).ok())
+                        .unwrap_or(fallback)
+                };
+                let (width, height) = (slot.width as i32, slot.height as i32);
+                overlay.render(
+                    document,
+                    [
+                        width,
+                        height,
+                        value(&params, "w", width),
+                        value(&params, "h", height),
+                        value(&dimensions, "mt", 0),
+                        value(&dimensions, "mb", 0),
+                        value(&dimensions, "ml", 0),
+                        value(&dimensions, "mr", 0),
+                    ],
+                    time,
+                )
+            })
+        };
         let mut state = shared.state.lock().unwrap();
+        state.overlays[target] = subtitles;
         state.ready = Some(target);
         state.frames += 1;
         if state.frames == 1 {

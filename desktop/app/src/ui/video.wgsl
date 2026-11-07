@@ -117,3 +117,9 @@ fn ambient(in: Out) -> @location(0) vec4<f32> {
     // saturate(1.5), at 55% opacity.
     return vec4<f32>(decode(saturate_by(color, 1.5)) * params.opacity, params.opacity);
 }
+
+@fragment
+fn subtitles(in: Out) -> @location(0) vec4<f32> {
+    let color = textureSampleLevel(picture, filtering, in.uv, 0.0);
+    return vec4<f32>(decode(color.rgb), color.a);
+}
