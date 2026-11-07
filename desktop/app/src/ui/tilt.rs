@@ -181,6 +181,9 @@ impl<Message> Widget<Message, Theme, Renderer> for Art {
             width: card.width + reach * 2.0,
             height: card.height + reach * 2.0,
         };
+        if room.intersection(viewport).is_none() {
+            return;
+        }
         renderer.with_layer(*viewport, |renderer| renderer.draw_primitive(room, tilted));
     }
 
@@ -245,6 +248,7 @@ impl Primitive for Tilted {
         let transform = bounds.width / (self.card.width + margin * 2.0);
         let scale = viewport.scale_factor();
         let frame = viewport.physical_size();
+        pipeline.size = frame;
         let card = Rectangle {
             x: (bounds.x + margin * transform) * scale,
             y: (bounds.y + margin * transform) * scale,
@@ -292,6 +296,21 @@ impl Primitive for Tilted {
         params.extend(rgba(self.glow));
         params.extend([self.edge[0], self.edge[1], self.edge[2], 0.0]);
 
+        let key = [card.width, card.height, self.radius * scale, self.smoothing].map(f32::to_bits);
+        let frame = pipeline.frame;
+        let shape = pipeline.meshes.entry(key).or_insert_with(|| {
+            let data = bytes(&mesh(card.size(), self.radius * scale, self.smoothing));
+            let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("tinystream tilt shape"),
+                size: data.len() as u64,
+                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+            queue.write_buffer(&buffer, 0, &data);
+            Shape { buffer, count: (data.len() / 16) as u32, used: frame }
+        });
+        shape.used = frame;
+
         let index = pipeline.prepared.len();
         pipeline.prepared.insert(self.id, index);
         if pipeline.slots.len() <= index {
@@ -299,56 +318,32 @@ impl Primitive for Tilted {
         }
         let slot = &mut pipeline.slots[index];
         queue.write_buffer(&slot.params, 0, &bytes(&params));
-        let mesh = mesh(card.size(), self.radius * scale, self.smoothing);
-        let data = bytes(&mesh);
-        if slot.vertices.size() < data.len() as u64 {
-            slot.vertices = device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("tinystream tilt shape"),
-                size: (data.len() as u64).next_power_of_two(),
-                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: false,
+        slot.shape = key;
+        if slot.group.as_ref().is_none_or(|(bound, _)| *bound != texture) {
+            let group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("tinystream tilt"),
+                layout: &pipeline.layout,
+                entries: &[
+                    wgpu::BindGroupEntry { binding: 0, resource: slot.params.as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&texture) },
+                    wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::Sampler(&pipeline.sampler) },
+                ],
             });
+            slot.group = Some((texture, group));
         }
-        queue.write_buffer(&slot.vertices, 0, &data);
-        slot.count = (mesh.len() / 4) as u32;
-        slot.group = Some(device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("tinystream tilt"),
-            layout: &pipeline.layout,
-            entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: slot.params.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&texture) },
-                wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::Sampler(&pipeline.sampler) },
-            ],
-        }));
     }
 
-    fn render(
-        &self,
-        pipeline: &Pipeline,
-        encoder: &mut wgpu::CommandEncoder,
-        target: &wgpu::TextureView,
-        clip_bounds: &Rectangle<u32>,
-    ) {
-        let Some(slot) = pipeline.prepared.get(&self.id).and_then(|&i| pipeline.slots.get(i)) else { return };
-        let Some(group) = &slot.group else { return };
-        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-            label: Some("tinystream tilt"),
-            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view: target,
-                depth_slice: None,
-                resolve_target: None,
-                ops: wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Store },
-            })],
-            depth_stencil_attachment: None,
-            timestamp_writes: None,
-            occlusion_query_set: None,
-            multiview_mask: None,
-        });
-        pass.set_scissor_rect(clip_bounds.x, clip_bounds.y, clip_bounds.width, clip_bounds.height);
-        pass.set_pipeline(&pipeline.pipeline);
-        pass.set_bind_group(0, group, &[]);
-        pass.set_vertex_buffer(0, slot.vertices.slice(..));
-        pass.draw(0..slot.count, 0..1);
+    /// Drawn in iced's pass, without breaking it.
+    fn draw(&self, pipeline: &Pipeline, render_pass: &mut wgpu::RenderPass<'_>) -> bool {
+        let Some(slot) = pipeline.prepared.get(&self.id).and_then(|&i| pipeline.slots.get(i)) else { return true };
+        let (Some((_, group)), Some(shape)) = (&slot.group, pipeline.meshes.get(&slot.shape)) else { return true };
+        // iced fits the viewport to the primitive, but the card is placed in the whole frame.
+        render_pass.set_viewport(0.0, 0.0, pipeline.size.width as f32, pipeline.size.height as f32, 0.0, 1.0);
+        render_pass.set_pipeline(&pipeline.pipeline);
+        render_pass.set_bind_group(0, group, &[]);
+        render_pass.set_vertex_buffer(0, shape.buffer.slice(..));
+        render_pass.draw(0..shape.count, 0..1);
+        true
     }
 }
 
@@ -430,29 +425,29 @@ fn upload(device: &wgpu::Device, queue: &wgpu::Queue, (width, height, pixels): (
     Uploaded { view: texture.create_view(&Default::default()), size: (width, height), used: 0 }
 }
 
+/// A card's outline, kept while cards of its size are drawn.
+struct Shape {
+    buffer: wgpu::Buffer,
+    count: u32,
+    used: u64,
+}
+
 struct Slot {
     params: wgpu::Buffer,
-    vertices: wgpu::Buffer,
-    count: u32,
-    group: Option<wgpu::BindGroup>,
+    shape: [u32; 4],
+    /// The texture it's bound to, and the bind group, kept while it's the same.
+    group: Option<(wgpu::TextureView, wgpu::BindGroup)>,
 }
 
 impl Slot {
     fn new(device: &wgpu::Device) -> Self {
-        let buffer = |size, usage| {
-            device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("tinystream tilt"),
-                size,
-                usage: usage | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            })
-        };
-        Self {
-            params: buffer(160, wgpu::BufferUsages::UNIFORM),
-            vertices: buffer(16384, wgpu::BufferUsages::VERTEX),
-            count: 0,
-            group: None,
-        }
+        let params = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("tinystream tilt"),
+            size: 160,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        Self { params, shape: [0; 4], group: None }
     }
 }
 
@@ -462,9 +457,12 @@ pub struct Pipeline {
     pipeline: wgpu::RenderPipeline,
     blank: wgpu::TextureView,
     pictures: HashMap<image::Id, Uploaded>,
+    meshes: HashMap<[u32; 4], Shape>,
     slots: Vec<Slot>,
     prepared: HashMap<u64, usize>,
     frame: u64,
+    /// The frame's size in pixels.
+    size: Size<u32>,
 }
 
 impl primitive::Pipeline for Pipeline {
@@ -552,9 +550,11 @@ impl primitive::Pipeline for Pipeline {
             pipeline,
             blank,
             pictures: HashMap::new(),
+            meshes: HashMap::new(),
             slots: Vec::new(),
             prepared: HashMap::new(),
             frame: 0,
+            size: Size::new(0, 0),
         }
     }
 
@@ -564,6 +564,7 @@ impl primitive::Pipeline for Pipeline {
         // Pictures off screen for a while (about ten seconds of frames) go.
         let frame = self.frame;
         self.pictures.retain(|_, picture| frame.saturating_sub(picture.used) < 600);
+        self.meshes.retain(|_, shape| frame.saturating_sub(shape.used) < 600);
         self.frame += 1;
     }
 }
