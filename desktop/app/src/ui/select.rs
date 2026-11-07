@@ -15,7 +15,7 @@ use iced_widget::{Column, Element, Renderer, Widget as _, container, row, scroll
 use super::controls::panel;
 use super::icon::{Icon, icon};
 use super::pressable::{Appearance, Status, pressable};
-use super::squircle::{Outline, Paint, Painted, draw_over, draw_under};
+use super::squircle::{Outline, Paint, draw_over, draw_under};
 use super::text::{self as type_, inherit};
 use super::theme::Look;
 
@@ -56,7 +56,6 @@ struct State {
     focused: bool,
     open: bool,
     active: usize,
-    painted: Painted,
     typed: String,
     typed_at: Option<Instant>,
 }
@@ -229,7 +228,7 @@ impl<T: Clone, Message: Clone> Widget<Message, Theme, Renderer> for Select<'_, T
                 viewport,
             );
         });
-        draw_over(renderer, &state.painted, shape, &paint, &self.look, viewport);
+        draw_over(renderer, shape, &paint, &self.look, viewport);
     }
 
     fn mouse_interaction(

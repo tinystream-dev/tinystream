@@ -6,14 +6,13 @@
 use std::cell::RefCell;
 
 use iced_core::layout::{self, Layout};
-use iced_core::widget::{Operation, Tree, tree};
+use iced_core::widget::{Operation, Tree};
 use iced_core::{
     Border, Color, Event, Length, Padding, Point, Rectangle, Renderer as _, Shadow, Size, Theme, Vector, Widget, mouse,
     overlay, renderer,
 };
-use iced_wgpu::graphics::geometry::Renderer as _;
 use iced_wgpu::primitive::Renderer as _;
-use iced_widget::canvas::{self, Cache, Frame, LineDash, Path, Stroke};
+use iced_widget::canvas::{self, Cache, Frame, Path};
 use iced_widget::{Element, Renderer};
 
 use super::backdrop::{self, Backdrop};
@@ -82,16 +81,6 @@ impl Keyed {
     }
 }
 
-/// A squircle's tessellated edge.
-#[derive(Default)]
-pub struct Painted {
-    edge: Keyed,
-}
-
-fn rgba(c: Color) -> [f32; 4] {
-    [c.r, c.g, c.b, c.a]
-}
-
 #[derive(Clone, Copy)]
 pub struct Outline {
     pub bounds: Rectangle,
@@ -154,71 +143,27 @@ fn lift(renderer: &mut Renderer, bounds: Rectangle, radius: f32, look: &Look, tu
 }
 
 /// Draws what's over a squircle's content: the lit (or dashed) edge, and the focus ring.
-pub fn draw_over(
-    renderer: &mut Renderer,
-    painted: &Painted,
-    outline: Outline,
-    paint: &Paint,
-    look: &Look,
-    viewport: &Rectangle,
-) {
+pub fn draw_over(renderer: &mut Renderer, outline: Outline, paint: &Paint, look: &Look, viewport: &Rectangle) {
     let Outline { bounds, radius, smoothing } = outline;
     if !(paint.edge || paint.dashed || paint.ring.is_some()) || bounds.width <= 1.0 || bounds.height <= 1.0 {
         return;
     }
-    // Room around the box for the ring, which sits outside it.
-    let pad = if paint.ring.is_some() { 4.0 } else { 0.0 };
-    let mut key =
-        vec![bounds.width, bounds.height, radius, smoothing, paint.edge as u8 as f32, paint.dashed as u8 as f32];
-    key.extend(rgba(paint.ring.unwrap_or(Color::TRANSPARENT)));
-    key.extend(rgba(look.glow));
-    key.extend(rgba(look.line_strong));
-    key.extend(look.edge());
-    let outer = Size::new(bounds.width + pad * 2.0, bounds.height + pad * 2.0);
-    let geometry = painted.edge.draw(renderer, outer, &key, |frame| {
-        // Half a pixel in, so the line falls inside the box like the web's clipped stroke.
-        let inside = path(
-            Point::new(pad + 0.5, pad + 0.5),
-            Size::new(bounds.width - 1.0, bounds.height - 1.0),
-            (radius - 0.5).max(0.0),
-            smoothing,
-        );
-        if paint.dashed {
-            frame.stroke(
-                &inside,
-                Stroke {
-                    line_dash: LineDash { segments: &[4.0, 4.0], offset: 0 },
-                    ..Stroke::default().with_width(1.0).with_color(look.line_strong)
-                },
-            );
-        } else if paint.edge {
-            let [top, middle, bottom] = look.edge();
-            let glow = look.glow;
-            let gradient =
-                iced_wgpu::graphics::gradient::Linear::new(Point::new(0.0, pad), Point::new(0.0, pad + bounds.height))
-                    .add_stop(0.0, glow.scale_alpha(top))
-                    .add_stop(0.35, glow.scale_alpha(middle))
-                    .add_stop(1.0, glow.scale_alpha(bottom));
-            frame.stroke(
-                &inside,
-                Stroke { style: canvas::Style::Gradient(gradient.into()), width: 1.0, ..Stroke::default() },
-            );
-        }
-        if let Some(ring) = paint.ring {
-            // `outline: 2px solid var(--color-focus)`, two pixels out.
-            let around = path(
-                Point::new(pad - 3.0, pad - 3.0),
-                Size::new(bounds.width + 6.0, bounds.height + 6.0),
-                radius + 3.0,
-                smoothing,
-            );
-            frame.stroke(&around, Stroke::default().with_width(2.0).with_color(ring));
-        }
-    });
     renderer.with_layer(*viewport, |renderer| {
-        renderer.with_translation(Vector::new(bounds.x - pad, bounds.y - pad), |renderer| {
-            renderer.draw_geometry(geometry);
-        });
+        let inside =
+            Rectangle { x: bounds.x + 0.5, y: bounds.y + 0.5, width: bounds.width - 1.0, height: bounds.height - 1.0 };
+        if paint.edge || paint.dashed {
+            let (color, gradient) = if paint.dashed { (look.line_strong, [1.0; 3]) } else { (look.glow, look.edge()) };
+            renderer.draw_primitive(
+                Fill::bounds(inside),
+                Fill::new(color, (radius - 0.5).max(0.0), smoothing).outline(1.0, gradient, paint.dashed),
+            );
+        }
+        if let Some(color) = paint.ring {
+            renderer.draw_primitive(
+                bounds.expand(5.0),
+                Fill::new(color, radius + 3.0, smoothing).outline(2.0, [1.0; 3], false),
+            );
+        }
     });
 }
 
@@ -312,14 +257,6 @@ impl<'a, Message> Squircle<'a, Message> {
 impl<Message> iced_core::widget::Meta for Squircle<'_, Message> {}
 
 impl<Message> Widget<Message, Theme, Renderer> for Squircle<'_, Message> {
-    fn tag(&self) -> tree::Tag {
-        tree::Tag::of::<Painted>()
-    }
-
-    fn state(&self) -> tree::State {
-        tree::State::new(Painted::default())
-    }
-
     fn diff(&mut self, tree: &mut Tree) {
         tree.diff_children(std::slice::from_mut(&mut self.content));
         let size = self.content.size();
@@ -349,7 +286,6 @@ impl<Message> Widget<Message, Theme, Renderer> for Squircle<'_, Message> {
         viewport: &Rectangle,
     ) {
         let bounds = layout.bounds();
-        let painted = tree.state.downcast_ref::<Painted>();
         let radius = if self.exact { self.radius } else { self.look.radius(self.radius) };
         let smoothing = self.smoothing.unwrap_or(self.look.corners().1);
         draw_under(renderer, Outline { bounds, radius, smoothing }, &self.paint, &self.look, viewport);
@@ -357,7 +293,7 @@ impl<Message> Widget<Message, Theme, Renderer> for Squircle<'_, Message> {
         renderer.with_layer(*viewport, |renderer| {
             self.content.draw(tree, renderer, theme, style, layout, cursor, viewport);
         });
-        draw_over(renderer, painted, Outline { bounds, radius, smoothing }, &self.paint, &self.look, viewport);
+        draw_over(renderer, Outline { bounds, radius, smoothing }, &self.paint, &self.look, viewport);
     }
 
     fn operate(

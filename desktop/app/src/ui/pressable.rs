@@ -13,7 +13,7 @@ use iced_core::{
 };
 use iced_widget::{Element, Renderer};
 
-use super::squircle::{Outline, Paint, Painted, draw_over, draw_under};
+use super::squircle::{Outline, Paint, draw_over, draw_under};
 use super::theme::Look;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -112,7 +112,6 @@ impl<'a, Message> Pressable<'a, Message> {
 struct State {
     pressed: bool,
     focused: bool,
-    painted: Painted,
 }
 
 impl Focusable for State {
@@ -278,14 +277,7 @@ impl<'a, Message: Clone + 'a> Widget<Message, Theme, Renderer> for Pressable<'a,
                 viewport,
             );
         });
-        draw_over(
-            renderer,
-            &state.painted,
-            Outline { bounds, radius, smoothing },
-            &appearance.paint,
-            &self.look,
-            viewport,
-        );
+        draw_over(renderer, Outline { bounds, radius, smoothing }, &appearance.paint, &self.look, viewport);
     }
 
     fn mouse_interaction(
