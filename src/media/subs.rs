@@ -175,7 +175,11 @@ fn extract_all(video: &Path, cache_dir: &Path) -> anyhow::Result<()> {
             out.push('\n');
         }
 
-        std::fs::write(cache_path(video, index, cache_dir), out)?;
+        // Readers mustn't see a track half written, or the browser keeps it for an hour.
+        let file = cache_path(video, index, cache_dir);
+        let tmp = file.with_extension("part");
+        std::fs::write(&tmp, out)?;
+        std::fs::rename(&tmp, &file)?;
     }
 
     tracing::debug!("extracted subtitles from {} in {:.1?}", video.display(), started.elapsed());
