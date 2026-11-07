@@ -73,10 +73,13 @@ impl Subtitles {
         self.renderer.fonts_mut().add(data);
     }
 
-    /// Reads a script, with the fonts in its `[Fonts]` section, to render from now on.
+    /// Reads a script, with the fonts in its `[Fonts]` section, to render from now on; false when
+    /// it isn't one. (Not an error, as the worker takes any error to mean it's broken.)
     #[wasm_bindgen(js_name = setTrack)]
-    pub fn set_track(&mut self, script: &[u8]) -> Result<(), JsError> {
-        let track = Track::parse(script).ok_or_else(|| JsError::new("not an ASS or SSA script"))?;
+    pub fn set_track(&mut self, script: &[u8]) -> bool {
+        let Some(track) = Track::parse(script) else {
+            return false;
+        };
         let mut fonts = self.fonts.clone();
 
         for (_, data) in track.fonts() {
@@ -86,7 +89,7 @@ impl Subtitles {
         self.renderer = Renderer::new(fonts);
         self.renderer.set_frame(self.frame, self.storage, self.margins);
         self.track = Some(track);
-        Ok(())
+        true
     }
 
     #[wasm_bindgen(js_name = freeTrack)]
@@ -216,7 +219,7 @@ mod tests {
 
     fn subtitles() -> Subtitles {
         let mut s = Subtitles::new(include_bytes!("../../../assets/fonts/NotoSans-Regular.ttf"));
-        s.set_track(SCRIPT).unwrap();
+        assert!(s.set_track(SCRIPT));
         s.resize(640, 360, 640, 360, 0, 0, 0, 0);
         s
     }
