@@ -55,7 +55,7 @@ jobs:
               - '!bunfig.toml'
               - '!.github/actions/android/**'
             web:
-              - '{web,packages}/**'
+              - '{web,packages,subtitles}/**'
               - '{package.json,bun.lock,bunfig.toml}'
               - '.github/workflows/ci.yml'
             mobile:
@@ -67,7 +67,8 @@ jobs:
               - 'desktop/**'
               - 'native/**'
               - '.github/actions/native-deps/**'
-              - '{theme,squircle}/**'
+              - '{theme,squircle,subtitles}/**'
+              - 'assets/fonts/**'
               - 'packages/shared/{schema.graphql,fragments.graphql,src/logo.ts}'
               - '{rust-toolchain.toml,rustfmt.toml}'
               - '.github/actions/rust/**'
@@ -107,7 +108,7 @@ jobs:
       # The workspace is installed from the root; web only needs its own packages.
       - run: bun install --frozen-lockfile --filter tinystream-web --filter @tinystream/shared
         working-directory: .
-      - run: cargo test -p tinystream-subtitles --locked
+      - run: cargo test -p tinystream-subtitle-renderer -p tinystream-subtitles --locked
         working-directory: .
       - run: bun run typecheck
       - run: bun run build

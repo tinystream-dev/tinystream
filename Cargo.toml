@@ -27,7 +27,7 @@ exclude = [
 ]
 
 [workspace]
-members = ["ffmpeg-sys", "libtorrent-sys", "native/*", "decoder/core", "web/decoder", "web/subtitles", "theme", "squircle"]
+members = ["ffmpeg-sys", "libtorrent-sys", "native/*", "decoder/core", "web/decoder", "web/subtitles", "subtitles", "theme", "squircle"]
 # The apps' crates are workspaces of their own (mobile/Cargo.toml, desktop/Cargo.toml), so none
 # rebuilds another. The native libraries only the desktop app uses stay out too, so building the
 # whole workspace doesn't build them.

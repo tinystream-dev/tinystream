@@ -4089,10 +4089,17 @@ name = "tinystream-squircle"
 version = "0.38.0"
 
 [[package]]
-name = "tinystream-subtitles"
+name = "tinystream-subtitle-renderer"
 version = "0.38.0"
 dependencies = [
  "rustyass",
+]
+
+[[package]]
+name = "tinystream-subtitles"
+version = "0.38.0"
+dependencies = [
+ "tinystream-subtitle-renderer",
  "wasm-bindgen",
 ]
 
