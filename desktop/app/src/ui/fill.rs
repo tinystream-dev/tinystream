@@ -145,14 +145,13 @@ impl Primitive for Fill {
 /// The squircle as triangles (x, y, coverage) in the primitive's pixels, `inset` in from its
 /// corner: a fan, and a one-pixel fringe across the outline fading out for antialiasing.
 fn mesh(size: Size, radius: f32, smoothing: f32, inset: f32) -> Vec<f32> {
-    let points =
-        tinystream_squircle::polygon(size.width as f64, size.height as f64, radius as f64, smoothing as f64, 1.5);
+    let points = polygon(size, radius, smoothing);
     let n = points.len();
     let mut out = Vec::with_capacity(n * 36);
     if n < 3 {
         return out;
     }
-    let at = |i: usize| (points[i % n].0 as f32 + inset, points[i % n].1 as f32 + inset);
+    let at = |i: usize| (points[i % n].0 + inset, points[i % n].1 + inset);
     let normal = |i: usize| {
         let edge = |p: (f32, f32), q: (f32, f32)| {
             let (dx, dy) = (q.0 - p.0, q.1 - p.1);
@@ -189,7 +188,7 @@ fn mesh(size: Size, radius: f32, smoothing: f32, inset: f32) -> Vec<f32> {
     out
 }
 
-fn outline_mesh(size: Size, radius: f32, smoothing: f32, inset: f32, width: f32) -> Vec<f32> {
+fn polygon(size: Size, radius: f32, smoothing: f32) -> Vec<(f32, f32)> {
     let mut points: Vec<(f32, f32)> =
         tinystream_squircle::polygon(size.width as f64, size.height as f64, radius as f64, smoothing as f64, 1.5)
             .into_iter()
@@ -200,6 +199,11 @@ fn outline_mesh(size: Size, radius: f32, smoothing: f32, inset: f32, width: f32)
     if points.first().zip(points.last()).is_some_and(|(a, b)| same(a, b)) {
         points.pop();
     }
+    points
+}
+
+fn outline_mesh(size: Size, radius: f32, smoothing: f32, inset: f32, width: f32) -> Vec<f32> {
+    let points = polygon(size, radius, smoothing);
     let n = points.len();
     if n < 3 {
         return Vec::new();

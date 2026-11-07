@@ -195,6 +195,29 @@ mod tests {
     static RENDER_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     #[test]
+    #[ignore = "requires a Vulkan adapter; checks the hovered window control for seams"]
+    fn hovered_window_control_has_a_uniform_fill() {
+        let _render = RENDER_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let dir = crate::test_support::Directory::new("hover-render");
+        let mut app = App::new(crate::route::Route::Home, crate::window_state::WindowState::default());
+        app.gallery = Some(gallery::Gallery::default());
+        app.update(Message::Shortcut(crate::keys::Shortcut::Zoom(0)), &mut Vec::new());
+        let path = dir.0.join("hover.png");
+        snapshot(&mut app, Size::new(800, 600), 1.5, Some(iced_core::Point::new(800.0 / 1.5 - 85.0, 25.0)), &path, &[])
+            .unwrap();
+        let image = image::open(&path).unwrap().to_rgba8();
+        let center = 672;
+        for y in [23, 27, 45, 48] {
+            let at = image.get_pixel(center, y);
+            let beside = image.get_pixel(center - 3, y);
+            assert!(
+                at.0.iter().zip(beside.0).all(|(a, b)| a.abs_diff(b) <= 1),
+                "seam at ({center}, {y}): {at:?}, beside {beside:?}"
+            );
+        }
+    }
+
+    #[test]
     #[ignore = "requires a Vulkan adapter; renders headlessly without connecting to a display"]
     fn ui_zoom_with_fractional_dpi_keeps_controls_interactive() {
         let _render = RENDER_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
