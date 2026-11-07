@@ -24,5 +24,6 @@ pub mod text;
 pub mod theme;
 pub mod tilt;
 pub mod video;
+pub mod visible;
 
 pub use theme::{Look, Style};

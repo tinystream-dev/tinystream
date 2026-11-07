@@ -41,9 +41,8 @@ impl<Message: Clone> Widget<Message, Theme, Renderer> for Context<'_, Message> {
     fn diff(&mut self, tree: &mut Tree) {
         if tree.children.len() != 2 {
             tree.children = vec![Tree::new(&self.content), Tree::empty()];
-        } else {
-            tree.children[0].diff::<Message, Theme, Renderer>(&mut self.content);
         }
+        tree.children[0].diff::<Message, Theme, Renderer>(&mut self.content);
     }
 
     fn size(&self) -> Size<Length> {
@@ -214,5 +213,23 @@ impl<Message: Clone> iced_core::Overlay<Message, Theme, Renderer> for Menu<'_, M
 
     fn mouse_interaction(&self, cursor: mouse::Cursor, renderer: &Renderer) -> mouse::Interaction {
         self.content.mouse_interaction(self.tree, self.layout, cursor, &self.layout.bounds(), renderer)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn initializes_the_targets_entire_widget_tree_before_its_first_layout() {
+        let mut widget = context_menu::<()>(
+            iced_widget::container(iced_widget::space()).boxed(),
+            vec![("Open".into(), ())],
+            &Look::default(),
+        );
+        let mut tree = Tree::new(&widget);
+        widget.diff(&mut tree);
+        assert_eq!(tree.children.len(), 2);
+        assert_eq!(tree.children[0].children.len(), 1);
     }
 }

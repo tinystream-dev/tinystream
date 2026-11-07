@@ -415,13 +415,13 @@ pub fn menu_item<'a, Message: Clone + 'a>(
 
 /// `<Chip>`: a filter or sort to pick, in a row of them.
 pub fn chip<'a, Message: Clone + 'a>(
-    label: &'a str,
+    label: impl AsRef<str>,
     active: bool,
     message: Message,
     look: &Look,
 ) -> Element<'a, Message> {
     let l = *look;
-    pressable(container(inherit(label, type_::S13)).center_y(30), 9.0, look, move |status| {
+    pressable(container(inherit(label.as_ref().to_owned(), type_::S13)).center_y(30), 9.0, look, move |status| {
         let hovered = matches!(status, Status::Hovered | Status::Pressed);
         Appearance {
             paint: Paint { fill: if active { Some(l.press) } else { hovered.then_some(l.hover) }, ..Paint::NONE },
@@ -635,6 +635,8 @@ pub enum Tone {
     Live,
     Warn,
     Strong,
+    /// Over artwork: `bg-media-shade/60 text-media-ink`.
+    Media,
 }
 
 /// `<Badge>`: a small label.
@@ -646,6 +648,7 @@ pub fn badge<'a, Message: 'a>(label: impl Into<String>, tone: Tone, look: &Look)
         Tone::Live => (look.info_deep.scale_alpha(0.12), look.info),
         Tone::Warn => (look.warn_deep.scale_alpha(0.12), look.warn),
         Tone::Strong => (look.ink, look.canvas),
+        Tone::Media => (look.media_shade.scale_alpha(0.6), look.media_ink),
     };
     let radius = look.rounded(Rounded::Md);
     container(text(label.into(), type_::XS2, ink).font(MEDIUM))
@@ -675,6 +678,20 @@ struct Bar {
 struct Clock {
     start: Option<Instant>,
     now: Option<Instant>,
+    from: Option<f32>,
+    to: Option<f32>,
+}
+impl Clock {
+    fn value(&self, now: Instant) -> Option<f32> {
+        self.to.map(|to| match (self.from, self.start) {
+            (Some(from), Some(start)) => super::motion::lerp(
+                from,
+                to,
+                (now.saturating_duration_since(start).as_secs_f32() / 2.0).clamp(0.0, 1.0),
+            ),
+            _ => to,
+        })
+    }
 }
 
 impl iced_core::widget::Meta for Bar {}
@@ -686,6 +703,17 @@ impl<Message> CoreWidget<Message, Theme, Renderer> for Bar {
 
     fn state(&self) -> tree::State {
         tree::State::new(Clock::default())
+    }
+
+    fn diff(&mut self, tree: &mut Tree) {
+        let clock = tree.state.downcast_mut::<Clock>();
+        if self.value != clock.to {
+            let now = Instant::now();
+            clock.from = clock.value(now).or(self.value);
+            clock.to = self.value;
+            clock.start = Some(now);
+            clock.now = Some(now);
+        }
     }
 
     fn size(&self) -> Size<Length> {
@@ -707,13 +735,17 @@ impl<Message> CoreWidget<Message, Theme, Renderer> for Bar {
         _viewport: &Rectangle,
     ) {
         if let Event::Window(window::Event::RedrawRequested(now)) = event
-            && self.value.is_none()
             && !self.still
         {
             let clock = tree.state.downcast_mut::<Clock>();
             clock.start.get_or_insert(*now);
             clock.now = Some(*now);
-            shell.request_redraw();
+            if self.value.is_none()
+                || clock.start.is_some_and(|start| now.saturating_duration_since(start) < Duration::from_secs(2))
+                    && clock.from != clock.to
+            {
+                shell.request_redraw();
+            }
         }
     }
 
@@ -736,7 +768,15 @@ impl<Message> CoreWidget<Message, Theme, Renderer> for Bar {
         };
         renderer.fill_quad(pill(bounds), self.track);
         let bar = match self.value {
-            Some(value) => Rectangle { width: bounds.width * value.clamp(0.0, 1.0), ..bounds },
+            Some(value) => {
+                let clock = tree.state.downcast_ref::<Clock>();
+                let value = if self.still {
+                    value
+                } else {
+                    clock.value(clock.now.unwrap_or_else(Instant::now)).unwrap_or(value)
+                };
+                Rectangle { width: bounds.width * value.clamp(0.0, 1.0), ..bounds }
+            },
             None => {
                 // `slide`: a third of the width, from a third off the left to past the right.
                 let clock = tree.state.downcast_ref::<Clock>();

@@ -8,13 +8,14 @@ use std::time::{Duration, Instant};
 use iced_core::layout::{self, Layout};
 use iced_core::widget::{Tree, tree};
 use iced_core::{
-    Color, Event, Length, Point, Rectangle, Renderer as _, Size, Theme, Vector, Widget, mouse, renderer, window,
+    Alignment, Color, Event, Font, Length, Point, Rectangle, Renderer as _, Size, Theme, Vector, Widget, mouse,
+    renderer, window,
 };
 use iced_widget::canvas::{self, Frame, LineJoin, Path, Stroke};
 use iced_widget::{Column, Element, Renderer, Row, Widget as _};
 
 use super::motion;
-use super::text::{Size as TextSize, inherit};
+use super::text::{REGULAR, Size as TextSize, inherit};
 use super::theme::Look;
 
 const ROLL: Duration = Duration::from_millis(500);
@@ -22,27 +23,41 @@ const ROLL: Duration = Duration::from_millis(500);
 /// `<Ticker>`: `value`, its digits rolling to new ones. Places count from the end, so `9` to `10`
 /// rolls the last one and a new one appears in front.
 pub fn ticker<'a, Message: 'a>(value: &str, size: TextSize, look: &Look) -> Element<'a, Message> {
+    styled_ticker(value, size, REGULAR, None, look)
+}
+
+/// A ticker in its own `font`, and `color` instead of the text colour around it.
+pub fn styled_ticker<'a, Message: 'a>(
+    value: &str,
+    size: TextSize,
+    font: Font,
+    color: Option<Color>,
+    look: &Look,
+) -> Element<'a, Message> {
     let still = look.reduce_motion;
     let chars: Vec<char> = value.chars().collect();
     let content = Row::with_children(chars.iter().map(|&c| {
         match c.to_digit(10) {
             Some(d) => Digit {
-                strip: Column::with_children((0..10).map(|n| inherit(n.to_string(), size).boxed())).boxed(),
+                strip: Column::with_children((0..10).map(|n| inherit(n.to_string(), size).font(font).boxed()))
+                    .align_x(Alignment::Center)
+                    .boxed(),
                 digit: d as f32,
                 line: size.line,
                 still,
             }
             .boxed(),
-            None => inherit(c.to_string(), size).boxed(),
+            None => inherit(c.to_string(), size).font(font).boxed(),
         }
     }))
     .boxed();
-    Ticker { content, places: chars.len() }.boxed()
+    Ticker { content, places: chars.len(), color }.boxed()
 }
 
 struct Ticker<'a, Message> {
     content: Element<'a, Message>,
     places: usize,
+    color: Option<Color>,
 }
 impl<Message> iced_core::widget::Meta for Ticker<'_, Message> {}
 impl<Message> Widget<Message, Theme, Renderer> for Ticker<'_, Message> {
@@ -103,7 +118,8 @@ impl<Message> Widget<Message, Theme, Renderer> for Ticker<'_, Message> {
         viewport: &Rectangle,
     ) {
         let (child, tree) = layout.iter(&tree.children).next().expect("digits");
-        self.content.draw(tree, renderer, theme, style, child, cursor, viewport);
+        let style = renderer::Style { text_color: self.color.unwrap_or(style.text_color) };
+        self.content.draw(tree, renderer, theme, &style, child, cursor, viewport);
     }
 }
 

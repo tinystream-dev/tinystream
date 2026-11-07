@@ -547,7 +547,7 @@ impl Gallery {
                     arrived: None,
                     caption: format!("{} episodes", 12 + i * 2),
                     progress: (i == 0).then_some(0.42),
-                    fresh: (i == 1).then_some("2 new"),
+                    corner: (i == 1).then(|| ("2 new".into(), true)),
                 },
                 Message::Noop,
                 l,
@@ -577,7 +577,7 @@ impl Gallery {
             .padding(16);
         column![
             posters,
-            shelf("gallery-shelf", cards, self.shelf, Message::Shelf, Message::Page, l),
+            shelf("gallery-shelf", cards, self.shelf, Message::Shelf, Message::Page, l, 40.0),
             people,
             loaded,
             tinted,

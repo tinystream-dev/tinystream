@@ -601,6 +601,74 @@ impl<Message> Widget<Message, Theme, Renderer> for Bone {
     }
 }
 
+/// `animate-[pulse-dot_1.6s_ease-in-out_infinite]`: a round dot `size` across, fading to 35% and
+/// back.
+pub fn pulse_dot<'a, Message: 'a>(size: f32, color: Color, look: &Look) -> Element<'a, Message> {
+    iced_widget::Widget::boxed(PulseDot { size, color, still: look.reduce_motion })
+}
+
+struct PulseDot {
+    size: f32,
+    color: Color,
+    still: bool,
+}
+
+impl iced_core::widget::Meta for PulseDot {}
+
+impl<Message> Widget<Message, Theme, Renderer> for PulseDot {
+    fn size(&self) -> Size<Length> {
+        Size::new(Length::Fixed(self.size), Length::Fixed(self.size))
+    }
+
+    fn layout(&mut self, tree: &mut Tree, _renderer: &Renderer, limits: &layout::Limits) {
+        tree.size = layout::atomic(limits, self.size, self.size);
+    }
+
+    fn update(
+        &mut self,
+        _tree: &mut Tree,
+        event: &Event,
+        _layout: Layout,
+        _cursor: mouse::Cursor,
+        _renderer: &Renderer,
+        shell: &mut iced_core::Shell<'_, Message>,
+        _viewport: &Rectangle,
+    ) {
+        if let Event::Window(window::Event::RedrawRequested(_)) = event
+            && !self.still
+        {
+            shell.request_redraw();
+        }
+    }
+
+    fn draw(
+        &self,
+        _tree: &Tree,
+        renderer: &mut Renderer,
+        _theme: &Theme,
+        _style: &renderer::Style,
+        layout: Layout,
+        _cursor: mouse::Cursor,
+        _viewport: &Rectangle,
+    ) {
+        let opacity = if self.still {
+            1.0
+        } else {
+            let t = epoch().elapsed().as_secs_f32() % 1.6 / 1.6;
+            let half = if t < 0.5 { t * 2.0 } else { 2.0 - t * 2.0 };
+            motion::lerp(1.0, 0.35, motion::EASE_IN_OUT.at(half))
+        };
+        renderer.fill_quad(
+            renderer::Quad {
+                bounds: layout.bounds(),
+                border: Border::default().rounded(self.size / 2.0),
+                ..renderer::Quad::default()
+            },
+            self.color.scale_alpha(opacity),
+        );
+    }
+}
+
 /// When shimmering started, so every bone on screen moves together.
 fn epoch() -> Instant {
     static EPOCH: std::sync::OnceLock<Instant> = std::sync::OnceLock::new();

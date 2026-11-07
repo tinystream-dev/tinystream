@@ -58,7 +58,11 @@ pub fn section<'a, Message: 'a>(
 }
 
 /// `<Empty>`: nothing to show, said kindly.
-pub fn empty<'a, Message: 'a>(title: &'a str, body: Option<&'a str>, look: &Look) -> Element<'a, Message> {
+pub fn empty<'a, Message: 'a>(
+    title: impl iced_core::text::IntoFragment<'a>,
+    body: Option<&'a str>,
+    look: &Look,
+) -> Element<'a, Message> {
     let mut content =
         Column::new().push(text(title, type_::S15, look.ink).font(MEDIUM).boxed()).align_x(Alignment::Center);
     if let Some(body) = body {
@@ -102,20 +106,21 @@ pub fn poster_grid<'a, Message: 'a>(
 /// `<Row>`: a shelf scrolling sideways, 20 apart, its edges fading into the page, with arrows
 /// for paging through it once the pointer's over it.
 pub fn shelf<'a, Message: Clone + 'a>(
-    id: &'static str,
+    id: impl Into<widget::Id>,
     items: Vec<Element<'a, Message>>,
     viewport: Option<iced_widget::scrollable::Viewport>,
     scrolled: impl Fn(iced_widget::scrollable::Scroll) -> Message + 'a,
     page: impl Fn(f32) -> Message + 'a,
     look: &Look,
+    inset: f32,
 ) -> Element<'a, Message> {
     let strip = scrollable(container(Row::with_children(items).spacing(20)).padding(Padding {
         top: 4.0,
         bottom: 12.0,
-        left: 40.0,
-        right: 40.0,
+        left: inset,
+        right: inset,
     }))
-    .id(widget::Id::new(id))
+    .id(id)
     .direction(Direction::Horizontal(Scrollbar::hidden()))
     .on_scroll(scrolled)
     .width(Length::Fill);

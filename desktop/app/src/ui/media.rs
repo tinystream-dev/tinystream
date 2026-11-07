@@ -215,12 +215,13 @@ pub struct Poster<'a> {
     pub arrived: Option<Instant>,
     pub caption: String,
     pub progress: Option<f32>,
-    pub fresh: Option<&'a str>,
+    /// The corner label, with the fresh dot in front of it when it's about new things.
+    pub corner: Option<(String, bool)>,
 }
 
 pub fn poster<'a, Message: Clone + 'a>(card: Poster<'a>, on_press: Message, look: &Look) -> Element<'a, Message> {
     use iced_core::Padding;
-    use iced_widget::{column, space};
+    use iced_widget::{column, row, space};
 
     use super::pressable::{Appearance, pressable};
     use super::squircle::{Paint, squircle};
@@ -261,16 +262,29 @@ pub fn poster<'a, Message: Clone + 'a>(card: Poster<'a>, on_press: Message, look
         .height(4);
         layers.push(container(bar).align_bottom(Length::Fill).padding(10).boxed());
     }
-    if let Some(fresh) = card.fresh {
+    if let Some((label, fresh)) = card.corner {
+        let label = text(label, type_::XS2, look.media_ink).font(MEDIUM);
+        let warn = look.warn;
+        let content = if fresh {
+            row![
+                container(space()).width(6).height(6).style(move |_| container::Style {
+                    background: Some(warn.into()),
+                    border: Border::default().rounded(3),
+                    ..Default::default()
+                }),
+                label
+            ]
+            .spacing(4)
+            .align_y(Alignment::Center)
+            .boxed()
+        } else {
+            label.boxed()
+        };
         layers.push(
-            container(
-                squircle(text(fresh, type_::XS2, look.media_ink).font(MEDIUM), 6.0, look)
-                    .fill(look.media_shade.scale_alpha(0.6))
-                    .padding([2, 6]),
-            )
-            .align_right(Length::Fill)
-            .padding(8)
-            .boxed(),
+            container(squircle(content, 6.0, look).fill(look.media_shade.scale_alpha(0.6)).padding([2, 6]))
+                .align_right(Length::Fill)
+                .padding(8)
+                .boxed(),
         );
     }
     let art = iced_widget::Stack::with_children(layers).width(Length::Fill);

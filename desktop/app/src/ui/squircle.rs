@@ -428,3 +428,45 @@ impl<Message> Widget<Message, Theme, Renderer> for Squircle<'_, Message> {
         self.content.overlay(tree, layout, renderer, viewport, translation, window)
     }
 }
+
+/// A linear shade clipped to the same outline as the artwork beneath it.
+pub fn gradient<'a, Message: 'a>(
+    radius: f32,
+    angle: f32,
+    stops: Vec<(f32, Color)>,
+    look: &Look,
+) -> Element<'a, Message> {
+    struct Shade {
+        radius: f32,
+        smoothing: f32,
+        angle: f32,
+        stops: Vec<(f32, Color)>,
+    }
+    impl<Message> canvas::Program<Message> for Shade {
+        type State = ();
+
+        fn draw(
+            &self,
+            _: &(),
+            renderer: &Renderer,
+            _: &Theme,
+            bounds: Rectangle,
+            _: mouse::Cursor,
+        ) -> Vec<canvas::Geometry> {
+            let mut frame = Frame::new(renderer, bounds.size());
+            let (start, end) = Rectangle::with_size(bounds.size()).chord(self.angle);
+            let mut fill = canvas::gradient::Linear::new(start, end);
+            for &(offset, color) in &self.stops {
+                fill = fill.add_stop(offset, color);
+            }
+            frame
+                .fill(&path(Point::ORIGIN, bounds.size(), self.radius, self.smoothing), canvas::Gradient::Linear(fill));
+            vec![frame.into_geometry()]
+        }
+    }
+    use iced_widget::Widget as _;
+    canvas::Canvas::new(Shade { radius: look.radius(radius), smoothing: look.corners().1, angle, stops })
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .boxed()
+}
