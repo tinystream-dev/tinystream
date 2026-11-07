@@ -30,6 +30,7 @@ pub enum Key {
     Shell,
     Home,
     Music,
+    BookHome,
     Coming,
     Library(String),
     Books(String),
@@ -47,6 +48,7 @@ pub enum Key {
     Discover(String, String),
     ForYou(String),
     Search(String),
+    Recents(Vec<i64>),
     Options,
     Aired(String, String),
     Releases(i64, i64, Vec<i64>, String),
@@ -62,6 +64,7 @@ struct Entry {
     dirty: bool,
     serial: u64,
     fetched: Option<Instant>,
+    updates: u8,
 }
 
 #[derive(Debug, Clone)]
@@ -77,11 +80,14 @@ pub enum Dialog {
 pub enum Action {
     Watched(Vec<i64>, bool),
     TitleWatched(i64, bool),
+    RestoreTitle(i64, Vec<i64>),
+    RestoreEpisodes(Vec<i64>, Vec<i64>),
     Refresh(i64),
     Approve(i64),
     Decline(i64),
     CancelRequest(i64),
     Pause(Vec<i64>),
+    Bulk(bool),
     Resume(Vec<i64>),
     Recheck(Vec<i64>),
     Import(i64),
@@ -107,12 +113,16 @@ pub enum Message {
     Mutated(u64, Result<(), api::Error>),
     Picture(u64, String, Option<iced_widget::image::Handle>, bool),
     Retry(Key),
+    WantImage(String),
     Query(String),
+    FindShows(String),
     Library(String),
     Category(String),
     Filter(String),
     Sort(bool),
+    BookSort(String),
     Season(i64),
+    Overview(i64),
     Week(i64),
     Dialog(Option<Dialog>),
     Note(String),
@@ -120,19 +130,27 @@ pub enum Message {
     Profile(String),
     PickLibrary(String),
     ReleaseQuery(String),
-    ReleaseReady(u64, String),
+    ReleaseSubmit,
+    ShowRejected,
+    ManualRelease(Option<Arc<ReleaseCandidate>>),
+    ManualSeason(String),
+    ManualEpisode(String),
     MatchReady(u64, String),
     DownloadCategory(String),
     MatchQuery(String),
     Provider(String),
     Act(Action),
     Follow(Notice),
-    Select(i64, bool),
-    SelectAll(bool),
+    DownloadGroup(String),
     Draft(&'static str, String),
     Source(String),
+    Shelf(String, iced_widget::scrollable::Viewport),
+    PageShelf(String, f32),
     Tick,
     SearchReady(u64, String),
+    RecentLoaded(Vec<i64>),
+    RecentSaved,
+    InboxSettled(Result<(), api::Error>),
     DiscoverReady(u64, String),
 }
 
@@ -141,6 +159,7 @@ pub struct Browsing {
     cache: HashMap<Key, Entry>,
     pub images: Images,
     pub generation: u64,
+    pub reduce_motion: bool,
     serial: u64,
     pub query: String,
     pub discover_input: String,
@@ -149,8 +168,14 @@ pub struct Browsing {
     pub category: String,
     pub filter: HashMap<Route, String>,
     pub newest: HashSet<Route>,
+    pub book_sort: HashMap<Route, String>,
     pub seasons: HashMap<i64, i64>,
+    pub expanded: HashSet<i64>,
+    pub undo: Option<Action>,
+    notice_at: Option<Instant>,
+    pending_notice: Option<String>,
     pub week: i64,
+    pub shelves: HashMap<String, iced_widget::scrollable::Viewport>,
     pub dialog: Option<Dialog>,
     pub note: String,
     pub monitor: String,
@@ -158,13 +183,19 @@ pub struct Browsing {
     pub pick_library: String,
     pub release_query: String,
     pub release_input: String,
-    release_serial: u64,
+    pub show_rejected: bool,
+    pub manual_release: Option<Arc<ReleaseCandidate>>,
+    pub manual_season: String,
+    pub manual_episode: String,
+    pub grabbed: HashSet<String>,
+    pending_action: Option<Action>,
+    previous_dialog: Option<Dialog>,
     pub match_input: String,
     match_serial: u64,
     pub download_category: String,
     pub match_query: String,
     pub provider: String,
-    pub selected: HashSet<i64>,
+    pub download_groups: HashSet<String>,
     pub busy: bool,
     pub error: Option<String>,
     pub notice: Option<String>,
@@ -173,6 +204,10 @@ pub struct Browsing {
     pub search_query: String,
     pub search_index: usize,
     pub recent: Vec<Card>,
+    recent_file: Option<std::path::PathBuf>,
+    recent_loaded: bool,
+    recent_writing: bool,
+    recent_dirty: bool,
     pub rates: HashMap<String, Vec<f32>>,
     tick_pending: bool,
     image_queue: VecDeque<String>,
@@ -189,6 +224,7 @@ pub struct SeriesDraft {
     pub numbering: String,
     pub naming: String,
     pub seeding: String,
+    pub inherited_naming: Option<String>,
 }
 impl SeriesDraft {
     pub fn patch(&self) -> Value {
@@ -201,7 +237,7 @@ impl SeriesDraft {
             "forever" => json!({"then":"PAUSE"}),
             _ => Value::Null,
         };
-        json!({"profile":if self.profile.is_empty(){None}else{Some(&self.profile)},"sources":self.sources,"groups":list(&self.groups),"aliases":list(&self.aliases),"numbering":self.numbering,"naming":if self.naming.trim().is_empty(){None}else{Some(self.naming.trim())},"seeding":seeding})
+        json!({"profile":if self.profile.is_empty(){None}else{Some(&self.profile)},"sources":self.sources,"groups":list(&self.groups),"aliases":list(&self.aliases),"numbering":self.numbering,"naming":if self.naming.trim().is_empty()||self.inherited_naming.as_deref()==Some(self.naming.trim()){None}else{Some(self.naming.trim())},"seeding":seeding})
     }
 }
 
@@ -247,10 +283,60 @@ impl Browsing {
     pub fn follow(&mut self, route: &Route, api: &Api, effects: &mut Vec<Effect>) {
         self.ensure(Key::Shell, api, effects);
         self.ensure(Key::Inbox, api, effects);
+        if !self.recent_loaded
+            && let Some(viewer) = self.viewer()
+        {
+            use std::hash::{Hash, Hasher};
+            let mut hash = std::hash::DefaultHasher::new();
+            (api.origin.as_str(), viewer.id).hash(&mut hash);
+            self.recent_file =
+                crate::paths::state_dir().map(|dir| dir.join("recents").join(format!("{:016x}.json", hash.finish())));
+            self.recent_loaded = true;
+            if let Some(path) = self.recent_file.clone() {
+                let generation = self.generation;
+                effects.push(Effect::Task(Box::pin(async move {
+                    let ids = tokio::fs::read(path)
+                        .await
+                        .ok()
+                        .and_then(|bytes| serde_json::from_slice::<Vec<i64>>(&bytes).ok())
+                        .unwrap_or_default();
+                    AppMessage::Browsing(generation, Message::RecentLoaded(ids))
+                })));
+            }
+        }
+        if self.recent_dirty
+            && !self.recent_writing
+            && let Some(path) = self.recent_file.clone()
+        {
+            self.recent_dirty = false;
+            self.recent_writing = true;
+            let ids = self.recent.iter().map(|c| c.id).collect::<Vec<_>>();
+            let generation = self.generation;
+            effects.push(Effect::Task(Box::pin(async move {
+                let result = async {
+                    if let Some(parent) = path.parent() {
+                        tokio::fs::create_dir_all(parent).await?;
+                    }
+                    let partial = path.with_extension(format!("{}.partial", std::process::id()));
+                    tokio::fs::write(&partial, serde_json::to_vec(&ids).expect("recent IDs")).await?;
+                    tokio::fs::rename(partial, path).await
+                }
+                .await;
+                if let Err(error) = result {
+                    tracing::debug!("can't remember recent titles: {error}");
+                }
+                AppMessage::Browsing(generation, Message::RecentSaved)
+            })));
+        }
+
         match route {
             Route::Home => {
-                for key in [Key::Home, Key::Music] {
-                    self.ensure(key, api, effects);
+                self.ensure(Key::Home, api, effects);
+                if self.libraries().iter().any(|l| l.kind == "MUSIC") {
+                    self.ensure(Key::Music, api, effects);
+                }
+                if self.libraries().iter().any(|l| l.kind == "BOOKS") {
+                    self.ensure(Key::BookHome, api, effects);
                 }
                 if self.features() {
                     self.ensure(Key::Coming, api, effects);
@@ -271,9 +357,18 @@ impl Browsing {
                         effects,
                     );
                 }
+                if self.can().downloads
+                    && self
+                        .data(&Key::Series(*id as i64))
+                        .and_then(|d| d.title.as_ref())
+                        .and_then(|t| t.series.as_ref())
+                        .is_some_and(|s| s.counts.grabbed > 0)
+                {
+                    self.ensure(Key::Downloads, api, effects);
+                }
             },
             Route::Calendar => {
-                self.ensure(Key::Calendar(week_start(now()) + self.week * 7 * 86400), api, effects);
+                self.ensure(Key::Calendar(calendar_start(self.week)), api, effects);
                 self.ensure(Key::Soon, api, effects);
             },
             Route::Requests => self.ensure(Key::Requests, api, effects),
@@ -431,7 +526,6 @@ impl Browsing {
                 entry.fetched = Some(Instant::now());
                 match result {
                     Ok(data) => {
-                        let paths = picture_paths(&data);
                         let mut rates = Vec::new();
                         if let Some(e) = &data.download_engine {
                             rates.push(("download".to_owned(), e.download_rate));
@@ -456,10 +550,20 @@ impl Browsing {
                             self.recent.retain(|c| c.id != title.card.id);
                             self.recent.insert(0, title.card.clone());
                             self.recent.truncate(12);
+                            self.recent_dirty = true;
                         }
+                        if let Key::Recents(ids) = &key {
+                            self.recent.retain(|c| !ids.contains(&c.id) || data.titles.iter().any(|t| t.id == c.id));
+                            for card in &data.titles {
+                                if !self.recent.iter().any(|c| c.id == card.id) {
+                                    self.recent.push(card.clone());
+                                }
+                            }
+                            self.recent.truncate(12);
+                        }
+                        entry.updates = entry.updates.saturating_add(1);
                         entry.data = Some(data);
                         entry.error = None;
-                        self.pictures(paths, api, effects);
                     },
                     Err(error) => {
                         entry.error = Some(error.message);
@@ -473,26 +577,67 @@ impl Browsing {
                 self.busy = false;
                 match result {
                     Ok(()) => {
-                        self.dialog = None;
-                        self.notice = Some("Saved".into());
+                        let grabbed = match self.pending_action.take() {
+                            Some(Action::Grab(_, r)) => {
+                                self.grabbed.insert(r.release.link.clone());
+                                self.manual_release = None;
+                                true
+                            },
+                            _ => false,
+                        };
+                        if grabbed {
+                            if self.previous_dialog.is_some() {
+                                self.dialog = self.previous_dialog.take();
+                            }
+                        } else {
+                            self.dialog = None;
+                            self.previous_dialog = None;
+                        }
+
+                        self.notice = self.pending_notice.take();
+                        self.notice_at = Some(Instant::now());
                         self.error = None;
-                        self.images.clear();
-                        self.invalidate(|_| true);
+                        self.invalidate(|k| !grabbed || !matches!(k, Key::Releases(..)));
                     },
-                    Err(error) => self.error = Some(error.message),
+                    Err(error) => {
+                        self.error = Some(error.message);
+                        self.undo = None;
+                        if matches!(self.dialog, Some(Dialog::Confirm { .. })) {
+                            self.dialog = self.previous_dialog.take();
+                        }
+                    },
                 }
             },
             Message::Picture(generation, path, handle, fresh) if generation == self.generation => {
                 self.images.arrived(path, handle, fresh);
+                self.images.limit_ready(256);
                 if fresh {
                     self.image_active = self.image_active.saturating_sub(1);
                     self.fetch_pictures(api, effects);
                 }
             },
+            Message::RecentLoaded(ids) => {
+                if !ids.is_empty() {
+                    self.ensure(Key::Recents(ids.into_iter().take(12).collect()), api, effects);
+                }
+            },
+            Message::InboxSettled(result) => {
+                self.invalidate(|k| matches!(k, Key::Inbox));
+                if let Err(error) = result {
+                    self.error = Some(error.message);
+                }
+            },
+            Message::RecentSaved => self.recent_writing = false,
+            Message::WantImage(path) => self.pictures(vec![path], api, effects),
             Message::Retry(key) => {
                 if let Some(e) = self.cache.get_mut(&key) {
                     e.dirty = true;
                 }
+            },
+            Message::FindShows(query) => {
+                self.discover_input = query.clone();
+                self.query = query;
+                return Some(Route::Discover);
             },
             Message::Query(query) => {
                 self.discover_serial += 1;
@@ -514,11 +659,19 @@ impl Browsing {
             Message::Filter(filter) => {
                 self.filter.insert(route.clone(), filter);
             },
+            Message::BookSort(sort) => {
+                self.book_sort.insert(route.clone(), sort);
+            },
             Message::Sort(newest) => {
                 if newest {
                     self.newest.insert(route.clone());
                 } else {
                     self.newest.remove(route);
+                }
+            },
+            Message::Overview(id) => {
+                if !self.expanded.remove(&id) {
+                    self.expanded.insert(id);
                 }
             },
             Message::Season(season) => {
@@ -529,15 +682,30 @@ impl Browsing {
             Message::Week(offset) => self.week = offset,
             Message::Dialog(dialog) => {
                 self.error = None;
+                if dialog.is_none()
+                    && matches!(self.dialog, Some(Dialog::Confirm { .. }))
+                    && self.previous_dialog.is_some()
+                {
+                    self.dialog = self.previous_dialog.take();
+                    return None;
+                }
+                if matches!(dialog, Some(Dialog::Confirm { .. })) {
+                    self.previous_dialog = self.dialog.clone();
+                    self.dialog = dialog;
+                    return None;
+                }
+                self.previous_dialog = None;
                 self.note.clear();
                 self.profile.clear();
-                self.release_serial += 1;
                 self.match_serial += 1;
                 self.release_query.clear();
                 self.release_input.clear();
                 self.match_input.clear();
                 self.match_query.clear();
                 self.provider.clear();
+                self.manual_release = None;
+                self.show_rejected = false;
+                self.grabbed.clear();
                 if let Some(Dialog::Pick(r)) = &dialog {
                     self.pick_library = r.library.clone();
                     self.monitor.clear();
@@ -550,12 +718,14 @@ impl Browsing {
                         aliases: s.aliases.join(", "),
                         numbering: s.numbering.clone(),
                         naming: s.naming.clone().unwrap_or_else(|| s.style.file.clone()),
+                        inherited_naming: if s.naming.is_none() { Some(s.style.file.clone()) } else { None },
                         seeding: match &s.seeding {
                             None => "default",
                             Some(r) if r.ratio == Some(0.0) => "none",
-                            Some(r) if r.ratio == Some(1.0) => "ratio",
-                            Some(r) if r.time.is_some() => "week",
-                            _ => "forever",
+                            Some(r) if r.ratio == Some(1.0) && r.time.is_none() && r.idle.is_none() => "ratio",
+                            Some(r) if r.ratio.is_none() && r.time.is_some() && r.idle.is_none() => "week",
+                            Some(r) if r.ratio.is_none() && r.time.is_none() && r.idle.is_none() => "forever",
+                            _ => "default",
                         }
                         .into(),
                     };
@@ -566,17 +736,28 @@ impl Browsing {
             Message::Monitor(monitor) => self.monitor = monitor,
             Message::Profile(profile) => self.profile = profile,
             Message::PickLibrary(library) => self.pick_library = library,
-            Message::ReleaseQuery(query) => {
-                self.release_input = query.clone();
-                self.release_serial += 1;
-                let serial = self.release_serial;
-                let generation = self.generation;
-                effects.push(Effect::Task(Box::pin(async move {
-                    tokio::time::sleep(Duration::from_millis(350)).await;
-                    AppMessage::Browsing(generation, Message::ReleaseReady(serial, query))
-                })));
+            Message::ReleaseQuery(query) => self.release_input = query,
+            Message::ReleaseSubmit => {
+                self.release_query = self.release_input.trim().to_owned();
+                self.manual_release = None;
+                if let Some(Dialog::Releases { series, season, episodes, .. }) = &self.dialog {
+                    let key = Key::Releases(*series, *season, episodes.clone(), self.release_query.clone());
+                    if let Some(entry) = self.cache.get_mut(&key) {
+                        entry.dirty = true;
+                        entry.data = None;
+                    }
+                }
             },
-            Message::ReleaseReady(serial, query) if serial == self.release_serial => self.release_query = query,
+            Message::ShowRejected => self.show_rejected = !self.show_rejected,
+            Message::ManualRelease(release) => {
+                self.manual_release = release;
+                if let Some(Dialog::Releases { season, episodes, .. }) = &self.dialog {
+                    self.manual_season = season.to_string();
+                    self.manual_episode = if episodes.len() == 1 { episodes[0].to_string() } else { String::new() };
+                }
+            },
+            Message::ManualSeason(season) => self.manual_season = season,
+            Message::ManualEpisode(episode) => self.manual_episode = episode,
             Message::MatchReady(serial, query) if serial == self.match_serial => self.match_query = query,
             Message::DownloadCategory(category) => self.download_category = category,
             Message::MatchQuery(query) => {
@@ -594,11 +775,9 @@ impl Browsing {
                 self.act(Action::Read(Some(vec![n.id])), api, effects);
                 return n.link.and_then(|link| Route::parse(&link));
             },
-            Message::Select(id, selected) => {
-                if selected {
-                    self.selected.insert(id);
-                } else {
-                    self.selected.remove(&id);
+            Message::DownloadGroup(key) => {
+                if !self.download_groups.remove(&key) {
+                    self.download_groups.insert(key);
                 }
             },
             Message::Draft(field, value) => match field {
@@ -619,19 +798,74 @@ impl Browsing {
                     self.draft.sources.push(source);
                 }
             },
-            Message::SelectAll(on) => {
-                self.selected = if on {
-                    self.data(&Key::Downloads).map(|d| d.downloads.iter().map(|d| d.id).collect()).unwrap_or_default()
-                } else {
-                    HashSet::new()
-                };
-            },
             Message::Act(action) => self.act(action, api, effects),
+            Message::Shelf(id, viewport) => {
+                self.shelves.insert(id, viewport);
+            },
+            Message::PageShelf(id, direction) => {
+                let width = self.shelves.get(&id).map_or(800.0, |v| v.bounds.width);
+                let animation = if self.reduce_motion {
+                    iced_core::widget::operation::Animation::Instant
+                } else {
+                    iced_core::widget::operation::Animation::default()
+                };
+                effects.push(Effect::Operate(Box::new(iced_core::widget::operation::scrollable::scroll_by(
+                    id.into(),
+                    iced_core::widget::operation::scrollable::AbsoluteOffset { x: width * direction * 0.85, y: 0.0 },
+                    animation,
+                ))));
+            },
             Message::Tick => {
                 self.tick_pending = false;
+                if self.notice_at.is_some_and(|at| at.elapsed().as_secs() >= 5) {
+                    self.notice = None;
+                    self.undo = None;
+                    self.notice_at = None;
+                }
                 for (key, entry) in &mut self.cache {
+                    let downloading =
+                        entry.data.as_ref().is_some_and(|d| d.calendar.iter().any(|e| e.download.is_some()));
                     let interval = match key {
-                        Key::Downloads | Key::Engine | Key::Calendar(_) | Key::Soon | Key::Coming => 2,
+                        Key::Downloads | Key::Engine => 2,
+                        Key::Calendar(_) => {
+                            if downloading {
+                                2
+                            } else {
+                                60
+                            }
+                        },
+                        Key::Soon => {
+                            if downloading {
+                                2
+                            } else if entry.data.as_ref().is_some_and(|d| {
+                                d.calendar
+                                    .iter()
+                                    .any(|e| e.air_at <= now() && e.air_at > now() - 12 * 3600 && e.state == "WANTED")
+                            }) {
+                                10
+                            } else {
+                                60
+                            }
+                        },
+                        Key::Coming => {
+                            if downloading {
+                                3
+                            } else {
+                                300
+                            }
+                        },
+                        Key::Title(_)
+                            if entry.updates < 4
+                                && entry.data.as_ref().and_then(|d| d.title.as_ref()).is_some_and(|t| {
+                                    if t.card.backdrop.is_some() {
+                                        t.card.backdrop_tint.is_none()
+                                    } else {
+                                        t.card.poster.is_some() && t.card.poster_tint.is_none()
+                                    }
+                                }) =>
+                        {
+                            2
+                        },
                         Key::Wanted => 10,
                         Key::Requests => 15,
                         Key::Inbox => 60,
@@ -652,7 +886,7 @@ impl Browsing {
             if !self.images.want(&path) {
                 continue;
             }
-            self.image_queue.push_back(path);
+            self.image_queue.push_front(path);
         }
         self.fetch_pictures(api, effects);
     }
@@ -682,9 +916,80 @@ impl Browsing {
     }
 
     fn act(&mut self, action: Action, api: &Api, effects: &mut Vec<Effect>) {
+        if matches!(action, Action::Read(_) | Action::DeleteNotice(_)) {
+            if let Some(inbox) = self
+                .cache
+                .get_mut(&Key::Inbox)
+                .and_then(|e| e.data.as_mut())
+                .and_then(|d| Arc::make_mut(d).notifications.as_mut())
+            {
+                match &action {
+                    Action::Read(ids) => {
+                        for n in &mut inbox.items {
+                            if n.read_at.is_none() && ids.as_ref().is_none_or(|ids| ids.contains(&n.id)) {
+                                n.read_at = Some(now());
+                            }
+                        }
+                    },
+                    Action::DeleteNotice(id) => inbox.items.retain(|n| id.is_some_and(|id| id != n.id)),
+                    _ => {},
+                }
+                inbox.unread = inbox.items.iter().filter(|n| n.read_at.is_none()).count() as i64;
+            }
+            let api = api.clone();
+            let generation = self.generation;
+            effects.push(Effect::Task(Box::pin(async move {
+                AppMessage::Browsing(generation, Message::InboxSettled(mutate(&api, action).await))
+            })));
+            return;
+        }
         if self.busy {
             return;
         }
+        self.undo = match &action {
+            Action::TitleWatched(id, _) => self.data(&Key::Title(*id)).and_then(|d| d.title.as_ref()).map(|t| {
+                Action::RestoreTitle(
+                    *id,
+                    t.seasons
+                        .iter()
+                        .flat_map(|s| &s.episodes)
+                        .chain(t.movie.iter())
+                        .filter(|v| v.finished)
+                        .map(|v| v.id)
+                        .collect(),
+                )
+            }),
+            Action::Watched(ids, _) => {
+                let mut watched = Vec::new();
+                let mut unwatched = Vec::new();
+                for data in self.cache.values().filter_map(|e| e.data.as_deref()) {
+                    if let Some(t) = &data.title {
+                        for v in t
+                            .seasons
+                            .iter()
+                            .flat_map(|s| &s.episodes)
+                            .chain(t.movie.iter())
+                            .filter(|v| ids.contains(&v.id))
+                        {
+                            if v.finished {
+                                watched.push(v.id);
+                            } else {
+                                unwatched.push(v.id);
+                            }
+                        }
+                    }
+                }
+                Some(Action::RestoreEpisodes(watched, unwatched))
+            },
+            _ => None,
+        };
+        self.pending_notice = match action {
+            Action::Read(_) | Action::DeleteNotice(_) | Action::Artwork { .. } => None,
+            Action::TitleWatched(_, true) | Action::Watched(_, true) => Some("Marked watched".into()),
+            Action::TitleWatched(_, false) | Action::Watched(_, false) => Some("Marked unwatched".into()),
+            _ => Some("Saved".into()),
+        };
+        self.pending_action = Some(action.clone());
         self.busy = true;
         self.error = None;
         self.notice = None;
@@ -718,8 +1023,12 @@ async fn load(api: &Api, key: &Key) -> Result<Document, api::Error> {
     use api::*;
     let null_string = |s: &str| if s.is_empty() { Value::Null } else { json!(s) };
     match key {
-        Key::Shell => query::<BrowseShell>(api, json!({})).await,
+        Key::Shell => {
+            let data = query::<BrowseShell>(api, json!({})).await?;
+            if data.viewer.is_none() { Err(Error::unauthorized()) } else { Ok(data) }
+        },
         Key::Home => query::<BrowseHome>(api, json!({})).await,
+        Key::BookHome => query::<BrowseBookHome>(api, json!({})).await,
         Key::Music => query::<BrowseMusicHome>(api, json!({})).await,
         Key::Coming => query::<BrowseComingUp>(api, json!({"from":now()-3600,"to":now()+7*86400})).await,
         Key::Library(name) => query::<BrowseLibrary>(api, json!({"name":name})).await,
@@ -728,7 +1037,7 @@ async fn load(api: &Api, key: &Key) -> Result<Document, api::Error> {
         Key::Similar(id) => query::<BrowseSimilar>(api, json!({"id":id})).await,
         Key::Schedule(id) => query::<BrowseTitleSchedule>(api, json!({"id":id})).await,
         Key::Series(id) => query::<BrowseTitleSeries>(api, json!({"id":id})).await,
-        Key::Calendar(start) => query::<BrowseCalendar>(api, json!({"from":start,"to":start+7*86400})).await,
+        Key::Calendar(start) => query::<BrowseCalendar>(api, json!({"from":start,"to":shift_days(*start,7)})).await,
         Key::Soon => query::<BrowseCalendar>(api, json!({"from":now()-12*3600,"to":now()+30*86400})).await,
         Key::Requests => query::<BrowseRequests>(api, json!({})).await,
         Key::Wanted => query::<BrowseWanted>(api, json!({})).await,
@@ -739,6 +1048,7 @@ async fn load(api: &Api, key: &Key) -> Result<Document, api::Error> {
             query::<BrowseDiscover>(api, json!({"library":null_string(library),"query":q})).await
         },
         Key::ForYou(library) => query::<BrowseForYou>(api, json!({"library":null_string(library)})).await,
+        Key::Recents(ids) => query::<BrowseRecents>(api, json!({"ids":ids})).await,
         Key::Search(q) => query::<BrowseSearch>(api, json!({"query":q})).await,
         Key::Naming(id, file) => query::<BrowseNamingPreview>(api, json!({"id":id,"file":file})).await,
         Key::Options => query::<BrowseOptions>(api, json!({})).await,
@@ -764,11 +1074,24 @@ async fn mutate(api: &Api, action: Action) -> Result<(), api::Error> {
     use api::*;
     match action {
         Action::Watched(ids, watched) => mutation::<BrowseSetWatched>(api, json!({"videoIds":ids,"watched":watched})).await,
+        Action::RestoreTitle(id,ids)=>{
+            mutation::<BrowseSetTitleWatched>(api,json!({"id":id,"watched":false})).await?;
+            if !ids.is_empty(){mutation::<BrowseSetWatched>(api,json!({"videoIds":ids,"watched":true})).await?;} Ok(())
+        },
+        Action::RestoreEpisodes(watched,unwatched)=>{
+            if !watched.is_empty(){mutation::<BrowseSetWatched>(api,json!({"videoIds":watched,"watched":true})).await?;}
+            if !unwatched.is_empty(){mutation::<BrowseSetWatched>(api,json!({"videoIds":unwatched,"watched":false})).await?;}Ok(())
+        },
         Action::TitleWatched(id, watched) => mutation::<BrowseSetTitleWatched>(api, json!({"id":id,"watched":watched})).await,
         Action::Refresh(id) => mutation::<BrowseRefreshTitle>(api, json!({"id":id})).await,
         Action::Approve(id) => mutation::<BrowseApproveRequest>(api, json!({"id":id})).await,
         Action::Decline(id) => mutation::<BrowseDeclineRequest>(api, json!({"id":id})).await,
         Action::CancelRequest(id) => mutation::<BrowseDeleteRequest>(api, json!({"id":id})).await,
+        Action::Bulk(pause)=>{
+            let data=load(api,&Key::Downloads).await?;
+            let ids=data.downloads.iter().filter(|d|if pause{matches!(d.state.as_str(),"DOWNLOADING"|"SEEDING")}else{d.state=="PAUSED"}).map(|d|d.id).collect::<Vec<_>>();
+            if pause{mutation::<BrowseDownloadsPause>(api,json!({"ids":ids})).await}else{mutation::<BrowseDownloadsResume>(api,json!({"ids":ids})).await}
+        },
         Action::Pause(ids) => mutation::<BrowseDownloadsPause>(api, json!({"ids":ids})).await,
         Action::Resume(ids) => mutation::<BrowseDownloadsResume>(api, json!({"ids":ids})).await,
         Action::Recheck(ids) => mutation::<BrowseDownloadsRecheck>(api, json!({"ids":ids})).await,
@@ -783,7 +1106,11 @@ async fn mutate(api: &Api, action: Action) -> Result<(), api::Error> {
         Action::RefreshSchedule(id) => mutation::<BrowseRefreshSeriesSchedule>(api, json!({"id":id})).await,
         Action::RemoveSeries(id) => mutation::<BrowseRemoveSeries>(api, json!({"id":id})).await,
         Action::LookAgain(id, season, episode) => mutation::<BrowseLookForAgain>(api, json!({"seriesId":id,"season":season,"episode":episode})).await,
-        Action::DeleteDownloaded(id, season) => mutation::<BrowseDeleteDownloaded>(api, json!({"seriesId":id,"season":season})).await,
+        Action::DeleteDownloaded(id, season) => {
+            let variables=serde_json::from_value(json!({"seriesId":id,"season":season})).map_err(|e|Error::message(format!("Invalid request: {e}")))?;
+            let data=api.request::<BrowseDeleteDownloaded>(variables).await?;
+            if data.delete_downloaded.problems.is_empty(){Ok(())}else{Err(Error::message(data.delete_downloaded.problems.join("\n")))}
+        },
         Action::Grab(id, r) => mutation::<BrowseGrabRelease>(api, json!({"seriesId":id,"episodes":r.episodes.iter().map(|e|json!({"season":e.season,"episode":e.episode})).collect::<Vec<_>>(),"release":{"title":r.release.title,"source":r.release.source,"link":r.release.link,"infoHash":r.release.info_hash,"size":r.release.size,"seeders":r.release.seeders,"leechers":r.release.leechers,"published":r.release.published,"page":r.release.page}})).await,
         Action::Match(id, provider, provider_id) => mutation::<BrowseMatchTitle>(api, json!({"id":id,"provider":provider,"providerId":provider_id})).await,
         Action::Artwork { id, kind, reset } => api.artwork(id, kind, reset).await,
@@ -794,105 +1121,19 @@ pub fn now() -> i64 {
     SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs() as i64
 }
 
-pub fn week_start(at: i64) -> i64 {
+pub fn shift_days(at: i64, days: i64) -> i64 {
     use crate::platform::{Current, Desktop};
     let offset = Current::utc_offset(at);
-    let day = (at + offset).div_euclid(86400);
-    (day - (day + 3).rem_euclid(7)) * 86400 - offset
+    let wall = ((at + offset).div_euclid(86400) + days) * 86400;
+    wall - Current::utc_offset(wall - offset)
 }
-
-fn picture_paths(d: &Document) -> Vec<String> {
-    let mut paths = Vec::new();
-    let mut add = |p: &Option<String>| {
-        if let Some(p) = p {
-            paths.push(p.clone());
-        }
-    };
-    for c in d.library.iter().flat_map(|l| &l.titles) {
-        add(&c.poster);
-    }
-    if let Some(h) = &d.home {
-        for e in &h.continue_watching {
-            add(&e.video.still);
-            add(&e.video.title.backdrop);
-        }
-        for c in h.recently_added.iter().flat_map(|s| &s.titles).chain(h.popular_here.iter().map(|p| &p.title)) {
-            add(&c.poster);
-        }
-    }
-    if let Some(t) = &d.title {
-        add(&t.card.poster);
-        add(&t.card.backdrop);
-        for s in &t.seasons {
-            add(&s.poster);
-            for v in &s.episodes {
-                add(&v.still);
-            }
-        }
-        if let Some(s) = &t.similar {
-            for c in &s.also_watched {
-                add(&c.poster);
-            }
-            for c in &s.recommendations {
-                add(&c.poster);
-            }
-        }
-        if let Some(c) = &t.match_candidates {
-            for c in &c.results {
-                add(&c.poster);
-            }
-        }
-    }
-    for e in &d.calendar {
-        add(&e.poster);
-        add(&e.backdrop);
-    }
-    for r in &d.requests {
-        add(&r.poster);
-        if let Some(u) = &r.user {
-            add(&u.avatar);
-        }
-    }
-    for r in &d.downloads {
-        add(&r.poster);
-    }
-    if let Some(i) = &d.notifications {
-        for n in &i.items {
-            add(&n.image);
-            if let Some(a) = &n.actor {
-                add(&a.avatar);
-            }
-        }
-    }
-    if let Some(s) = &d.search {
-        for c in &s.titles {
-            add(&c.poster);
-        }
-    }
-    if let Some(s) = &d.music_search {
-        for a in s.albums.iter().chain(&s.artists) {
-            add(&a.cover);
-        }
-    }
-    if let Some(h) = &d.music_home {
-        for a in h.recently_added.iter().chain(&h.recently_played) {
-            add(&a.cover);
-        }
-    }
-    if let Some(s) = &d.discover {
-        for c in &s.results {
-            add(&c.poster);
-        }
-    }
-    if let Some(s) = &d.for_you {
-        for c in s.shelves.iter().flat_map(|s| &s.results) {
-            add(&c.poster);
-        }
-    }
-    for b in &d.books {
-        add(&b.cover);
-    }
-    paths
+pub fn week_start(at: i64) -> i64 {
+    use crate::platform::{Current, Desktop};
+    let day = (at + Current::utc_offset(at)).div_euclid(86400);
+    shift_days(at, -(day + 3).rem_euclid(7))
+}
+pub fn calendar_start(week: i64) -> i64 {
+    shift_days(week_start(now()), week * 7)
 }
 
 #[cfg(test)]
@@ -901,6 +1142,130 @@ mod tests {
 
     fn api() -> Api {
         Api::new(url::Url::parse("http://localhost:3000").unwrap(), None).unwrap()
+    }
+
+    #[test]
+    fn inbox_reads_and_removals_are_immediate_even_during_another_mutation() {
+        let mut b = Browsing { busy: true, ..Default::default() };
+        let data: Document =
+            serde_json::from_value(json!({"notifications":{"unread":2,"items":[{"id":1},{"id":2}]}})).unwrap();
+        b.cache.insert(Key::Inbox, Entry { data: Some(Arc::new(data)), ..Default::default() });
+        let mut effects = Vec::new();
+        let api = api();
+        b.act(Action::Read(Some(vec![1])), &api, &mut effects);
+        assert_eq!(b.unread(), 1);
+        b.act(Action::DeleteNotice(Some(2)), &api, &mut effects);
+        assert_eq!(b.unread(), 0);
+        assert_eq!(b.data(&Key::Inbox).unwrap().notifications.as_ref().unwrap().items.len(), 1);
+        assert!(b.busy);
+        assert_eq!(effects.len(), 2);
+    }
+
+    #[test]
+    fn grabbing_a_release_returns_to_its_results_without_losing_the_query() {
+        let mut b = Browsing {
+            dialog: Some(Dialog::Releases { series: 1, season: 2, episodes: vec![3], name: "Example".into() }),
+            release_query: "query".into(),
+            ..Default::default()
+        };
+        let api = api();
+        let mut effects = Vec::new();
+        let candidate = Arc::new(ReleaseCandidate {
+            release: Release { link: "release-link".into(), ..Default::default() },
+            ..Default::default()
+        });
+        let action = Action::Grab(1, candidate);
+        b.update(
+            Message::Dialog(Some(Dialog::Confirm {
+                title: "Download?".into(),
+                body: String::new(),
+                action: Arc::new(action.clone()),
+            })),
+            &api,
+            &Route::Wanted,
+            &mut effects,
+        );
+        b.act(action, &api, &mut effects);
+        b.update(Message::Mutated(0, Ok(())), &api, &Route::Wanted, &mut effects);
+        assert!(matches!(b.dialog, Some(Dialog::Releases { series: 1, .. })));
+        assert_eq!(b.release_query, "query");
+        assert!(b.grabbed.contains("release-link"));
+    }
+
+    #[test]
+    fn calendar_boundaries_stay_at_local_midnight_across_offset_changes() {
+        use crate::platform::{Current, Desktop};
+        for at in [1711846800, 1729990800] {
+            let start = week_start(at);
+            let local = start + Current::utc_offset(start);
+            assert_eq!(local.rem_euclid(86400), 0);
+            assert_eq!((local.div_euclid(86400) + 3).rem_euclid(7), 0);
+            let next = shift_days(start, 7);
+            assert_eq!((next + Current::utc_offset(next)).rem_euclid(86400), 0);
+        }
+    }
+
+    #[test]
+    fn images_are_deduplicated_and_fetched_with_bounded_concurrency() {
+        let mut b = Browsing::default();
+        let mut effects = Vec::new();
+        let api = api();
+        b.pictures((0..20).map(|i| format!("image/{i}")).collect(), &api, &mut effects);
+        b.pictures(vec!["image/0".into()], &api, &mut effects);
+        assert_eq!(effects.len(), 6);
+        assert_eq!(b.image_active, 6);
+        assert_eq!(b.image_queue.len(), 14);
+        b.update(Message::Picture(0, "image/0".into(), None, true), &api, &Route::Home, &mut effects);
+        assert_eq!(effects.len(), 7);
+        assert_eq!(b.image_active, 6);
+        assert_eq!(b.image_queue.len(), 13);
+    }
+
+    #[test]
+    fn null_optional_request_and_download_fields_decode() {
+        let d:Document=serde_json::from_value(json!({"requests":[{"library":null}],"downloads":[{"source":null,"size":null,"seedGoal":{"ratio":null,"seconds":null}}],"books":[{"reading":{"position":1,"progress":0.5,"finished":false,"updatedAt":9}}]})).unwrap();
+        assert!(d.requests[0].library.is_none());
+        assert!(d.downloads[0].source.is_none());
+        assert_eq!(d.books[0].reading.as_ref().unwrap().updated_at, 9);
+    }
+
+    #[test]
+    fn series_settings_preserve_server_source_names_and_encode_duration_presets() {
+        let draft = SeriesDraft {
+            numbering: "AUTO".into(),
+            sources: vec!["A server source".into()],
+            groups: "Group A, Group B, ".into(),
+            seeding: "week".into(),
+            ..Default::default()
+        };
+        let patch = draft.patch();
+        assert_eq!(patch["sources"], json!(["A server source"]));
+        assert_eq!(patch["groups"], json!(["Group A", "Group B"]));
+        let _: api::browse_update_series::Variables = serde_json::from_value(json!({"id":1,"patch":patch})).unwrap();
+    }
+
+    #[test]
+    fn download_events_do_not_refetch_unrelated_library_pages() {
+        let mut b = Browsing::default();
+        for key in [Key::Home, Key::Downloads, Key::Inbox, Key::Library("Shows".into())] {
+            b.cache.insert(key, Entry::default());
+        }
+        b.live(&api::Live::Event(Arc::new(
+            serde_json::from_value(json!({"events":{"__typename":"ListChanged","list":"DOWNLOADS"}})).unwrap(),
+        )));
+        assert!(b.cache[&Key::Downloads].dirty);
+        assert!(!b.cache[&Key::Home].dirty);
+        assert!(!b.cache[&Key::Library("Shows".into())].dirty);
+    }
+
+    #[test]
+    fn progress_saved_after_the_player_is_closed_invalidates_cached_watched_state() {
+        let mut app = crate::app::App::new(Route::Home, crate::window_state::WindowState::default());
+        app.session.screen = crate::session::Screen::Ready;
+        app.session.api = Some(api());
+        app.browsing.cache.insert(Key::Home, Entry { data: Some(Arc::new(Document::default())), ..Default::default() });
+        app.update(crate::app::Message::Player(999, crate::player::Message::Saved), &mut Vec::new());
+        assert!(app.browsing.cache[&Key::Home].pending);
     }
 
     #[test]

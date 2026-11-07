@@ -27,7 +27,10 @@ pub struct Document {
     pub series: Option<Series>,
     pub settings: Option<Options>,
     pub aired_episodes: Option<i64>,
+    pub titles: Vec<Card>,
     pub books: Vec<Book>,
+    pub reading_now: Vec<Book>,
+    pub new_books: Vec<BookShelf>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -54,7 +57,7 @@ pub struct Features {
     pub downloads: bool,
     pub clips: bool,
 }
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Library {
     pub name: String,
@@ -228,7 +231,10 @@ pub struct Album {
     pub cover: Option<String>,
 }
 #[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
 pub struct Track {
+    pub album_id: i64,
+    pub cover: Option<String>,
     pub id: i64,
     pub title: String,
     pub artist: String,
@@ -251,9 +257,12 @@ pub struct Book {
     pub year: Option<i64>,
     pub cover: Option<String>,
     pub reading: Option<Reading>,
+    pub added_at: i64,
 }
 #[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
 pub struct Reading {
+    pub updated_at: i64,
     pub position: f64,
     pub progress: f64,
     pub finished: bool,
@@ -359,6 +368,8 @@ pub struct Live {
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Engine {
+    pub version: String,
+    pub download_path: String,
     pub download_rate: i64,
     pub upload_rate: i64,
     pub active: i64,
@@ -396,6 +407,7 @@ pub struct Series {
     pub library: String,
     pub managed: bool,
     pub profile: Option<String>,
+    pub effective_profile: String,
     pub sources: Vec<String>,
     pub groups: Vec<String>,
     pub aliases: Vec<String>,
@@ -426,6 +438,7 @@ pub struct ReleaseCandidate {
     pub verdict: Verdict,
     pub episodes: Vec<EpisodeNumber>,
     pub batch: bool,
+    pub attributes: Attributes,
 }
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
@@ -446,6 +459,7 @@ pub struct Verdict {
     pub score: i64,
     pub rejections: Vec<String>,
     pub warnings: Vec<String>,
+    pub nonstandard: bool,
 }
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct EpisodeNumber {
@@ -504,4 +518,21 @@ pub struct NamingPreview {
 pub struct SeedGoal {
     pub ratio: Option<f64>,
     pub seconds: Option<i64>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct BookShelf {
+    pub library: String,
+    pub books: Vec<Book>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct Attributes {
+    pub group: Option<String>,
+    pub resolution: Option<i64>,
+    pub codec: Option<String>,
+    pub source: Option<String>,
+    pub dual_audio: bool,
+    pub version: i64,
 }

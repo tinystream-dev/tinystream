@@ -26,6 +26,7 @@ pub enum Picture {
 #[derive(Default)]
 pub struct Images {
     pictures: HashMap<String, Picture>,
+    touched: HashMap<String, Instant>,
 }
 
 impl Images {
@@ -42,6 +43,7 @@ impl Images {
 
     /// Whether `path` still has to be asked for; marks it as on its way.
     pub fn want(&mut self, path: &str) -> bool {
+        self.touched.insert(path.to_owned(), Instant::now());
         if self.pictures.contains_key(path) {
             return false;
         }
@@ -50,6 +52,7 @@ impl Images {
     }
 
     pub fn arrived(&mut self, path: String, handle: Option<Handle>, fresh: bool) {
+        self.touched.entry(path.clone()).or_insert_with(Instant::now);
         if !fresh && matches!(self.pictures.get(&path), Some(Picture::Ready(_, Some(_)))) {
             return;
         }
@@ -61,9 +64,26 @@ impl Images {
         self.pictures.insert(path, picture);
     }
 
+    /// Bounds decoded artwork while retaining queued requests and cheap missing-image entries.
+    pub fn limit_ready(&mut self, limit: usize) {
+        let mut ready = self
+            .pictures
+            .iter()
+            .filter(|(_, p)| matches!(p, Picture::Ready(..)))
+            .map(|(path, _)| (path.clone(), self.touched.get(path).copied()))
+            .collect::<Vec<_>>();
+        let remove = ready.len().saturating_sub(limit);
+        ready.sort_by_key(|(_, at)| *at);
+        for (path, _) in ready.into_iter().take(remove) {
+            self.pictures.remove(&path);
+            self.touched.remove(&path);
+        }
+    }
+
     /// Forgets everything, for another server or when pictures may have changed.
     pub fn clear(&mut self) {
         self.pictures.clear();
+        self.touched.clear();
     }
 }
 
@@ -118,6 +138,22 @@ pub async fn decode(bytes: Vec<u8>) -> Option<Handle> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn decoded_image_limit_keeps_recently_requested_images_and_inflight_entries() {
+        let mut images = Images::default();
+        let handle = Handle::from_rgba(1, 1, vec![0, 0, 0, 255]);
+        for path in ["old", "current", "new"] {
+            images.want(path);
+            images.arrived(path.into(), Some(handle.clone()), false);
+        }
+        images.want("current");
+        images.want("loading");
+        images.limit_ready(1);
+        assert!(images.get("current").is_some());
+        assert!(images.get("old").is_none());
+        assert!(!images.want("loading"));
+    }
 
     #[test]
     fn disk_results_cannot_replace_a_fresher_picture() {

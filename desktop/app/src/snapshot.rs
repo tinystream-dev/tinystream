@@ -115,6 +115,17 @@ pub fn snapshot(
             );
             interface.operate(&renderer, &mut scroll);
         }
+        if frame == 0 && app.gallery.is_none() && app.history.current().scroll > 0.0 {
+            let mut scroll = iced_core::widget::operation::scrollable::scroll_to(
+                crate::app::SCROLL.into(),
+                iced_core::widget::operation::scrollable::AbsoluteOffset {
+                    x: None,
+                    y: Some(app.history.current().scroll),
+                },
+                iced_core::widget::operation::Animation::Instant,
+            );
+            interface.operate(&renderer, &mut scroll);
+        }
         let mut events =
             vec![Event::Window(window::Event::RedrawRequested(start + Duration::from_secs(2 * frame as u64 + 2)))];
         if let mouse::Cursor::Available(position) = cursor {

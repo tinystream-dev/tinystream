@@ -133,7 +133,8 @@ fn main() -> ExitCode {
             if matches!(scene.as_str(), "settings" | "credits") {
                 app.history = route::History::new(Route::Settings);
             }
-            browsing::preview::prepare(&mut app, scene);
+            browsing::preview::prepare(&mut app, scene, flags.style, flags.custom, flags.still);
+            app.history.set_scroll(flags.scroll);
             if scene == "credits" {
                 app.overlay = Some(app::Overlay::Credits);
             }
@@ -206,6 +207,7 @@ struct Flags {
     #[cfg_attr(not(debug_assertions), allow(dead_code))]
     pointer: Option<iced_core::Point>,
     click: bool,
+    right_click: bool,
     key: Option<String>,
 }
 
@@ -214,6 +216,12 @@ impl Flags {
     fn input(&self) -> Vec<iced_core::Event> {
         use iced_core::{Event, keyboard, mouse};
         let mut events = Vec::new();
+        if self.right_click {
+            events.extend([
+                Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Right)),
+                Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Right)),
+            ]);
+        }
         if self.click {
             events.extend([
                 Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)),
@@ -224,6 +232,8 @@ impl Flags {
             let named = match key.as_str() {
                 "Escape" => keyboard::key::Named::Escape,
                 "Tab" => keyboard::key::Named::Tab,
+                "ArrowDown" => keyboard::key::Named::ArrowDown,
+                "ArrowUp" => keyboard::key::Named::ArrowUp,
                 "Space" => keyboard::key::Named::Space,
                 _ => keyboard::key::Named::Enter,
             };
@@ -256,6 +266,7 @@ impl Flags {
             scale: 1.0,
             pointer: None,
             click: false,
+            right_click: false,
             key: None,
         };
         let mut args = std::env::args().skip(1);
@@ -264,6 +275,7 @@ impl Flags {
                 "--video" => flags.video = Some(args.next().unwrap_or_default().into()),
                 "--gallery" => flags.gallery = true,
                 "--click" => flags.click = true,
+                "--right-click" => flags.right_click = true,
                 "--key" => flags.key = args.next(),
                 "--custom" => flags.custom = true,
                 "--light" => flags.light = true,

@@ -67,6 +67,7 @@ pub enum Message {
     Query(String),
     Submit,
     SearchStep(i32),
+    SearchHover(usize),
     Focus(bool),
     Session(crate::session::Message),
     Gallery(crate::ui::gallery::Message),
@@ -125,6 +126,7 @@ impl App {
     }
 
     pub fn update(&mut self, message: Message, effects: &mut Vec<Effect>) {
+        self.browsing.reduce_motion = self.session.look().reduce_motion;
         self.handle(message, effects);
         self.follow_route(effects);
         if self.session.screen == crate::session::Screen::Ready
@@ -145,7 +147,13 @@ impl App {
                 if generation != self.session.generation {
                     return;
                 }
-                let unauthorized = matches!(&message, crate::browsing::Message::Loaded(_, _, _, Err(e)) | crate::browsing::Message::Mutated(_, Err(e)) if e.unauthorized);
+                if matches!(message, crate::browsing::Message::Follow(_)) {
+                    self.overlay = None;
+                }
+                if matches!(message, crate::browsing::Message::Act(_)) && self.overlay == Some(Overlay::Search) {
+                    self.overlay = None;
+                }
+                let unauthorized = matches!(&message, crate::browsing::Message::Loaded(_, _, _, Err(e)) | crate::browsing::Message::Mutated(_, Err(e)) | crate::browsing::Message::InboxSettled(Err(e)) if e.unauthorized);
                 if unauthorized {
                     self.handle(
                         Message::Session(crate::session::Message::Live(generation, crate::api::Live::Unauthorized)),
@@ -272,16 +280,32 @@ impl App {
                 self.reduce_motion = reduce;
                 self.session.reduce_motion = reduce;
             },
+            Message::SearchHover(index) => self.browsing.search_index = index,
             Message::SearchStep(step) => {
                 let count = crate::browsing::palette(self).len();
                 if count > 0 {
                     self.browsing.search_index =
                         (self.browsing.search_index as i32 + step).rem_euclid(count as i32) as usize;
+                    let items = crate::browsing::palette(self);
+                    let mut group = "";
+                    let mut y = 0.0f32;
+                    for item in items.iter().take(self.browsing.search_index + 1) {
+                        if item.group != group {
+                            group = item.group;
+                            y += 32.0;
+                        }
+                        y += 54.0;
+                    }
+                    effects.push(Effect::Operate(Box::new(operation::scrollable::scroll_to(
+                        "palette-results".into(),
+                        AbsoluteOffset { x: None, y: Some((y - 220.0).max(0.0)) },
+                        Animation::Instant,
+                    ))));
                 }
             },
             Message::Submit => {
                 if let Some(item) = crate::browsing::palette(self).get(self.browsing.search_index) {
-                    self.navigate(item.route.clone(), effects);
+                    self.handle(item.message(self.session.generation), effects);
                 }
             },
         }

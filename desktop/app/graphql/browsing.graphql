@@ -440,3 +440,10 @@ fragment InboxFields on Inbox { items { ...NotificationFields } unread }
 query BrowseOptions { settings { libraries { name metadataProvider managed profile } profiles { name } sources { name } automation { defaultMonitor } } }
 mutation BrowseTitleArtwork($id: Int!, $kind: TitleArtwork!, $image: Upload) { setTitleArtwork(id: $id, kind: $kind, image: $image) { id } }
 mutation BrowseVideoArtwork($videoId: Int!, $image: Upload) { setVideoArtwork(videoId: $videoId, image: $image) { id } }
+
+query BrowseBookHome {
+  readingNow { ...BookCard }
+  newBooks { library books { ...BookCard } }
+}
+
+query BrowseRecents($ids: [Int!]!) { titles(ids: $ids) { ...Card } }
