@@ -311,6 +311,7 @@ impl Runner {
 
     /// Runs `message` through the app and carries out what it asks for.
     fn update(&mut self, event_loop: &ActiveEventLoop, message: Message) {
+        let quiet = quiet(&message);
         self.app.update(message, &mut self.effects);
 
         for effect in std::mem::take(&mut self.effects) {
@@ -419,77 +420,28 @@ impl Runner {
         if !self.app.player.as_ref().is_some_and(|player| player.pip) {
             self.pip = None;
         }
+        if quiet {
+            return;
+        }
         for window in self.window.iter_mut().chain(self.pip.iter_mut()) {
             window.ui_dirty = true;
             window.raw.request_redraw();
         }
     }
 
-    /// Feeds the window's pending events to the widgets, and their messages to the app.
-    fn process(&mut self, event_loop: &ActiveEventLoop, pip: bool) {
-        let Some(window) = (if pip { &mut self.pip } else { &mut self.window }) else { return };
-        if window.events.is_empty() && window.operations.is_empty() {
-            return;
-        }
-
-        window.ui_dirty = true;
-        let events = std::mem::take(&mut window.events);
-        let mut messages = shell::Bus::new();
-        let mut interface = UserInterface::build(
-            window_view(&self.app, pip),
-            window.viewport.logical_size(),
-            std::mem::take(&mut window.cache),
-            &mut window.renderer,
-        );
-
-        for mut operation in window.operations.drain(..) {
-            loop {
-                interface.operate(&window.renderer, operation.as_mut());
-                match operation.finish() {
-                    iced_core::widget::operation::Outcome::Chain(next) => operation = next,
-                    _ => break,
-                }
-            }
-        }
-
-        let (state, statuses) = interface.update(
-            window.raw.as_ref(),
-            &window.waker,
-            &events,
-            window.cursor,
-            &mut window.renderer,
-            &mut messages,
-        );
-        window.cache = interface.into_cache();
-        window.react(state, &mut self.clipboard, &self.proxy);
-        window.raw.request_redraw();
-
-        let shortcuts = events
-            .iter()
-            .zip(statuses)
-            .filter_map(
-                |(event, status)| {
-                    if pip { self.app.listen_in(event, status, true) } else { self.app.listen(event, status) }
-                },
-            )
-            .collect::<Vec<_>>();
-
-        for message in messages.into_iter().chain(shortcuts) {
-            self.update(event_loop, message);
-        }
-    }
-
+    /// Feeds the window's pending events to the widgets with the redraw drawing them, and their
+    /// messages to the app, then draws the frame: once a frame, however many events came in.
     fn redraw(&mut self, event_loop: &ActiveEventLoop, pip: bool) {
-        self.process(event_loop, pip);
         let animating = self.app.animating() && (pip || !self.app.player.as_ref().is_some_and(|player| player.pip));
         let Some(window) = (if pip { &mut self.pip } else { &mut self.window }) else { return };
         let size = window.raw.inner_size();
         if size.width == 0 || size.height == 0 {
             return;
         }
+        let pending = !window.events.is_empty() || !window.operations.is_empty();
         // Frame notifications change the shared texture, not the widget tree. iced prepares its
         // retained primitives on every present, including the newest video frame.
-        if !window.ui_dirty && !window.resized && !animating {
+        if !pending && !window.ui_dirty && !window.resized && !animating {
             iced_core::Renderer::tick(&mut window.renderer);
             if !window.present(window.background) {
                 window.resized = true;
@@ -498,36 +450,72 @@ impl Runner {
             return;
         }
         self.app.session.system_dark = window.raw.theme() != Some(winit::window::Theme::Light);
-        let look = match &self.app.gallery {
-            Some(gallery) => gallery.look(self.app.reduce_motion),
-            None => self.app.session.look(),
-        };
-        self.theme = look.theme();
-        window.background = if pip { look.media_shade } else { look.canvas };
         window.ui_dirty = false;
         iced_core::Renderer::tick(&mut window.renderer);
         if window.resized {
             window.configure();
         }
 
+        let now = Instant::now();
+        let mut events = std::mem::take(&mut window.events);
+        let inputs = events.len();
+        events.push(Event::Window(window::Event::RedrawRequested(now)));
         let mut interface = UserInterface::build(
             window_view(&self.app, pip),
             window.viewport.logical_size(),
             std::mem::take(&mut window.cache),
             &mut window.renderer,
         );
-        let mut messages = shell::Bus::new();
-        let (state, _) = interface.update(
+        operate(&mut interface, &window.renderer, &mut window.operations);
+        let mut bus = shell::Bus::new();
+        let (state, statuses) = interface.update(
             window.raw.as_ref(),
             &window.waker,
-            &[Event::Window(window::Event::RedrawRequested(Instant::now()))],
+            &events,
             window.cursor,
             &mut window.renderer,
-            &mut messages,
+            &mut bus,
         );
+        window.react(state, &mut self.clipboard, &self.proxy);
+        let mut messages = bus.into_iter().collect::<Vec<_>>();
+
+        // What the widgets asked for is shown in this frame, so it's built again once the app has
+        // it, and told it's being drawn.
+        if !messages.iter().all(quiet) {
+            window.cache = interface.into_cache();
+            for message in std::mem::take(&mut messages) {
+                self.update(event_loop, message);
+            }
+            let Some(window) = (if pip { &mut self.pip } else { &mut self.window }) else { return };
+            interface = UserInterface::build(
+                window_view(&self.app, pip),
+                window.viewport.logical_size(),
+                std::mem::take(&mut window.cache),
+                &mut window.renderer,
+            );
+            operate(&mut interface, &window.renderer, &mut window.operations);
+            let mut bus = shell::Bus::new();
+            let (state, _) = interface.update(
+                window.raw.as_ref(),
+                &window.waker,
+                &[Event::Window(window::Event::RedrawRequested(now))],
+                window.cursor,
+                &mut window.renderer,
+                &mut bus,
+            );
+            window.react(state, &mut self.clipboard, &self.proxy);
+            messages.extend(bus);
+        }
+
+        let Some(window) = (if pip { &mut self.pip } else { &mut self.window }) else { return };
+        let look = match &self.app.gallery {
+            Some(gallery) => gallery.look(self.app.reduce_motion),
+            None => self.app.session.look(),
+        };
+        self.theme = look.theme();
+        window.background = if pip { look.media_shade } else { look.canvas };
         interface.draw(&mut window.renderer, &self.theme, &renderer::Style { text_color: look.ink }, window.cursor);
         window.cache = interface.into_cache();
-        window.react(state, &mut self.clipboard, &self.proxy);
 
         if !window.present(window.background) {
             window.resized = true;
@@ -537,7 +525,17 @@ impl Runner {
             window.raw.request_redraw();
         }
 
-        for message in messages {
+        // Keys the widgets left alone are shortcuts, shown from the next frame.
+        let shortcuts = events[..inputs]
+            .iter()
+            .zip(statuses)
+            .filter_map(
+                |(event, status)| {
+                    if pip { self.app.listen_in(event, status, true) } else { self.app.listen(event, status) }
+                },
+            )
+            .collect::<Vec<_>>();
+        for message in messages.into_iter().chain(shortcuts) {
             self.update(event_loop, message);
         }
     }
@@ -818,8 +816,8 @@ impl ApplicationHandler<UserEvent> for Runner {
         let Some(window) = (if pip { &mut self.pip } else { &mut self.window }) else { return };
         if let Some(event) = conversion::window_event(event, window.viewport.scale_factor(), window.modifiers) {
             window.events.push(event);
+            window.raw.request_redraw();
         }
-        self.process(event_loop, pip);
     }
 
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: UserEvent) {
@@ -828,8 +826,8 @@ impl ApplicationHandler<UserEvent> for Runner {
             UserEvent::Event(event) => {
                 if let Some(window) = &mut self.window {
                     window.events.push(event);
+                    window.raw.request_redraw();
                 }
-                self.process(event_loop, false);
             },
             UserEvent::Wake => {
                 for window in self.window.iter_mut().chain(self.pip.iter_mut()) {
@@ -849,6 +847,29 @@ impl ApplicationHandler<UserEvent> for Runner {
         match self.window.iter().chain(self.pip.iter()).filter_map(|window| window.redraw_at).min() {
             Some(at) => event_loop.set_control_flow(ControlFlow::WaitUntil(at)),
             None => event_loop.set_control_flow(ControlFlow::Wait),
+        }
+    }
+}
+
+/// Whether `message` leaves what's shown as it is: the page's scroll position is only kept for
+/// coming back to it, and the scrollable redraws itself.
+fn quiet(message: &Message) -> bool {
+    matches!(message, Message::Scrolled(_))
+}
+
+/// Runs the operations the app asked for on `interface`.
+fn operate(
+    interface: &mut UserInterface<'_, Message, Theme, Renderer>,
+    renderer: &Renderer,
+    operations: &mut Vec<Box<dyn Operation>>,
+) {
+    for mut operation in operations.drain(..) {
+        loop {
+            interface.operate(renderer, operation.as_mut());
+            match operation.finish() {
+                iced_core::widget::operation::Outcome::Chain(next) => operation = next,
+                _ => break,
+            }
         }
     }
 }
