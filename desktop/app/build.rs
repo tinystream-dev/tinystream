@@ -6,6 +6,7 @@ use std::path::PathBuf;
 use std::{env, fs};
 
 use graphql_client_codegen::{CodegenMode, GraphQLClientCodegenOptions, generate_module_token_stream_from_string};
+use graphql_parser::query::{Definition, OperationDefinition, Selection, SelectionSet};
 
 fn main() {
     let output = PathBuf::from(env::var_os("OUT_DIR").expect("Cargo output directory"));
@@ -20,8 +21,25 @@ fn main() {
     }
 
     let shared = fs::read_to_string(fragments).expect("shared fragments");
-    let shared = graphql_parser::parse_query::<String>(&shared).expect("valid shared fragments");
+    let mut shared = graphql_parser::parse_query::<String>(&shared).expect("valid shared fragments");
     let operations = queries.map(|query| fs::read_to_string(query).expect("operations")).join("\n");
+    // Every request carries the whole document, and the server turns away fragments nothing uses.
+    let parsed = graphql_parser::parse_query::<String>(&operations).expect("valid operations");
+    let mut used = Vec::new();
+    for definition in &parsed.definitions {
+        spreads(definition_selections(definition), &mut used);
+    }
+    let mut seen = 0;
+    while seen < used.len() {
+        let name = used[seen].clone();
+        seen += 1;
+        if let Some(fragment) =
+            shared.definitions.iter().find(|d| matches!(d, Definition::Fragment(f) if f.name == name))
+        {
+            spreads(definition_selections(fragment), &mut used);
+        }
+    }
+    shared.definitions.retain(|d| matches!(d, Definition::Fragment(f) if used.contains(&f.name)));
     let document = format!("{operations}\n{shared}");
     let mut options = GraphQLClientCodegenOptions::new(CodegenMode::Cli);
     options.set_module_visibility(syn::parse_str("pub").expect("public visibility"));
@@ -32,6 +50,30 @@ fn main() {
         .expect("operations match the shared schema");
     fs::write(output.join("graphql.rs"), generated.to_string().replace(" ; ", ";\n").replace(" } ", " }\n"))
         .expect("write generated API types");
+}
+
+fn definition_selections<'a, 'd>(definition: &'d Definition<'a, String>) -> &'d SelectionSet<'a, String> {
+    match definition {
+        Definition::Fragment(fragment) => &fragment.selection_set,
+        Definition::Operation(OperationDefinition::Query(q)) => &q.selection_set,
+        Definition::Operation(OperationDefinition::Mutation(m)) => &m.selection_set,
+        Definition::Operation(OperationDefinition::Subscription(s)) => &s.selection_set,
+        Definition::Operation(OperationDefinition::SelectionSet(set)) => set,
+    }
+}
+
+/// The names of the fragments `set` spreads, anywhere inside it, added to `names`.
+fn spreads(set: &SelectionSet<'_, String>, names: &mut Vec<String>) {
+    for item in &set.items {
+        match item {
+            Selection::Field(field) => spreads(&field.selection_set, names),
+            Selection::InlineFragment(inline) => spreads(&inline.selection_set, names),
+            Selection::FragmentSpread(spread) if !names.contains(&spread.fragment_name) => {
+                names.push(spread.fragment_name.clone())
+            },
+            Selection::FragmentSpread(_) => {},
+        }
+    }
 }
 
 /// The logo's shapes from the shared `logo.ts`, as steps like the icons'.
