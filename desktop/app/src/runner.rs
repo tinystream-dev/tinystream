@@ -397,6 +397,8 @@ impl Runner {
                 },
                 Effect::Listen(start) => {
                     let proxy = self.proxy.clone();
+                    // Listeners may spawn their own tasks on the runtime.
+                    let _runtime = self.runtime.enter();
                     start(Arc::new(move |message| {
                         let _ = proxy.send_event(UserEvent::Message(message));
                     }));
