@@ -304,7 +304,7 @@ function ClipCard({ clip: c, scope, onOpen }: { clip: Clip; scope: Scope; onOpen
         {scope === 'sent' && (
           <div className="flex shrink-0 -space-x-1.5 pt-0.5">
             {c.recipients.slice(0, 3).map(({ user: p }) => (
-              <span key={p.id} className="rounded-full ring-2 ring-canvas">
+              <span key={p.id} className="flex rounded-full ring-2 ring-canvas">
                 <Avatar user={p} size={20} />
               </span>
             ))}

@@ -697,7 +697,7 @@ export function SendTo({ value, onChange }: { value: Person[]; onChange: (p: Per
       </Popover>
       <div className="flex min-w-0 -space-x-1.5">
         {value.slice(0, 6).map((p) => (
-          <span key={p.id} className="rounded-full ring-2 ring-media-canvas" title={p.username}>
+          <span key={p.id} className="flex rounded-full ring-2 ring-media-canvas" title={p.username}>
             <Avatar user={p} size={24} />
           </span>
         ))}
