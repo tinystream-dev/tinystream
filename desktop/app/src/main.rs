@@ -133,6 +133,7 @@ fn main() -> ExitCode {
             if matches!(scene.as_str(), "settings" | "credits") {
                 app.history = route::History::new(Route::Settings);
             }
+            browsing::preview::prepare(&mut app, scene);
             if scene == "credits" {
                 app.overlay = Some(app::Overlay::Credits);
             }

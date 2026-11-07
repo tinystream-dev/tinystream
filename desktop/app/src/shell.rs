@@ -24,7 +24,7 @@ use crate::ui::layout::{empty, page as page_column};
 use crate::ui::logo::logo;
 use crate::ui::media::avatar;
 use crate::ui::pressable::{Appearance, Status, pressable};
-use crate::ui::squircle::{Paint};
+use crate::ui::squircle::Paint;
 use crate::ui::text::{self as type_, MEDIUM, SEMIBOLD, inherit, text, truncate};
 
 pub const SEARCH: &str = "search";
@@ -127,7 +127,11 @@ fn chrome<'a>(app: &'a App, base: Element<'a, Message>, focus: bool, look: &Look
     layers.push(app.chrome.edges().map(Message::Chrome).boxed());
     let base = iced_widget::Stack::with_children(layers).width(Fill).height(Fill).boxed();
     if let Some(dialog) = crate::browsing::dialog(app, look) {
-        return stack![base, dialog].width(Fill).height(Fill).boxed();
+        return crate::ui::modal::modal(
+            base,
+            dialog,
+            Message::Browsing(app.session.generation, crate::browsing::Message::Dialog(None)),
+        );
     }
     if app.gallery.is_none()
         && let Some(overlay) = app.overlay
@@ -142,7 +146,28 @@ fn sidebar<'a>(app: &'a App, route: &Route, look: &Look) -> Element<'a, Message>
     let brand = row![
         logo(20.0, look),
         text("tinystream", type_::S15, look.ink).font(SEMIBOLD).width(Fill),
-        icon_button(Icon::Bell, "Notifications", Some(Message::Overlay(Some(Overlay::Notifications))), look),
+        stack![
+            icon_button(Icon::Bell, "Notifications", Some(Message::Overlay(Some(Overlay::Notifications))), look),
+            if app.browsing.unread() > 0 {
+                container(
+                    container(text(
+                        if app.browsing.unread() > 9 { "9+".into() } else { app.browsing.unread().to_string() },
+                        type_::Size { px: 9.0, line: 14.0 },
+                        look.canvas,
+                    ))
+                    .center(14)
+                    .style(move |_| container::Style {
+                        background: Some(l.ink.into()),
+                        border: Border::default().rounded(8),
+                        ..Default::default()
+                    }),
+                )
+                .align_right(32)
+                .boxed()
+            } else {
+                space().boxed()
+            }
+        ],
     ]
     .spacing(10)
     .align_y(Alignment::Center);
@@ -172,27 +197,55 @@ fn sidebar<'a>(app: &'a App, route: &Route, look: &Look) -> Element<'a, Message>
     .padding([0, 10])
     .on_press(Message::Overlay(Some(Overlay::Search)));
 
-    let mut nav = column![
-        nav_link("Home", Icon::House, Route::Home, route, look),
-        nav_link("Clips", Icon::Scissors, Route::Clips, route, look),
-        nav_link("Downloads", Icon::ArrowDownToLine, Route::Downloads, route, look),
-    ]
-    .spacing(2);
-
-    for (label, to, _, glyph) in PAGES.iter().filter(|(_, to, ..)| {
-        matches!(to, Route::Calendar | Route::Discover | Route::Wanted | Route::Requests)
-            && crate::browsing::allowed(&app.browsing, to)
-    }) {
+    let mut nav = column![nav_link("Home", Icon::House, Route::Home, route, look)];
+    if app.browsing.data(&crate::browsing::Key::Shell).and_then(|d| d.server.as_ref()).is_some_and(|s| s.clips) {
+        nav = nav.push(nav_link("Clips", Icon::Scissors, Route::Clips, route, look));
+    }
+    if app.browsing.features() {
+        nav = nav.push(
+            container(text("Shows", type_::XS, look.ink_3))
+                .padding(Padding { top: 20.0, bottom: 4.0, left: 10.0, ..Padding::ZERO })
+                .boxed(),
+        );
+        for (label, to, glyph) in [
+            ("Calendar", Route::Calendar, Icon::CalendarDays),
+            ("Add shows", Route::Discover, Icon::Plus),
+            ("Requests", Route::Requests, Icon::Inbox),
+            ("Downloads", Route::Downloads, Icon::ArrowDownToLine),
+            ("Wanted", Route::Wanted, Icon::ListTodo),
+        ] {
+            if crate::browsing::allowed(&app.browsing, &to) {
+                nav = nav.push(nav_link(
+                    if to == Route::Discover && !app.browsing.can().manage_shows { "Request shows" } else { label },
+                    glyph,
+                    to,
+                    route,
+                    look,
+                ));
+            }
+        }
+    }
+    if !app.browsing.libraries().is_empty() {
+        nav = nav.push(
+            container(text("Libraries", type_::XS, look.ink_3))
+                .padding(Padding { top: 20.0, bottom: 4.0, left: 10.0, ..Padding::ZERO })
+                .boxed(),
+        );
+    }
+    for library in app.browsing.libraries() {
         nav = nav.push(nav_link(
-            if *to == Route::Discover && !app.browsing.can().manage_shows { "Request shows" } else { label },
-            *glyph,
-            to.clone(),
+            &library.name,
+            if library.kind == "BOOKS" {
+                Icon::BookOpen
+            } else if library.kind == "MUSIC" {
+                Icon::Music
+            } else {
+                Icon::Clapperboard
+            },
+            Route::Library(library.name.clone()),
             route,
             look,
         ));
-    }
-    for library in app.browsing.libraries() {
-        nav = nav.push(nav_link(&library.name, Icon::Clapperboard, Route::Library(library.name.clone()), route, look));
     }
 
     let user = app.session.config.active().and_then(|server| server.user.as_ref());
@@ -228,7 +281,6 @@ fn sidebar<'a>(app: &'a App, route: &Route, look: &Look) -> Element<'a, Message>
             app.chrome.drag_area(container(logo_row).height(36).align_y(Alignment::Center), Message::Chrome),
             container(search).padding(Padding { top: 6.0, bottom: 12.0, ..Padding::ZERO }),
             scrollable(nav).height(Fill),
-            space().height(Fill),
             account,
         ]
         .height(Fill),

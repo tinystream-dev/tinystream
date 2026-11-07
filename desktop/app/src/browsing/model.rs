@@ -49,8 +49,10 @@ pub struct Permissions {
     pub watch_together: bool,
 }
 #[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default)]
 pub struct Features {
     pub downloads: bool,
+    pub clips: bool,
 }
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
@@ -76,6 +78,8 @@ pub struct Card {
     pub year: Option<i64>,
     pub poster: Option<String>,
     pub backdrop: Option<String>,
+    pub poster_tint: Option<String>,
+    pub backdrop_tint: Option<String>,
     pub watched_count: i64,
     pub video_count: i64,
     pub progress: Option<f64>,
@@ -118,8 +122,6 @@ pub struct Title {
     pub overview: Option<String>,
     pub genres: Vec<String>,
     pub rating: Option<f64>,
-    pub poster_tint: Option<String>,
-    pub backdrop_tint: Option<String>,
     pub custom_poster: bool,
     pub custom_backdrop: bool,
     pub match_state: String,
@@ -334,6 +336,10 @@ pub struct Download {
     pub error: Option<String>,
     pub live: Option<Live>,
     pub save_path: Option<String>,
+    pub finished_at: Option<i64>,
+    pub episodes: Vec<EpisodeNumber>,
+    pub category: String,
+    pub seed_goal: SeedGoal,
 }
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
@@ -464,10 +470,38 @@ pub struct Automation {
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
-pub struct NamingStyle { pub file: String, pub samples: i64, pub agreement: Option<f64> }
+#[serde(default)]
+pub struct NamingStyle {
+    pub file: String,
+    pub samples: i64,
+    pub agreement: Option<f64>,
+}
 #[derive(Debug, Clone, Default, Deserialize)]
-pub struct Seeding { pub ratio: Option<f64>, pub time: Option<String>, pub idle: Option<String>, pub then: String }
+pub struct Seeding {
+    pub ratio: Option<f64>,
+    pub time: Option<String>,
+    pub idle: Option<String>,
+    pub then: String,
+}
 #[derive(Debug, Clone, Default, Deserialize)]
-pub struct Counts { pub have:i64,pub wanted:i64,pub missing:i64,pub grabbed:i64,pub total:i64,pub upcoming:i64,pub skipped:i64 }
+#[serde(default)]
+pub struct Counts {
+    pub have: i64,
+    pub wanted: i64,
+    pub missing: i64,
+    pub grabbed: i64,
+    pub total: i64,
+    pub upcoming: i64,
+    pub skipped: i64,
+}
 #[derive(Debug, Clone, Default, Deserialize)]
-pub struct NamingPreview { pub samples: Vec<String>, pub error: Option<String> }
+pub struct NamingPreview {
+    pub samples: Vec<String>,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct SeedGoal {
+    pub ratio: Option<f64>,
+    pub seconds: Option<i64>,
+}

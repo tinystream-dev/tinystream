@@ -129,13 +129,6 @@
   }
 
 
-  query BrowseTitleDownloads {
-    downloads {
-      ...DownloadFields
-    }
-  }
-
-
   mutation BrowseSetWatched($videoIds: [Int!]!, $watched: Boolean!) {
     setWatched(videoIds: $videoIds, watched: $watched) {
       id
@@ -441,7 +434,7 @@
     }
   }
 
-query BrowseShell { viewer { ...Viewer } libraries { name kind showCount movieCount albumCount trackCount bookCount } server { downloads } }
+query BrowseShell { viewer { ...Viewer } libraries { name kind showCount movieCount albumCount trackCount bookCount } server { downloads clips } }
 query BrowseBooks($library: String!) { books(library: $library) { ...BookCard } }
 fragment InboxFields on Inbox { items { ...NotificationFields } unread }
 query BrowseOptions { settings { libraries { name metadataProvider managed profile } profiles { name } sources { name } automation { defaultMonitor } } }

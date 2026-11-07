@@ -2,7 +2,7 @@
 
 use iced_core::Length::Fill;
 use iced_core::{Alignment, Color, Padding};
-use iced_widget::{Column, Element, Row, Widget, column, container, mouse_area, row, scrollable, space, stack};
+use iced_widget::{Column, Element, Row, Widget, column, container, row, scrollable, space};
 use serde_json::json;
 
 use super::model::*;
@@ -22,6 +22,48 @@ fn msg(b: &Browsing, m: Message) -> AppMessage {
 fn act(b: &Browsing, action: Action) -> AppMessage {
     msg(b, Message::Act(action))
 }
+struct CardButton<'a> {
+    look: Look,
+    content: Option<View<'a>>,
+    message: Option<AppMessage>,
+}
+fn card_button<'a>(look: &Look) -> CardButton<'a> {
+    CardButton { look: *look, content: None, message: None }
+}
+impl<'a> CardButton<'a> {
+    fn content(
+        mut self,
+        content: impl iced_core::Widget<AppMessage, iced_core::Theme, iced_widget::Renderer> + 'a,
+    ) -> Self {
+        self.content = Some(content.boxed());
+        self
+    }
+
+    fn plain(self) -> Self {
+        self
+    }
+
+    fn on_press(mut self, message: AppMessage) -> Self {
+        self.message = Some(message);
+        self
+    }
+
+    fn on_press_maybe(mut self, message: Option<AppMessage>) -> Self {
+        self.message = message;
+        self
+    }
+
+    fn boxed(self) -> View<'a> {
+        let ink = self.look.ink;
+        crate::ui::pressable::pressable(self.content.unwrap_or_else(|| space().boxed()), 14.0, &self.look, move |_| {
+            crate::ui::pressable::Appearance { paint: crate::ui::squircle::Paint::NONE, ink }
+        })
+        .width(Fill)
+        .on_press_maybe(self.message)
+        .boxed()
+    }
+}
+
 fn heading<'a>(name: impl Into<String>, look: &Look) -> View<'a> {
     container(text(name.into(), ty::TITLE, look.ink).font(SEMIBOLD))
         .padding(Padding { bottom: 32.0, ..Padding::ZERO })
@@ -42,6 +84,16 @@ fn shelf<'a>(children: Vec<View<'a>>) -> View<'a> {
         .direction(iced_widget::scrollable::Direction::Horizontal(iced_widget::scrollable::Scrollbar::hidden()))
         .width(Fill)
         .boxed()
+}
+fn title_link<'a>(name: &'a str, route: Option<Route>, look: &Look) -> View<'a> {
+    if let Some(route) = route {
+        card_button(look)
+            .content(truncate(name, ty::SM, look.ink).font(MEDIUM))
+            .on_press(AppMessage::Navigate(route))
+            .boxed()
+    } else {
+        truncate(name, ty::SM, look.ink).font(MEDIUM).boxed()
+    }
 }
 fn raised<'a>(content: View<'a>, look: &Look) -> View<'a> {
     squircle(content, 16.0, look).fill(look.raised).edge().padding(12).width(Fill).boxed()
@@ -71,8 +123,10 @@ fn poster<'a>(b: &'a Browsing, c: &'a Card, caption: Option<String>, look: &Look
             "Watched".into()
         } else if c.kind == "SHOW" && c.watched_count > 0 {
             format!("{} of {} watched", c.watched_count, c.video_count)
+        } else if c.kind == "SHOW" {
+            format!("{} episode{}", c.video_count, if c.video_count == 1 { "" } else { "s" })
         } else {
-            c.year.map(|y| y.to_string()).unwrap_or_default()
+            c.year.map(|y| y.to_string()).unwrap_or("Movie".into())
         }
     });
     let poster = media::poster(
@@ -84,13 +138,23 @@ fn poster<'a>(b: &'a Browsing, c: &'a Card, caption: Option<String>, look: &Look
                 _ => None,
             }),
             caption,
-            progress: c.progress.map(|p| p as f32),
+            progress: c.progress.filter(|_| !done).map(|p| p as f32),
             fresh: (c.fresh_count > 0 && !done).then_some("New"),
         },
         AppMessage::Navigate(Route::Title(c.id as u64)),
         look,
     );
-    mouse_area(poster).on_right_press(msg(b, Message::Dialog(Some(Dialog::Context(c.clone()))))).boxed()
+    {
+        let mut items = vec![
+            ("Open title".into(), AppMessage::Navigate(Route::Title(c.id as u64))),
+            (if done { "Mark unwatched" } else { "Mark watched" }.into(), act(b, Action::TitleWatched(c.id, !done))),
+        ];
+        if b.can().edit_metadata {
+            items.push(("Refresh metadata".into(), act(b, Action::Refresh(c.id))));
+            items.push(("Fix match".into(), msg(b, Message::Dialog(Some(Dialog::Match(c.id))))));
+        }
+        crate::ui::context_menu::context_menu(poster, items, look)
+    }
 }
 fn skeleton<'a>(look: &Look) -> View<'a> {
     let l = *look;
@@ -141,21 +205,52 @@ pub fn view<'a>(app: &'a App, route: &'a Route, look: &Look) -> Option<View<'a>>
         page = page.push((text(notice, ty::SM, look.ok)).boxed());
     }
     page = page.push((content).boxed());
-    Some(layout::page(page, matches!(route, Route::Calendar)))
+    let page = layout::page(page, matches!(route, Route::Calendar));
+    if let Route::Title(id) = route
+        && let Some(t) = b.data(&Key::Title(*id as i64)).and_then(|d| d.title.as_ref())
+        && let Some(path) = &t.card.backdrop
+    {
+        let canvas = look.canvas;
+        let mut layers = vec![
+            container(media::img(b.images.picture(path), 0.0, look)).width(Fill).height(544).boxed(),
+            container(space().width(Fill).height(544))
+                .style(move |_| container::Style {
+                    background: Some(
+                        iced_core::Gradient::Linear(
+                            iced_core::gradient::Linear::new(iced_core::Radians(0.0))
+                                .add_stop(0.0, canvas.scale_alpha(0.55))
+                                .add_stop(0.2, canvas.scale_alpha(0.55))
+                                .add_stop(1.0, canvas),
+                        )
+                        .into(),
+                    ),
+                    ..Default::default()
+                })
+                .boxed(),
+        ];
+        if let Some(color) = t.card.backdrop_tint.as_deref().or(t.card.poster_tint.as_deref()).and_then(parse_tint) {
+            layers.push(effects::ambient(effects::Ambient::title(color)));
+        }
+        layers.push(page);
+        Some(iced_widget::Stack::with_children(layers).width(Fill).boxed())
+    } else {
+        Some(page)
+    }
 }
 
-fn hero<'a>(
-    b: &'a Browsing,
-    name: &str,
-    label: &str,
+struct Hero<'a> {
+    name: &'a str,
+    label: &'a str,
     detail: String,
-    image: Option<&str>,
-    tint: Option<&str>,
+    image: Option<&'a str>,
+    tint: Option<&'a str>,
     action: Option<(String, Route)>,
     value: Option<f32>,
     height: f32,
-    look: &Look,
-) -> View<'a> {
+    metric: Option<String>,
+}
+fn hero<'a>(b: &'a Browsing, props: Hero<'_>, look: &Look) -> View<'a> {
+    let Hero { name, label, detail, image, tint, action, value, height, metric } = props;
     let l = *look;
     let mut content = column![
         text(label.to_owned(), ty::XS, look.ink_2).font(MEDIUM),
@@ -163,6 +258,9 @@ fn hero<'a>(
         text(detail, ty::SM, look.ink_2)
     ]
     .spacing(8);
+    if let Some(metric) = metric {
+        content = content.push(crate::ui::numbers::ticker(&metric, ty::Size { px: 40.0, line: 44.0 }, look).boxed());
+    }
     if let Some((label, route)) = action {
         content = content.push(
             (container(
@@ -199,7 +297,71 @@ fn hero<'a>(
         layers.push(effects::ambient(effects::Ambient::corner(color)));
     }
     layers.push(container(content).align_bottom(Fill).padding(36).boxed());
-    squircle(iced_widget::Stack::with_children(layers).height(height).width(Fill), 22.0, look).edge().boxed()
+    squircle(iced_widget::Stack::with_children(layers).height(height).width(Fill), 22.0, look)
+        .width(Fill)
+        .edge()
+        .boxed()
+}
+
+struct WideCard<'a> {
+    name: &'a str,
+    subtitle: String,
+    image: Option<&'a str>,
+    route: Option<Route>,
+    label: Option<String>,
+    value: Option<f32>,
+    width: f32,
+}
+fn wide_card<'a>(b: &'a Browsing, props: WideCard<'_>, look: &Look) -> View<'a> {
+    let WideCard { name, subtitle, image, route, label, value, width } = props;
+    let mut layers =
+        vec![crate::ui::tilt::art(image.and_then(|p| b.images.get(p)).cloned(), 16.0, 9.0 / 16.0, look).boxed()];
+    let shade = look.media_shade;
+    layers.push(
+        container(space().width(Fill).height(Fill))
+            .style(move |_| container::Style {
+                background: Some(
+                    iced_core::Gradient::Linear(
+                        iced_core::gradient::Linear::new(iced_core::Radians(0.0))
+                            .add_stop(0.0, shade.scale_alpha(0.1))
+                            .add_stop(1.0, shade.scale_alpha(0.85)),
+                    )
+                    .into(),
+                ),
+                ..Default::default()
+            })
+            .boxed(),
+    );
+    if let Some(label) = label {
+        layers.push(container(badge(label, Tone::Strong, look)).padding(12).boxed());
+    }
+    layers.push(
+        container(
+            column![
+                truncate(name.to_owned(), ty::SM, look.media_ink).font(MEDIUM),
+                truncate(subtitle, ty::XS, look.media_ink.scale_alpha(0.6))
+            ]
+            .spacing(3),
+        )
+        .align_bottom(Fill)
+        .padding(14)
+        .boxed(),
+    );
+    if let Some(value) = value {
+        layers.push(container(progress(Some(value), look.media_ink, look)).align_bottom(Fill).boxed());
+    }
+    container(
+        card_button(look)
+            .content(
+                squircle(iced_widget::Stack::with_children(layers).width(Fill).height(width * 9.0 / 16.0), 16.0, look)
+                    .edge()
+                    .width(Fill),
+            )
+            .on_press_maybe(route.map(AppMessage::Navigate))
+            .boxed(),
+    )
+    .width(width)
+    .boxed()
 }
 
 fn home<'a>(b: &'a Browsing, look: &Look) -> View<'a> {
@@ -212,20 +374,27 @@ fn home<'a>(b: &'a Browsing, look: &Look) -> View<'a> {
         page = page.push(
             (container(hero(
                 b,
-                &v.title.name,
-                if e.new_episode {
-                    "New episode"
-                } else if e.up_next {
-                    "Up next"
-                } else {
-                    "Continue watching"
+                Hero {
+                    name: &v.title.name,
+                    label: if e.new_episode {
+                        "New episode"
+                    } else if e.up_next {
+                        "Up next"
+                    } else {
+                        "Continue watching"
+                    },
+                    detail,
+                    image: v.title.backdrop.as_deref().or(v.still.as_deref()),
+                    tint: v.title.backdrop_tint.as_deref().or(v.title.poster_tint.as_deref()),
+                    action: Some((if e.up_next { "Play" } else { "Resume" }.into(), Route::Watch(v.id as u64, None))),
+                    value: v.duration.filter(|d| *d > 0.0).map(|d| (e.position / d) as f32),
+                    height: 304.0,
+                    metric: Some(if e.up_next {
+                        v.label.clone().unwrap_or("Play".into())
+                    } else {
+                        remaining(e.position, v.duration)
+                    }),
                 },
-                detail,
-                v.title.backdrop.as_deref().or(v.still.as_deref()),
-                None,
-                Some((if e.up_next { "Play" } else { "Resume" }.into(), Route::Watch(v.id as u64, None))),
-                v.duration.filter(|d| *d > 0.0).map(|d| (e.position / d) as f32),
-                304.0,
                 look,
             ))
             .padding(Padding { bottom: 44.0, ..Padding::ZERO }))
@@ -240,34 +409,23 @@ fn home<'a>(b: &'a Browsing, look: &Look) -> View<'a> {
         .filter(|e| featured.is_none_or(|f| f.video.id != e.video.id))
         .map(|e| {
             let v = &e.video;
-            container(
-                column![
-                    button("", look)
-                        .content(picture(
-                            b,
-                            v.still.as_deref().or(v.title.backdrop.as_deref()),
-                            320.0,
-                            180.0,
-                            16.0,
-                            look
-                        ))
-                        .on_press(AppMessage::Navigate(Route::Watch(v.id as u64, None)))
-                        .boxed(),
-                    truncate(&v.title.name, ty::SM, look.ink).font(MEDIUM),
-                    text(
-                        format!(
-                            "{} · {}",
-                            v.label.as_deref().unwrap_or(""),
-                            if e.up_next { "Up next".into() } else { remaining(e.position, v.duration) }
-                        ),
-                        ty::XS,
-                        look.ink_3
-                    )
-                ]
-                .spacing(6),
+            wide_card(
+                b,
+                WideCard {
+                    name: &v.title.name,
+                    subtitle: format!(
+                        "{} · {}",
+                        v.label.as_deref().unwrap_or(""),
+                        if e.up_next { "Up next".into() } else { remaining(e.position, v.duration) }
+                    ),
+                    image: v.still.as_deref().or(v.title.backdrop.as_deref()),
+                    route: Some(Route::Watch(v.id as u64, None)),
+                    label: if e.new_episode { Some("New episode".into()) } else { None },
+                    value: v.duration.filter(|d| *d > 0.0).map(|d| (e.position / d) as f32),
+                    width: 320.0,
+                },
+                look,
             )
-            .width(320)
-            .boxed()
         })
         .collect();
     if !rest.is_empty() {
@@ -279,7 +437,26 @@ fn home<'a>(b: &'a Browsing, look: &Look) -> View<'a> {
             .iter()
             .filter(|e| e.state != "DONE")
             .take(12)
-            .map(|e| container(calendar_card(b, e, look)).width(288).boxed())
+            .map(|e| {
+                wide_card(
+                    b,
+                    WideCard {
+                        name: &e.show,
+                        subtitle: format!("{} · {}", code(e.season, e.episode), e.name.as_deref().unwrap_or("")),
+                        image: e.backdrop.as_deref().or(e.poster.as_deref()),
+                        route: e.title.as_ref().map(|t| Route::Title(t.id as u64)),
+                        label: Some(
+                            e.download
+                                .as_ref()
+                                .map(|d| format!("Downloading {}%", (d.progress * 100.0) as i64))
+                                .unwrap_or_else(|| countdown(e.air_at)),
+                        ),
+                        value: e.download.as_ref().map(|d| d.progress as f32),
+                        width: 288.0,
+                    },
+                    look,
+                )
+            })
             .collect();
         if !entries.is_empty() {
             page = page.push((section("Coming up", shelf(entries), look)).boxed());
@@ -347,7 +524,7 @@ fn home<'a>(b: &'a Browsing, look: &Look) -> View<'a> {
                                 .map(|a| {
                                     container(
                                         column![
-                                            button("", look)
+                                            card_button(look)
                                                 .content(picture(b, a.cover.as_deref(), 136.0, 136.0, 12.0, look))
                                                 .on_press(AppMessage::Navigate(Route::Album(a.id as u64)))
                                                 .boxed(),
@@ -543,7 +720,7 @@ fn title<'a>(b: &'a Browsing, id: i64, look: &Look) -> View<'a> {
             [
                 c.year.map(|y| y.to_string()),
                 Some(if c.kind == "SHOW" {
-                    format!("{} seasons", t.seasons.len())
+                    format!("{} season{}", t.seasons.len(), if t.seasons.len() == 1 { "" } else { "s" })
                 } else {
                     t.movie.as_ref().and_then(|v| v.duration).map(runtime).unwrap_or_default()
                 }),
@@ -563,20 +740,7 @@ fn title<'a>(b: &'a Browsing, id: i64, look: &Look) -> View<'a> {
     .width(Fill);
     let header = row![picture(b, c.poster.as_deref(), 208.0, 312.0, 14.0, look), container(details).align_bottom(312)]
         .spacing(32);
-    if let Some(backdrop) = &c.backdrop {
-        let l = *look;
-        let backdrop = stack![
-            container(media::img(b.images.picture(backdrop), 0.0, look)).height(360),
-            container(space().height(360).width(Fill)).style(move |_| container::Style {
-                background: Some(l.canvas.scale_alpha(0.72).into()),
-                ..Default::default()
-            }),
-            container(header).padding(Padding { top: 40.0, ..Padding::ZERO })
-        ];
-        page = page.push((backdrop).boxed());
-    } else {
-        page = page.push((header).boxed());
-    }
+    page = page.push(container(header).padding(Padding { top: 40.0, ..Padding::ZERO }).boxed());
     if can.edit_metadata {
         page = page.push(
             (container(line(vec![
@@ -758,7 +922,7 @@ fn episode<'a>(b: &'a Browsing, v: &'a Video, look: &Look) -> View<'a> {
     }
     raised(
         row![
-            button("", look)
+            card_button(look)
                 .content(picture(b, v.still.as_deref(), 176.0, 99.0, 10.0, look))
                 .on_press(AppMessage::Navigate(Route::Watch(v.id as u64, None)))
                 .boxed(),
@@ -773,7 +937,7 @@ fn episode<'a>(b: &'a Browsing, v: &'a Video, look: &Look) -> View<'a> {
 }
 fn series_panel<'a>(b: &'a Browsing, s: &'a Series, look: &Look) -> View<'a> {
     let monitors = line(
-        [("NONE", "None"), ("FUTURE", "Future"), ("MISSING", "Missing"), ("ALL", "All")]
+        [("NONE", "Off"), ("FUTURE", "New episodes"), ("MISSING", "Everything")]
             .into_iter()
             .map(|(v, l)| chip(l, s.monitor == v, act(b, Action::UpdateSeries(s.id, json!({"monitor":v}))), look))
             .collect(),
@@ -783,6 +947,15 @@ fn series_panel<'a>(b: &'a Browsing, s: &'a Series, look: &Look) -> View<'a> {
             row![text("Downloads", ty::S15, look.ink).font(SEMIBOLD).width(Fill), state(&s.status, look)],
             monitors,
             line(vec![
+                button("Settings", look)
+                    .small()
+                    .on_press(msg(b, Message::Dialog(Some(Dialog::SeriesSettings(std::sync::Arc::new(s.clone()))))))
+                    .boxed(),
+                button("Look for skipped episodes again", look)
+                    .plain()
+                    .small()
+                    .on_press(act(b, Action::LookAgain(s.id, None, None)))
+                    .boxed(),
                 button("Refresh schedule", look)
                     .plain()
                     .small()
@@ -845,10 +1018,16 @@ fn discover<'a>(b: &'a Browsing, look: &Look) -> View<'a> {
     );
     page = page.push(
         (line(
-            [("", "All types"), ("ANIME", "Anime"), ("SHOWS", "Shows"), ("MOVIES", "Movies")]
-                .into_iter()
-                .map(|(v, l)| chip(l, b.category == v, msg(b, Message::Category(v.into())), look))
-                .collect(),
+            [
+                ("", "All types"),
+                ("EPISODES", "Episodes / Seasons"),
+                ("SPECIALS", "Specials"),
+                ("MOVIES", "Movies"),
+                ("OTHER", "Other / Mixed"),
+            ]
+            .into_iter()
+            .map(|(v, l)| chip(l, b.category == v, msg(b, Message::Category(v.into())), look))
+            .collect(),
         ))
         .boxed(),
     );
@@ -875,7 +1054,9 @@ fn discover<'a>(b: &'a Browsing, look: &Look) -> View<'a> {
         }
     }
     let key = Key::Discover(b.library.clone(), b.query.clone());
-    if let Some(d) = b.data(&key).and_then(|d| d.discover.as_ref()) {
+    if let Some(d) =
+        b.data(&key).or_else(|| b.previous_discover.as_ref().and_then(|k| b.data(k))).and_then(|d| d.discover.as_ref())
+    {
         let results: Vec<_> = d.results.iter().filter(|r| b.category.is_empty() || r.category == b.category).collect();
         if results.is_empty() {
             page = page.push((layout::empty("Nothing found", None, look)).boxed());
@@ -901,7 +1082,7 @@ fn discover_card<'a>(b: &'a Browsing, r: &'a Discover, look: &Look) -> View<'a> 
     let action = if let Some(id) = r.title_id {
         Some(AppMessage::Navigate(Route::Title(id as u64)))
     } else if status.is_none() && r.category != "MOVIES" && (b.can().manage_shows || b.can().request) {
-        Some(msg(b, Message::Dialog(Some(Dialog::Pick(r.clone())))))
+        Some(msg(b, Message::Dialog(Some(Dialog::Pick(std::sync::Arc::new(r.clone()))))))
     } else {
         None
     };
@@ -910,7 +1091,7 @@ fn discover_card<'a>(b: &'a Browsing, r: &'a Discover, look: &Look) -> View<'a> 
     if let Some(status) = status {
         layers.push(container(badge(status, Tone::Strong, look)).align_right(Fill).padding(8).boxed());
     }
-    let card = button("", look)
+    let card = card_button(look)
         .content(
             column![
                 iced_widget::Stack::with_children(layers),
@@ -985,14 +1166,25 @@ fn calendar<'a>(b: &'a Browsing, look: &Look) -> View<'a> {
         page = page.push(
             (container(hero(
                 b,
-                &next.show,
-                label,
-                detail,
-                next.backdrop.as_deref().or(next.poster.as_deref()),
-                next.backdrop_tint.as_deref(),
-                route.map(|r| ("Play".into(), r)),
-                next.download.as_ref().map(|d| d.progress as f32),
-                240.0,
+                Hero {
+                    name: &next.show,
+                    label,
+                    detail,
+                    image: next.backdrop.as_deref().or(next.poster.as_deref()),
+                    tint: next.backdrop_tint.as_deref(),
+                    action: route.map(|r| ("Play".into(), r)),
+                    value: next.download.as_ref().map(|d| d.progress as f32),
+                    height: 240.0,
+                    metric: Some(if next.air_at > now() {
+                        countdown(next.air_at)
+                    } else if let Some(d) = &next.download {
+                        format!("{:.1}%", d.progress * 100.0)
+                    } else if next.video.is_some() {
+                        "Ready to watch".into()
+                    } else {
+                        "Searching…".into()
+                    }),
+                },
                 look,
             ))
             .padding(Padding { bottom: 32.0, ..Padding::ZERO }))
@@ -1006,13 +1198,18 @@ fn calendar<'a>(b: &'a Browsing, look: &Look) -> View<'a> {
     for (i, label) in ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].iter().enumerate() {
         let day = start + i as i64 * 86400;
         let mut entries = Column::<View<'a>>::new().spacing(6).width(Fill);
+        let count = d.calendar.iter().filter(|e| e.air_at >= day && e.air_at < day + 86400).count();
         for e in d.calendar.iter().filter(|e| e.air_at >= day && e.air_at < day + 86400) {
             entries = entries.push((calendar_card(b, e, look)).boxed());
         }
         days = days.push(
             (column![
                 text(format!("{label} {}", date(day)), ty::XS, look.ink_3),
-                squircle(entries, 16.0, look).fill(look.raised).padding(6).height(Fill.min(416)).width(Fill)
+                squircle(entries, 16.0, look)
+                    .fill(look.raised)
+                    .padding(6)
+                    .height(416.0f32.max(count as f32 * 160.0))
+                    .width(Fill)
             ]
             .spacing(8)
             .width(Fill))
@@ -1047,7 +1244,7 @@ fn calendar_card<'a>(b: &'a Browsing, e: &'a CalendarEntry, look: &Look) -> View
     } else {
         content = content.push((state(&e.state, look)).boxed());
     }
-    button("", look).plain().content(content).on_press_maybe(entry_route(e).map(AppMessage::Navigate)).boxed()
+    card_button(look).plain().content(content).on_press_maybe(entry_route(e).map(AppMessage::Navigate)).boxed()
 }
 fn requests<'a>(b: &'a Browsing, look: &Look) -> View<'a> {
     let mut page = column![row![
@@ -1069,10 +1266,7 @@ fn requests<'a>(b: &'a Browsing, look: &Look) -> View<'a> {
         for r in d.requests.iter().filter(|r| (r.state == "PENDING") == pending_group) {
             let mut details = column![
                 row![
-                    button(&r.name, look)
-                        .plain()
-                        .on_press_maybe(r.title.as_ref().map(|t| AppMessage::Navigate(Route::Title(t.id as u64))))
-                        .boxed(),
+                    title_link(&r.name, r.title.as_ref().map(|t| Route::Title(t.id as u64)), look),
                     text(r.year.map(|y| y.to_string()).unwrap_or_default(), ty::XS, look.ink_3),
                     state(&r.state, look)
                 ]
@@ -1305,20 +1499,67 @@ fn downloads<'a>(b: &'a Browsing, route: &Route, look: &Look) -> View<'a> {
         if let Some(error) = &e.listen_error {
             page = page.push((text(error, ty::SM, look.warn)).boxed());
         }
-        page = page.push(
-            (raised(
-                line(vec![
-                    text(format!("↓ {}/s", bytes(e.download_rate)), ty::Size { px: 32.0, line: 40.0 }, look.ink)
-                        .font(SEMIBOLD)
-                        .boxed(),
-                    text(format!("↑ {}/s", bytes(e.upload_rate)), ty::SM, look.ink_2).boxed(),
-                    text(format!("{} active", e.active), ty::SM, look.ink_3).boxed(),
-                ]),
-                look,
-            ))
+        let down = b.rates.get("download").map_or(&[][..], Vec::as_slice);
+        let up = b.rates.get("upload").map_or(&[][..], Vec::as_slice);
+        let peers =
+            d.downloads.iter().filter_map(|d| d.live.as_ref()).filter(|l| !l.paused).map(|l| l.peers).sum::<i64>();
+        let shared = d.downloads.iter().filter_map(|d| d.live.as_ref()).map(|l| l.uploaded).sum::<i64>();
+        let stats = line(vec![
+            column![
+                text("Download", ty::XS, look.ink_3),
+                crate::ui::numbers::ticker(
+                    &format!("{}/s", bytes(e.download_rate)),
+                    ty::Size { px: 32.0, line: 40.0 },
+                    look
+                )
+            ]
+            .spacing(4)
             .boxed(),
-        );
+            column![
+                text("Upload", ty::XS, look.ink_3),
+                crate::ui::numbers::ticker(
+                    &format!("{}/s", bytes(e.upload_rate)),
+                    ty::Size { px: 32.0, line: 40.0 },
+                    look
+                )
+            ]
+            .spacing(4)
+            .boxed(),
+            text(
+                format!("{peers} peers · {} shared{}", bytes(shared), if e.slow_hours { " · slow hours" } else { "" }),
+                ty::XS,
+                look.ink_3,
+            )
+            .boxed(),
+        ]);
+        let chart = iced_widget::stack![
+            container(crate::ui::numbers::sparkline(
+                down,
+                look.info,
+                Fill,
+                80,
+                std::time::Duration::from_secs(2),
+                look
+            ))
+            .align_bottom(Fill),
+            container(crate::ui::numbers::sparkline(up, look.ok, Fill, 80, std::time::Duration::from_secs(2), look))
+                .align_bottom(Fill),
+            container(stats).padding(20)
+        ];
+        page = page.push(squircle(chart, 18.0, look).fill(look.raised).edge().width(Fill).height(140).boxed());
     }
+    page = page.push(line(
+        [
+            ("", "All types"),
+            ("EPISODES", "Episodes / Seasons"),
+            ("SPECIALS", "Specials"),
+            ("MOVIES", "Movies"),
+            ("OTHER", "Other / Mixed"),
+        ]
+        .into_iter()
+        .map(|(v, l)| chip(l, b.download_category == v, msg(b, Message::DownloadCategory(v.into())), look))
+        .collect(),
+    ));
     let filter = b.filter.get(route).map_or("all", String::as_str);
     page = page.push(
         (line(
@@ -1365,24 +1606,30 @@ fn downloads<'a>(b: &'a Browsing, route: &Route, look: &Look) -> View<'a> {
         }
         let mut list = Column::<View<'a>>::new().spacing(8);
         let mut count = 0;
-        for dl in d.downloads.iter().filter(|dl| match group {
-            "DOWNLOADING" => matches!(dl.state.as_str(), "DOWNLOADING" | "PAUSED"),
-            "FAILED" => matches!(dl.state.as_str(), "FAILED" | "REMOVED"),
-            _ => dl.state == group,
-        }) {
+        for dl in
+            d.downloads.iter().filter(|dl| b.download_category.is_empty() || dl.category == b.download_category).filter(
+                |dl| match group {
+                    "DOWNLOADING" => dl.state == "DOWNLOADING" || (dl.state == "PAUSED" && dl.finished_at.is_none()),
+                    "SEEDING" => dl.state == "SEEDING" || (dl.state == "PAUSED" && dl.finished_at.is_some()),
+                    "FAILED" => matches!(dl.state.as_str(), "FAILED" | "REMOVED"),
+                    _ => dl.state == group,
+                },
+            )
+        {
             count += 1;
             let live = dl.live.as_ref();
             let mut details = column![
                 row![
-                    button(&dl.name, look)
-                        .plain()
-                        .on_press_maybe(dl.title.as_ref().map(|t| AppMessage::Navigate(Route::Title(t.id as u64))))
-                        .boxed(),
+                    title_link(&dl.name, dl.title.as_ref().map(|t| Route::Title(t.id as u64)), look),
                     space().width(Fill),
                     state(&dl.state, look)
                 ]
                 .align_y(Alignment::Center),
-                text(format!("{} · {}", dl.source.as_deref().unwrap_or(""), bytes(dl.size.unwrap_or(0))), ty::XS, look.ink_3)
+                text(
+                    format!("{} · {}", dl.source.as_deref().unwrap_or(""), bytes(dl.size.unwrap_or(0))),
+                    ty::XS,
+                    look.ink_3
+                )
             ]
             .spacing(6)
             .width(Fill);
@@ -1439,7 +1686,7 @@ fn downloads<'a>(b: &'a Browsing, route: &Route, look: &Look) -> View<'a> {
                         ))
                         .boxed(),
                 ];
-            if dl.import_state == "FAILED" || dl.import_state == "PENDING" {
+            if dl.finished_at.is_some() && dl.import_state != "DONE" && dl.state != "REMOVED" {
                 actions.insert(0, button("Import", look).small().on_press(act(b, Action::Import(dl.id))).boxed());
             }
             list = list.push(
@@ -1479,108 +1726,151 @@ fn downloads<'a>(b: &'a Browsing, route: &Route, look: &Look) -> View<'a> {
     page.spacing(16).boxed()
 }
 
+pub struct PaletteItem {
+    pub label: String,
+    pub route: Route,
+    pub group: &'static str,
+    pub image: Option<String>,
+}
+
+pub fn palette(app: &App) -> Vec<PaletteItem> {
+    let b = &app.browsing;
+    let mut items = crate::shell::commands(&app.query)
+        .into_iter()
+        .filter(|(_, route)| allowed(b, route))
+        .map(|(label, route)| PaletteItem { label: label.into(), route, group: "Go to", image: None })
+        .collect::<Vec<_>>();
+    let needle = app.query.trim().to_lowercase();
+    for l in b.libraries().iter().filter(|l| l.name.to_lowercase().contains(&needle)) {
+        items.push(PaletteItem {
+            label: l.name.clone(),
+            route: Route::Library(l.name.clone()),
+            group: "Go to",
+            image: None,
+        });
+    }
+    if needle.is_empty() {
+        for c in &b.recent {
+            items.push(PaletteItem {
+                label: c.name.clone(),
+                route: Route::Title(c.id as u64),
+                group: "Recent",
+                image: c.poster.clone(),
+            });
+        }
+    } else if b.search_query.to_lowercase() == needle
+        && let Some(d) = b.data(&Key::Search(b.search_query.clone()))
+    {
+        if let Some(s) = &d.search {
+            for c in &s.titles {
+                items.push(PaletteItem {
+                    label: c.name.clone(),
+                    route: Route::Title(c.id as u64),
+                    group: "Titles",
+                    image: c.poster.clone(),
+                });
+            }
+            for v in &s.videos {
+                items.push(PaletteItem {
+                    label: format!(
+                        "{} · {} · {}",
+                        v.title.name,
+                        v.label.as_deref().unwrap_or(""),
+                        v.name.as_deref().unwrap_or("")
+                    ),
+                    route: Route::Watch(v.id as u64, None),
+                    group: "Episodes",
+                    image: None,
+                });
+            }
+        }
+        if let Some(s) = &d.music_search {
+            for a in &s.artists {
+                items.push(PaletteItem {
+                    label: a.name.clone(),
+                    route: Route::Artist(a.id as u64),
+                    group: "Artists",
+                    image: a.cover.clone(),
+                });
+            }
+            for a in &s.albums {
+                items.push(PaletteItem {
+                    label: format!("{} · {}", a.name, a.artist),
+                    route: Route::Album(a.id as u64),
+                    group: "Albums",
+                    image: a.cover.clone(),
+                });
+            }
+        }
+    }
+    items
+}
+
 pub fn search<'a>(app: &'a App, look: &Look) -> View<'a> {
     let b = &app.browsing;
     let mut results = Column::<View<'a>>::new().spacing(2).width(Fill);
-    for (name, route) in crate::shell::commands(&app.query).into_iter().filter(|(_, route)| allowed(b, route)) {
-        results = results.push((search_item(name, None, Some(AppMessage::Navigate(route)), look)).boxed());
-    }
-    if !app.query.trim().is_empty() {
-        let key = Key::Search(b.search_query.clone());
-        if let Some(d) = b.data(&key) {
-            if let Some(s) = &d.search {
-                if !s.titles.is_empty() {
-                    results = results.push((text("Titles", ty::XS, look.ink_3)).boxed());
-                }
-                for c in &s.titles {
-                    results = results.push(
-                        (button("", look)
-                            .plain()
-                            .content(
-                                row![
-                                    picture(b, c.poster.as_deref(), 28.0, 42.0, 6.0, look),
-                                    column![
-                                        text(&c.name, ty::SM, look.ink),
-                                        text(c.year.map(|y| y.to_string()).unwrap_or_default(), ty::XS, look.ink_3)
-                                    ]
-                                ]
-                                .spacing(12)
-                                .align_y(Alignment::Center),
-                            )
-                            .on_press(AppMessage::Navigate(Route::Title(c.id as u64)))
-                            .boxed())
-                        .boxed(),
-                    );
-                }
-                if !s.videos.is_empty() {
-                    results = results.push((text("Episodes", ty::XS, look.ink_3)).boxed());
-                }
-                for v in &s.videos {
-                    results = results.push(
-                        (search_item(
-                            &format!(
-                                "{} · {} · {}",
-                                v.title.name,
-                                v.label.as_deref().unwrap_or(""),
-                                v.name.as_deref().unwrap_or("")
-                            ),
-                            None,
-                            Some(AppMessage::Navigate(Route::Watch(v.id as u64, None))),
-                            look,
-                        ))
-                        .boxed(),
-                    );
-                }
-                if s.titles.is_empty() && s.videos.is_empty() {
-                    results = results.push((text("No titles found", ty::SM, look.ink_3)).boxed());
-                }
-            }
-            if let Some(s) = &d.music_search {
-                for a in &s.artists {
-                    results = results.push(
-                        (search_item(
-                            &format!("Artist · {}", a.name),
-                            None,
-                            Some(AppMessage::Navigate(Route::Artist(a.id as u64))),
-                            look,
-                        ))
-                        .boxed(),
-                    );
-                }
-                for a in &s.albums {
-                    results = results.push(
-                        (search_item(
-                            &format!("Album · {} · {}", a.name, a.artist),
-                            None,
-                            Some(AppMessage::Navigate(Route::Album(a.id as u64))),
-                            look,
-                        ))
-                        .boxed(),
-                    );
-                }
-            }
-        } else {
-            results = results.push((pending(b, &key, look)).boxed());
+    let mut group = "";
+    let items = palette(app);
+    let searching = !app.query.trim().is_empty()
+        && (b.search_query != app.query.trim() || b.data(&Key::Search(b.search_query.clone())).is_none());
+    for (index, item) in items.iter().enumerate() {
+        if item.group != group {
+            group = item.group;
+            results = results.push(container(text(group, ty::XS2, look.ink_3)).padding([8, 10]).boxed());
         }
-        if b.can().manage_shows || b.can().request {
-            results = results.push(
-                (search_item("Search all shows and movies", None, Some(AppMessage::Navigate(Route::Discover)), look))
-                    .boxed(),
-            );
-        }
+        let content = row![
+            picture(b, item.image.as_deref(), 28.0, 42.0, 6.0, look),
+            text(item.label.clone(), ty::SM, look.ink).width(Fill)
+        ]
+        .spacing(12)
+        .align_y(Alignment::Center);
+        results = results.push(menu_item(
+            None,
+            content,
+            None,
+            b.search_index == index,
+            Some(AppMessage::Navigate(item.route.clone())),
+            look,
+        ));
     }
+    if searching {
+        results = results.push(container(spinner(16.0, look)).padding(16).boxed());
+    } else if items.is_empty() {
+        results = results.push(
+            container(text(format!("Nothing called “{}”.", app.query.trim()), ty::SM, look.ink_3)).padding(24).boxed(),
+        );
+    }
+    let l = *look;
+    let field = row![
+        crate::ui::icon::icon(Icon::Search, 18.0).color(look.ink_3),
+        iced_widget::text_input("Search, or jump anywhere", &app.query)
+            .id(crate::shell::SEARCH)
+            .on_input(AppMessage::Query)
+            .on_submit(AppMessage::Submit)
+            .size(15)
+            .padding([16, 0])
+            .style(move |_, _| iced_widget::text_input::Style {
+                background: iced_core::Background::Color(Color::TRANSPARENT),
+                border: iced_core::Border::default(),
+                placeholder: l.ink_3,
+                value: l.ink,
+                selection: l.selection
+            }),
+        text("Esc", ty::XS2, look.ink_3)
+    ]
+    .spacing(12)
+    .align_y(Alignment::Center)
+    .padding([0, 16]);
     panel(
         column![
-            input(crate::shell::SEARCH, &app.query, "Search your library…", AppMessage::Query, look)
-                .on_submit(AppMessage::Submit)
-                .boxed(),
-            scrollable(results).height(Fill.max(440))
-        ]
-        .spacing(8),
+            field,
+            divider(look),
+            scrollable(results).id("palette-results").height(iced_core::Length::Shrink.max(440)),
+            container(text("↑ ↓ Navigate    Enter Open    Esc Close", ty::XS2, look.ink_3)).padding([8, 16])
+        ],
         16.0,
         look,
     )
-    .padding(12)
     .width(640)
     .boxed()
 }
@@ -1613,7 +1903,7 @@ pub fn notifications<'a>(app: &'a App, look: &Look) -> View<'a> {
                 details = details.push((text(relative(n.created_at), ty::XS2, look.ink_3)).boxed());
                 items = items.push(
                     (row![
-                        button("", look)
+                        card_button(look)
                             .plain()
                             .content(row![picture(b, n.image.as_deref(), 36.0, 54.0, 8.0, look), details].spacing(12))
                             .on_press(msg(b, Message::Follow(n.clone())))
@@ -1647,7 +1937,7 @@ pub fn notifications<'a>(app: &'a App, look: &Look) -> View<'a> {
             .spacing(8)
             .padding([8, 10]),
             divider(look),
-            scrollable(items).height(Fill.max(544))
+            scrollable(items).height(iced_core::Length::Shrink.max(544))
         ],
         16.0,
         look,
@@ -1669,32 +1959,9 @@ pub fn dialog<'a>(app: &'a App, look: &Look) -> Option<View<'a>> {
                 Some(body),
                 "Confirm",
                 true,
-                move |yes| if yes { act(b, action.clone()) } else { close.clone() },
+                move |yes| if yes { act(b, action.as_ref().clone()) } else { close.clone() },
                 look,
             ));
-        },
-        Dialog::Context(c) => {
-            content = content.push((text(&c.name, ty::S15, look.ink).font(SEMIBOLD)).boxed());
-            for (label, action) in [
-                ("Mark watched", Action::TitleWatched(c.id, true)),
-                ("Mark unwatched", Action::TitleWatched(c.id, false)),
-            ] {
-                content = content.push((button(label, look).plain().on_press(act(b, action)).boxed()).boxed());
-            }
-            if b.can().edit_metadata {
-                content = content
-                    .push(
-                        (button("Refresh metadata", look).plain().on_press(act(b, Action::Refresh(c.id))).boxed())
-                            .boxed(),
-                    )
-                    .push(
-                        (button("Fix match", look)
-                            .plain()
-                            .on_press(msg(b, Message::Dialog(Some(Dialog::Match(c.id)))))
-                            .boxed())
-                        .boxed(),
-                    );
-            }
         },
         Dialog::Pick(r) => {
             content = content.push(
@@ -1761,14 +2028,14 @@ pub fn dialog<'a>(app: &'a App, look: &Look) -> Option<View<'a>> {
                 }
                 content = content.push((text("Download", ty::S13, look.ink_2)).boxed()).push(
                     (line(
-                        [("NONE", "None"), ("FUTURE", "Future"), ("MISSING", "Missing"), ("ALL", "All")]
+                        [("NONE", "Off"), ("FUTURE", "New episodes"), ("MISSING", "Everything")]
                             .into_iter()
-                            .map(|(v, l)| chip(l, b.monitor == v, msg(b, Message::Monitor(v.into())), look))
+                            .map(|(v, l)| chip(l, b.chosen_monitor() == v, msg(b, Message::Monitor(v.into())), look))
                             .collect(),
                     ))
                     .boxed(),
                 );
-                if b.monitor == "MISSING"
+                if b.chosen_monitor() == "MISSING"
                     && let Some(aired) = b
                         .data(&Key::Aired(r.provider.clone(), r.id.clone()))
                         .and_then(|d| d.aired_episodes)
@@ -1780,7 +2047,15 @@ pub fn dialog<'a>(app: &'a App, look: &Look) -> Option<View<'a>> {
                     (button("Add show", look)
                         .primary()
                         .on_press_maybe((!b.busy && options.is_some() && !b.pick_library.is_empty()).then(|| {
-                            act(b, Action::Add(r.clone(), b.pick_library.clone(), b.monitor.clone(), b.profile.clone()))
+                            act(
+                                b,
+                                Action::Add(
+                                    r.clone(),
+                                    b.pick_library.clone(),
+                                    b.chosen_monitor().to_owned(),
+                                    b.profile.clone(),
+                                ),
+                            )
                         }))
                         .boxed())
                     .boxed(),
@@ -1860,13 +2135,13 @@ pub fn dialog<'a>(app: &'a App, look: &Look) -> Option<View<'a>> {
                                     .primary()
                                     .small()
                                     .on_press_maybe((!b.busy).then(|| if r.verdict.accepted {
-                                        act(b, Action::Grab(*series, r.clone()))
+                                        act(b, Action::Grab(*series, std::sync::Arc::new(r.clone())))
                                     } else {
                                         confirm(
                                             b,
                                             "Grab rejected release?",
                                             "This release doesn't meet the quality profile.",
-                                            Action::Grab(*series, r.clone()),
+                                            Action::Grab(*series, std::sync::Arc::new(r.clone())),
                                         )
                                     }))
                                     .boxed()
@@ -1881,10 +2156,95 @@ pub fn dialog<'a>(app: &'a App, look: &Look) -> Option<View<'a>> {
                 if s.releases.is_empty() {
                     releases = releases.push((layout::empty("No releases found", None, look)).boxed());
                 }
-                content = content.push((scrollable(releases).height(Fill.max(420))).boxed());
+                content = content.push((scrollable(releases).height(iced_core::Length::Shrink.max(420))).boxed());
             } else {
                 content = content.push((pending(b, &key, look)).boxed());
             }
+        },
+        Dialog::SeriesSettings(s) => {
+            let draft = &b.draft;
+            content = content.push(text(&s.name, ty::S15, look.ink).font(MEDIUM).boxed());
+            let mut form = Column::<View<'a>>::new().spacing(16);
+            form = form.push(text("Quality profile", ty::S13, look.ink_2).boxed());
+            if let Some(options) = b.data(&Key::Options).and_then(|d| d.settings.as_ref()) {
+                form = form.push(line(
+                    std::iter::once(chip(
+                        "Library default",
+                        draft.profile.is_empty(),
+                        msg(b, Message::Draft("profile", String::new())),
+                        look,
+                    ))
+                    .chain(options.profiles.iter().map(|p| {
+                        chip(&p.name, draft.profile == p.name, msg(b, Message::Draft("profile", p.name.clone())), look)
+                    }))
+                    .collect(),
+                ));
+                form = form.push(text("Sources", ty::S13, look.ink_2).boxed()).push(line(
+                    std::iter::once(chip(
+                        "All sources",
+                        draft.sources.is_empty(),
+                        msg(b, Message::Source(String::new())),
+                        look,
+                    ))
+                    .chain(options.sources.iter().map(|source| {
+                        chip(
+                            &source.name,
+                            draft.sources.contains(&source.name),
+                            msg(b, Message::Source(source.name.clone())),
+                            look,
+                        )
+                    }))
+                    .collect(),
+                ));
+            }
+            for (id, label, value) in [
+                ("groups", "Preferred groups", &draft.groups),
+                ("aliases", "Also known as", &draft.aliases),
+                ("naming", "File names", &draft.naming),
+            ] {
+                form = form.push(field(
+                    label,
+                    input(id, value, "", move |value| msg(b, Message::Draft(id, value)), look).boxed(),
+                    None,
+                    look,
+                ));
+            }
+            if let Some(preview) = b
+                .data(&Key::Naming(s.id, draft.naming.clone()))
+                .and_then(|d| d.series.as_ref())
+                .and_then(|s| s.naming_preview.as_ref())
+            {
+                for sample in &preview.samples {
+                    form = form.push(text(sample, ty::XS, look.ink_3).boxed());
+                }
+                if let Some(error) = &preview.error {
+                    form = form.push(text(error, ty::XS, look.danger).boxed());
+                }
+            }
+            form = form.push(text("Episode numbers in releases", ty::S13, look.ink_2).boxed()).push(line(
+                [("AUTO", "Work it out"), ("SEASONAL", "Per season"), ("ABSOLUTE", "From the first episode")]
+                    .into_iter()
+                    .map(|(v, l)| chip(l, draft.numbering == v, msg(b, Message::Draft("numbering", v.into())), look))
+                    .collect(),
+            ));
+            form = form.push(text("Seeding", ty::S13, look.ink_2).boxed()).push(line(
+                [
+                    ("default", "Default"),
+                    ("none", "Don't seed"),
+                    ("ratio", "Ratio 1.0"),
+                    ("week", "7 days"),
+                    ("forever", "Forever"),
+                ]
+                .into_iter()
+                .map(|(v, l)| chip(l, draft.seeding == v, msg(b, Message::Draft("seeding", v.into())), look))
+                .collect(),
+            ));
+            content = content.push(scrollable(form).height(iced_core::Length::Shrink.max(440)).boxed()).push(
+                button("Save", look)
+                    .primary()
+                    .on_press_maybe((!b.busy).then(|| act(b, Action::UpdateSeries(s.id, draft.patch()))))
+                    .boxed(),
+            );
         },
         Dialog::Match(id) => {
             content = content
@@ -1914,7 +2274,7 @@ pub fn dialog<'a>(app: &'a App, look: &Look) -> Option<View<'a>> {
                 let mut list = Column::<View<'a>>::new().spacing(8);
                 for r in &c.results {
                     list = list.push(
-                        (button("", look)
+                        (card_button(look)
                             .plain()
                             .content(
                                 row![
@@ -1931,7 +2291,7 @@ pub fn dialog<'a>(app: &'a App, look: &Look) -> Option<View<'a>> {
                         .boxed(),
                     );
                 }
-                content = content.push((scrollable(list).height(Fill.max(420))).boxed());
+                content = content.push((scrollable(list).height(iced_core::Length::Shrink.max(420))).boxed());
             } else {
                 content = content.push((pending(b, &key, look)).boxed());
             }
@@ -1947,7 +2307,14 @@ pub fn dialog<'a>(app: &'a App, look: &Look) -> Option<View<'a>> {
     Some(crate::ui::overlay::dialog(content, 640.0, close, look))
 }
 fn confirm(b: &Browsing, title: &str, body: &str, action: Action) -> AppMessage {
-    msg(b, Message::Dialog(Some(Dialog::Confirm { title: title.into(), body: body.into(), action })))
+    msg(
+        b,
+        Message::Dialog(Some(Dialog::Confirm {
+            title: title.into(),
+            body: body.into(),
+            action: std::sync::Arc::new(action),
+        })),
+    )
 }
 pub fn allowed(b: &Browsing, route: &Route) -> bool {
     let can = b.can();
@@ -2022,8 +2389,4 @@ fn parse_tint(tint: &str) -> Option<Color> {
         return None;
     }
     Some(Color::from_rgb(rgb[0] / 255.0, rgb[1] / 255.0, rgb[2] / 255.0))
-}
-
-fn search_item<'a>(label: &str, hint: Option<&'a str>, message: Option<AppMessage>, look: &Look) -> View<'a> {
-    menu_item(None, text(label.to_owned(), ty::SM, look.ink), hint, false, message, look)
 }

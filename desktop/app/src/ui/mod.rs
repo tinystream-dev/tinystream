@@ -4,6 +4,7 @@
 //! the widgets screens are built from. `web/src/styles.css` and `web/src/components` are the spec.
 
 pub mod backdrop;
+pub mod context_menu;
 pub mod controls;
 pub mod credits;
 pub mod effects;

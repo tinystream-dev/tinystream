@@ -403,7 +403,7 @@ pub fn menu_item<'a, Message: Clone + 'a>(
     pressable(content, 8.0, look, move |status| {
         let hovered = matches!(status, Status::Hovered | Status::Pressed);
         Appearance {
-            paint: Paint { fill: hovered.then_some(l.hover), ..Paint::NONE },
+            paint: Paint { fill: (hovered || active).then_some(l.hover), ..Paint::NONE },
             ink: if hovered || active { l.ink } else { l.ink_2 },
         }
     })

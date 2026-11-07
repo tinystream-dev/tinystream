@@ -107,7 +107,7 @@ impl Default for Gallery {
 }
 
 /// A made-up poster: a warm or cool wash with a sun in it, so there's something to tilt and blur.
-fn artwork(seed: u32) -> image::Handle {
+pub(crate) fn artwork(seed: u32) -> image::Handle {
     let (w, h) = (300u32, 450u32);
     let hue = (seed * 67 % 360) as f32;
     let mut pixels = Vec::with_capacity((w * h * 4) as usize);

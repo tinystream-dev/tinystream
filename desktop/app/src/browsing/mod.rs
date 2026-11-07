@@ -3,7 +3,7 @@
 //! Browsing state, cached independently of navigation. An invalidation during a request is
 //! retained until that request settles, and replies from previous sessions are discarded.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -18,10 +18,12 @@ use crate::route::Route;
 
 #[allow(dead_code)]
 pub mod model;
+#[cfg(debug_assertions)]
+pub mod preview;
 mod view;
 
 use model::*;
-pub use view::{allowed, dialog, notifications, search, view};
+pub use view::{allowed, dialog, notifications, palette, search, view};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Key {
@@ -49,6 +51,7 @@ pub enum Key {
     Aired(String, String),
     Releases(i64, i64, Vec<i64>, String),
     Match(i64, String, String),
+    Naming(i64, String),
 }
 
 #[derive(Default)]
@@ -63,11 +66,11 @@ struct Entry {
 
 #[derive(Debug, Clone)]
 pub enum Dialog {
-    Pick(Discover),
+    Pick(Arc<Discover>),
     Releases { series: i64, season: i64, episodes: Vec<i64>, name: String },
     Match(i64),
-    Confirm { title: String, body: String, action: Action },
-    Context(Card),
+    Confirm { title: String, body: String, action: Arc<Action> },
+    SeriesSettings(Arc<Series>),
 }
 
 #[derive(Debug, Clone)]
@@ -85,15 +88,15 @@ pub enum Action {
     Remove(Vec<i64>, bool),
     Read(Option<Vec<i64>>),
     DeleteNotice(Option<i64>),
-    Add(Discover, String, String, String),
-    Request(Discover, String),
+    Add(Arc<Discover>, String, String, String),
+    Request(Arc<Discover>, String),
     Manage(i64),
     UpdateSeries(i64, Value),
     RefreshSchedule(i64),
     RemoveSeries(i64),
     LookAgain(i64, Option<i64>, Option<i64>),
     DeleteDownloaded(i64, Option<i64>),
-    Grab(i64, ReleaseCandidate),
+    Grab(i64, Arc<ReleaseCandidate>),
     Match(i64, String, String),
     Artwork { id: i64, kind: Option<String>, reset: bool },
 }
@@ -117,12 +120,17 @@ pub enum Message {
     Profile(String),
     PickLibrary(String),
     ReleaseQuery(String),
+    ReleaseReady(u64, String),
+    MatchReady(u64, String),
+    DownloadCategory(String),
     MatchQuery(String),
     Provider(String),
     Act(Action),
     Follow(Notice),
     Select(i64, bool),
     SelectAll(bool),
+    Draft(&'static str, String),
+    Source(String),
     Tick,
     SearchReady(u64, String),
     DiscoverReady(u64, String),
@@ -136,6 +144,7 @@ pub struct Browsing {
     serial: u64,
     pub query: String,
     pub discover_input: String,
+    pub previous_discover: Option<Key>,
     pub library: String,
     pub category: String,
     pub filter: HashMap<Route, String>,
@@ -148,6 +157,11 @@ pub struct Browsing {
     pub profile: String,
     pub pick_library: String,
     pub release_query: String,
+    pub release_input: String,
+    release_serial: u64,
+    pub match_input: String,
+    match_serial: u64,
+    pub download_category: String,
     pub match_query: String,
     pub provider: String,
     pub selected: HashSet<i64>,
@@ -157,7 +171,38 @@ pub struct Browsing {
     search_serial: u64,
     discover_serial: u64,
     pub search_query: String,
+    pub search_index: usize,
+    pub recent: Vec<Card>,
+    pub rates: HashMap<String, Vec<f32>>,
     tick_pending: bool,
+    image_queue: VecDeque<String>,
+    image_active: usize,
+    pub draft: SeriesDraft,
+}
+
+#[derive(Default)]
+pub struct SeriesDraft {
+    pub profile: String,
+    pub sources: Vec<String>,
+    pub groups: String,
+    pub aliases: String,
+    pub numbering: String,
+    pub naming: String,
+    pub seeding: String,
+}
+impl SeriesDraft {
+    pub fn patch(&self) -> Value {
+        let list =
+            |s: &str| s.split(',').map(str::trim).filter(|s| !s.is_empty()).map(str::to_owned).collect::<Vec<_>>();
+        let seeding = match self.seeding.as_str() {
+            "none" => json!({"ratio":0,"then":"REMOVE"}),
+            "ratio" => json!({"ratio":1,"then":"REMOVE"}),
+            "week" => json!({"time":"7days","then":"REMOVE"}),
+            "forever" => json!({"then":"PAUSE"}),
+            _ => Value::Null,
+        };
+        json!({"profile":if self.profile.is_empty(){None}else{Some(&self.profile)},"sources":self.sources,"groups":list(&self.groups),"aliases":list(&self.aliases),"numbering":self.numbering,"naming":if self.naming.trim().is_empty(){None}else{Some(self.naming.trim())},"seeding":seeding})
+    }
 }
 
 impl Browsing {
@@ -167,6 +212,16 @@ impl Browsing {
 
     pub fn can(&self) -> Permissions {
         self.data(&Key::Shell).and_then(|d| d.viewer.as_ref()).map(|v| v.permissions.clone()).unwrap_or_default()
+    }
+
+    pub fn chosen_monitor(&self) -> &str {
+        if !self.monitor.is_empty() {
+            &self.monitor
+        } else {
+            self.data(&Key::Options)
+                .and_then(|d| d.settings.as_ref())
+                .map_or("NONE", |s| s.automation.default_monitor.as_str())
+        }
     }
 
     pub fn viewer(&self) -> Option<&Viewer> {
@@ -240,10 +295,14 @@ impl Browsing {
         match self.dialog.clone() {
             Some(Dialog::Pick(r)) if self.can().manage_shows => {
                 self.ensure(Key::Options, api, effects);
-                self.ensure(Key::Aired(r.provider, r.id), api, effects);
+                self.ensure(Key::Aired(r.provider.clone(), r.id.clone()), api, effects);
             },
             Some(Dialog::Releases { series, season, episodes, .. }) => {
                 self.ensure(Key::Releases(series, season, episodes, self.release_query.clone()), api, effects)
+            },
+            Some(Dialog::SeriesSettings(s)) => {
+                self.ensure(Key::Options, api, effects);
+                self.ensure(Key::Naming(s.id, self.draft.naming.clone()), api, effects);
             },
             Some(Dialog::Match(id)) => {
                 self.ensure(Key::Match(id, self.match_query.clone(), self.provider.clone()), api, effects)
@@ -297,12 +356,49 @@ impl Browsing {
             api::Live::Event(event) => match &event.events {
                 E::NotificationReceived(_) => self.invalidate(|k| matches!(k, Key::Inbox)),
                 E::ConfigChanged(_) => self.invalidate(|_| true),
-                E::LibraryChanged(_)
-                | E::ScanFinished(_)
-                | E::MetadataChanged(_)
-                | E::EpisodesImported(_)
-                | E::SeriesChanged(_)
-                | E::ListChanged(_) => self.invalidate(|_| true),
+                E::ListChanged(change) => match change.list {
+                    api::events::ChangedList::DOWNLOADS => self.invalidate(|k| {
+                        matches!(
+                            k,
+                            Key::Downloads
+                                | Key::Engine
+                                | Key::Wanted
+                                | Key::Coming
+                                | Key::Calendar(_)
+                                | Key::Soon
+                                | Key::Series(_)
+                        )
+                    }),
+                    api::events::ChangedList::NOTIFICATIONS => self.invalidate(|k| matches!(k, Key::Inbox)),
+                    api::events::ChangedList::REQUESTS => self.invalidate(|k| {
+                        matches!(
+                            k,
+                            Key::Requests
+                                | Key::Discover(..)
+                                | Key::ForYou(_)
+                                | Key::Coming
+                                | Key::Calendar(_)
+                                | Key::Soon
+                        )
+                    }),
+                    api::events::ChangedList::USERS => self.invalidate(|_| true),
+                    _ => {},
+                },
+                E::LibraryChanged(_) | E::ScanFinished(_) | E::MetadataChanged(_) | E::EpisodesImported(_) => {
+                    self.invalidate(|_| true)
+                },
+                E::SeriesChanged(_) => self.invalidate(|k| {
+                    matches!(
+                        k,
+                        Key::Series(_)
+                            | Key::Schedule(_)
+                            | Key::Wanted
+                            | Key::Calendar(_)
+                            | Key::Soon
+                            | Key::Coming
+                            | Key::Discover(..)
+                    )
+                }),
                 _ => {},
             },
             _ => {},
@@ -310,6 +406,7 @@ impl Browsing {
     }
 
     pub fn search(&mut self, query: String, effects: &mut Vec<Effect>) {
+        self.search_index = 0;
         self.search_serial += 1;
         let serial = self.search_serial;
         let generation = self.generation;
@@ -329,12 +426,37 @@ impl Browsing {
                 if generation != self.generation {
                     return None;
                 }
-                let Some(entry) = self.cache.get_mut(&key).filter(|e| e.serial == serial) else { return None };
+                let entry = self.cache.get_mut(&key).filter(|e| e.serial == serial)?;
                 entry.pending = false;
                 entry.fetched = Some(Instant::now());
                 match result {
                     Ok(data) => {
                         let paths = picture_paths(&data);
+                        let mut rates = Vec::new();
+                        if let Some(e) = &data.download_engine {
+                            rates.push(("download".to_owned(), e.download_rate));
+                            rates.push(("upload".to_owned(), e.upload_rate));
+                        }
+                        for d in &data.downloads {
+                            if let Some(l) = &d.live {
+                                rates.push((format!("dl{}", d.id), l.download_rate));
+                            }
+                        }
+                        for (key, rate) in rates {
+                            let values = self.rates.entry(key).or_default();
+                            values.push(rate as f32);
+                            if values.len() > 90 {
+                                values.remove(0);
+                            }
+                        }
+
+                        if let Key::Title(_) = key
+                            && let Some(title) = &data.title
+                        {
+                            self.recent.retain(|c| c.id != title.card.id);
+                            self.recent.insert(0, title.card.clone());
+                            self.recent.truncate(12);
+                        }
                         entry.data = Some(data);
                         entry.error = None;
                         self.pictures(paths, api, effects);
@@ -361,7 +483,11 @@ impl Browsing {
                 }
             },
             Message::Picture(generation, path, handle, fresh) if generation == self.generation => {
-                self.images.arrived(path, handle, fresh)
+                self.images.arrived(path, handle, fresh);
+                if fresh {
+                    self.image_active = self.image_active.saturating_sub(1);
+                    self.fetch_pictures(api, effects);
+                }
             },
             Message::Retry(key) => {
                 if let Some(e) = self.cache.get_mut(&key) {
@@ -378,7 +504,10 @@ impl Browsing {
                     AppMessage::Browsing(generation, Message::DiscoverReady(serial, query.trim().to_owned()))
                 })));
             },
-            Message::DiscoverReady(serial, query) if serial == self.discover_serial => self.query = query,
+            Message::DiscoverReady(serial, query) if serial == self.discover_serial => {
+                self.previous_discover = Some(Key::Discover(self.library.clone(), self.query.clone()));
+                self.query = query;
+            },
             Message::SearchReady(serial, query) if serial == self.search_serial => self.search_query = query,
             Message::Library(library) => self.library = library,
             Message::Category(category) => self.category = category,
@@ -402,15 +531,34 @@ impl Browsing {
                 self.error = None;
                 self.note.clear();
                 self.profile.clear();
+                self.release_serial += 1;
+                self.match_serial += 1;
                 self.release_query.clear();
+                self.release_input.clear();
+                self.match_input.clear();
                 self.match_query.clear();
                 self.provider.clear();
                 if let Some(Dialog::Pick(r)) = &dialog {
                     self.pick_library = r.library.clone();
-                    self.monitor = self
-                        .data(&Key::Options)
-                        .and_then(|d| d.settings.as_ref())
-                        .map_or("NONE".into(), |s| s.automation.default_monitor.clone());
+                    self.monitor.clear();
+                }
+                if let Some(Dialog::SeriesSettings(s)) = &dialog {
+                    self.draft = SeriesDraft {
+                        profile: s.profile.clone().unwrap_or_default(),
+                        sources: s.sources.clone(),
+                        groups: s.groups.join(", "),
+                        aliases: s.aliases.join(", "),
+                        numbering: s.numbering.clone(),
+                        naming: s.naming.clone().unwrap_or_else(|| s.style.file.clone()),
+                        seeding: match &s.seeding {
+                            None => "default",
+                            Some(r) if r.ratio == Some(0.0) => "none",
+                            Some(r) if r.ratio == Some(1.0) => "ratio",
+                            Some(r) if r.time.is_some() => "week",
+                            _ => "forever",
+                        }
+                        .into(),
+                    };
                 }
                 self.dialog = dialog;
             },
@@ -418,8 +566,29 @@ impl Browsing {
             Message::Monitor(monitor) => self.monitor = monitor,
             Message::Profile(profile) => self.profile = profile,
             Message::PickLibrary(library) => self.pick_library = library,
-            Message::ReleaseQuery(query) => self.release_query = query,
-            Message::MatchQuery(query) => self.match_query = query,
+            Message::ReleaseQuery(query) => {
+                self.release_input = query.clone();
+                self.release_serial += 1;
+                let serial = self.release_serial;
+                let generation = self.generation;
+                effects.push(Effect::Task(Box::pin(async move {
+                    tokio::time::sleep(Duration::from_millis(350)).await;
+                    AppMessage::Browsing(generation, Message::ReleaseReady(serial, query))
+                })));
+            },
+            Message::ReleaseReady(serial, query) if serial == self.release_serial => self.release_query = query,
+            Message::MatchReady(serial, query) if serial == self.match_serial => self.match_query = query,
+            Message::DownloadCategory(category) => self.download_category = category,
+            Message::MatchQuery(query) => {
+                self.match_input = query.clone();
+                self.match_serial += 1;
+                let serial = self.match_serial;
+                let generation = self.generation;
+                effects.push(Effect::Task(Box::pin(async move {
+                    tokio::time::sleep(Duration::from_millis(350)).await;
+                    AppMessage::Browsing(generation, Message::MatchReady(serial, query))
+                })));
+            },
             Message::Provider(provider) => self.provider = provider,
             Message::Follow(n) => {
                 self.act(Action::Read(Some(vec![n.id])), api, effects);
@@ -430,6 +599,24 @@ impl Browsing {
                     self.selected.insert(id);
                 } else {
                     self.selected.remove(&id);
+                }
+            },
+            Message::Draft(field, value) => match field {
+                "profile" => self.draft.profile = value,
+                "groups" => self.draft.groups = value,
+                "aliases" => self.draft.aliases = value,
+                "numbering" => self.draft.numbering = value,
+                "naming" => self.draft.naming = value,
+                "seeding" => self.draft.seeding = value,
+                _ => {},
+            },
+            Message::Source(source) => {
+                if source.is_empty() {
+                    self.draft.sources.clear();
+                } else if let Some(i) = self.draft.sources.iter().position(|s| *s == source) {
+                    self.draft.sources.remove(i);
+                } else {
+                    self.draft.sources.push(source);
                 }
             },
             Message::SelectAll(on) => {
@@ -465,6 +652,15 @@ impl Browsing {
             if !self.images.want(&path) {
                 continue;
             }
+            self.image_queue.push_back(path);
+        }
+        self.fetch_pictures(api, effects);
+    }
+
+    fn fetch_pictures(&mut self, api: &Api, effects: &mut Vec<Effect>) {
+        while self.image_active < 6 {
+            let Some(path) = self.image_queue.pop_front() else { break };
+            self.image_active += 1;
             let api = api.clone();
             let generation = self.generation;
             effects.push(Effect::Listen(Box::new(move |send| {
@@ -544,6 +740,7 @@ async fn load(api: &Api, key: &Key) -> Result<Document, api::Error> {
         },
         Key::ForYou(library) => query::<BrowseForYou>(api, json!({"library":null_string(library)})).await,
         Key::Search(q) => query::<BrowseSearch>(api, json!({"query":q})).await,
+        Key::Naming(id, file) => query::<BrowseNamingPreview>(api, json!({"id":id,"file":file})).await,
         Key::Options => query::<BrowseOptions>(api, json!({})).await,
         Key::Aired(provider, id) => query::<BrowseAiredEpisodes>(api, json!({"provider":provider,"id":id})).await,
         Key::Releases(id, season, episodes, q) => {

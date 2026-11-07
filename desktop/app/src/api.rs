@@ -143,18 +143,16 @@ impl Api {
 
     pub async fn artwork(&self, id: i64, kind: Option<String>, reset: bool) -> Result<(), Error> {
         use crate::platform::{Current, Desktop};
-        let (query, variables) = if let Some(kind) = kind {
-            (
-                "mutation Artwork($id:Int!,$kind:TitleArtwork!,$image:Upload){setTitleArtwork(id:$id,kind:$kind,image:$image){id}}",
-                json!({"id":id,"kind":kind,"image":null}),
-            )
+        let operation = if let Some(kind) = kind {
+            let variables = serde_json::from_value(json!({"id":id,"kind":kind,"image":null}))
+                .map_err(|_| Error::message("Invalid artwork target."))?;
+            serde_json::to_value(BrowseTitleArtwork::build_query(variables))
         } else {
-            (
-                "mutation Artwork($videoId:Int!,$image:Upload){setVideoArtwork(videoId:$videoId,image:$image){id}}",
-                json!({"videoId":id,"image":null}),
-            )
-        };
-        let operation = json!({"query":query,"variables":variables});
+            let variables = serde_json::from_value(json!({"videoId":id,"image":null}))
+                .map_err(|_| Error::message("Invalid artwork target."))?;
+            serde_json::to_value(BrowseVideoArtwork::build_query(variables))
+        }
+        .map_err(|_| Error::message("Couldn't prepare the picture upload."))?;
         let mut request = self.http.post(self.origin.join("api/graphql").expect("validated origin"));
         if let Some(token) = &self.token {
             request = request.bearer_auth(&token.0);

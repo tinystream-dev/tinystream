@@ -25,8 +25,8 @@ fn main() {
     let document = format!("{operations}\n{shared}");
     let mut options = GraphQLClientCodegenOptions::new(CodegenMode::Cli);
     options.set_module_visibility(syn::parse_str("pub").expect("public visibility"));
-    options.set_variables_derives("Debug, Clone, Deserialize".into());
-    options.set_response_derives("Debug, Clone, Serialize".into());
+    options.set_variables_derives("Clone, Deserialize".into());
+    options.set_response_derives("Clone, Serialize".into());
     options.set_fragments_other_variant(true);
     let generated = generate_module_token_stream_from_string(&document, &PathBuf::from(schema), options)
         .expect("operations match the shared schema");

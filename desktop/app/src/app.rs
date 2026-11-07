@@ -66,6 +66,7 @@ pub enum Message {
     Overlay(Option<Overlay>),
     Query(String),
     Submit,
+    SearchStep(i32),
     Focus(bool),
     Session(crate::session::Message),
     Gallery(crate::ui::gallery::Message),
@@ -176,6 +177,16 @@ impl App {
                 }
             },
             Message::Player(serial, message) => {
+                if matches!(message, crate::player::Message::Saved) {
+                    self.browsing.invalidate(|k| {
+                        matches!(
+                            k,
+                            crate::browsing::Key::Home
+                                | crate::browsing::Key::Title(_)
+                                | crate::browsing::Key::Library(_)
+                        )
+                    });
+                }
                 let Some(player) = self.player.as_mut().filter(|player| player.serial == serial) else { return };
                 if let Some(out) = player.update(message, effects) {
                     self.player_asks(out, effects);
@@ -261,20 +272,16 @@ impl App {
                 self.reduce_motion = reduce;
                 self.session.reduce_motion = reduce;
             },
+            Message::SearchStep(step) => {
+                let count = crate::browsing::palette(self).len();
+                if count > 0 {
+                    self.browsing.search_index =
+                        (self.browsing.search_index as i32 + step).rem_euclid(count as i32) as usize;
+                }
+            },
             Message::Submit => {
-                let result = self
-                    .browsing
-                    .data(&crate::browsing::Key::Search(self.browsing.search_query.clone()))
-                    .and_then(|d| d.search.as_ref())
-                    .and_then(|s| s.titles.first())
-                    .map(|c| Route::Title(c.id as u64));
-                if let Some(route) = result.or_else(|| {
-                    shell::commands(&self.query)
-                        .into_iter()
-                        .find(|(_, r)| crate::browsing::allowed(&self.browsing, r))
-                        .map(|(_, r)| r)
-                }) {
-                    self.navigate(route, effects);
+                if let Some(item) = crate::browsing::palette(self).get(self.browsing.search_index) {
+                    self.navigate(item.route.clone(), effects);
                 }
             },
         }
@@ -415,6 +422,15 @@ impl App {
                 crate::keys::zoom(modified_key, *modifiers).or_else(|| crate::keys::zoom(key, *modifiers))
         {
             return Some(Message::Shortcut(shortcut));
+        }
+        if self.overlay == Some(Overlay::Search)
+            && let Event::Keyboard(keyboard::Event::KeyPressed { key, .. }) = event
+        {
+            match key {
+                keyboard::Key::Named(keyboard::key::Named::ArrowDown) => return Some(Message::SearchStep(1)),
+                keyboard::Key::Named(keyboard::key::Named::ArrowUp) => return Some(Message::SearchStep(-1)),
+                _ => {},
+            }
         }
         match event {
             Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. })
