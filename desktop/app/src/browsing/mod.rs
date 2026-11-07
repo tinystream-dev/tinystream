@@ -1001,22 +1001,25 @@ impl Browsing {
     }
 }
 
-async fn query<Q: GraphQLQuery>(api: &Api, variables: Value) -> Result<Document, api::Error>
-where
-    Q::Variables: DeserializeOwned,
-{
-    let variables =
-        serde_json::from_value(variables).map_err(|e| api::Error::message(format!("Invalid request: {e}")))?;
-    api.request_data::<Q, Document>(variables).await
+/// `value` as an operation's generated variables. Operations without any get a unit struct, which
+/// only `null` reads as.
+fn variables<V: DeserializeOwned>(value: Value) -> Result<V, api::Error> {
+    let value = if value.as_object().is_some_and(serde_json::Map::is_empty) { Value::Null } else { value };
+    serde_json::from_value(value).map_err(|e| api::Error::message(format!("Invalid request: {e}")))
 }
 
-async fn mutation<Q: GraphQLQuery>(api: &Api, variables: Value) -> Result<(), api::Error>
+async fn query<Q: GraphQLQuery>(api: &Api, value: Value) -> Result<Document, api::Error>
 where
     Q::Variables: DeserializeOwned,
 {
-    let variables =
-        serde_json::from_value(variables).map_err(|e| api::Error::message(format!("Invalid request: {e}")))?;
-    api.request::<Q>(variables).await.map(|_| ())
+    api.request_data::<Q, Document>(variables(value)?).await
+}
+
+async fn mutation<Q: GraphQLQuery>(api: &Api, value: Value) -> Result<(), api::Error>
+where
+    Q::Variables: DeserializeOwned,
+{
+    api.request::<Q>(variables(value)?).await.map(|_| ())
 }
 
 async fn load(api: &Api, key: &Key) -> Result<Document, api::Error> {
@@ -1325,6 +1328,92 @@ mod tests {
         }
         b.live(&api::Live::Connected);
         assert!(b.cache.values().all(|e| e.dirty));
+    }
+
+    #[test]
+    fn every_screen_and_action_builds_variables_the_server_can_be_sent() {
+        let keys = vec![
+            Key::Shell,
+            Key::Home,
+            Key::Music,
+            Key::BookHome,
+            Key::Coming,
+            Key::Library("Shows".into()),
+            Key::Books("Books".into()),
+            Key::Title(1),
+            Key::Similar(1),
+            Key::Series(1),
+            Key::Schedule(1),
+            Key::Calendar(0),
+            Key::Soon,
+            Key::Requests,
+            Key::Wanted,
+            Key::Downloads,
+            Key::Engine,
+            Key::Inbox,
+            Key::Discover(String::new(), String::new()),
+            Key::Discover("Shows".into(), "orbit".into()),
+            Key::ForYou(String::new()),
+            Key::Search("orbit".into()),
+            Key::Recents(vec![1]),
+            Key::Options,
+            Key::Aired("TMDB".into(), "1".into()),
+            Key::Releases(1, 1, vec![1], String::new()),
+            Key::Match(1, String::new(), String::new()),
+            Key::Naming(1, "a.mkv".into()),
+        ];
+        let found = Arc::new(Discover { provider: "TMDB".into(), id: "1".into(), ..Default::default() });
+        let actions = vec![
+            Action::Watched(vec![1], true),
+            Action::TitleWatched(1, true),
+            Action::RestoreTitle(1, vec![1]),
+            Action::RestoreEpisodes(vec![1], vec![2]),
+            Action::Refresh(1),
+            Action::Approve(1),
+            Action::Decline(1),
+            Action::CancelRequest(1),
+            Action::Pause(vec![1]),
+            Action::Bulk(true),
+            Action::Resume(vec![1]),
+            Action::Recheck(vec![1]),
+            Action::Import(1),
+            Action::Remove(vec![1], false),
+            Action::Read(None),
+            Action::Read(Some(vec![1])),
+            Action::DeleteNotice(None),
+            Action::DeleteNotice(Some(1)),
+            Action::Add(found.clone(), "Shows".into(), "MISSING".into(), String::new()),
+            Action::Request(found, String::new()),
+            Action::Manage(1),
+            Action::UpdateSeries(1, json!({"monitor":"MISSING"})),
+            Action::RefreshSchedule(1),
+            Action::RemoveSeries(1),
+            Action::LookAgain(1, Some(1), None),
+            Action::DeleteDownloaded(1, None),
+            Action::Grab(1, Arc::new(ReleaseCandidate::default())),
+            Action::Match(1, "TMDB".into(), "1".into()),
+        ];
+        crate::test_support::run(async move {
+            // Refusing everything makes each call send exactly one request, so one that never
+            // leaves fails its own assertion instead of leaving the server waiting.
+            let (origin, server) = crate::test_support::http(
+                keys.len() + actions.len(),
+                |_| json!({"data":null,"errors":[{"message":"refused"}]}),
+            )
+            .await;
+            let api = Api::new(origin, Some(api::Token("test-session".into()))).unwrap();
+            for key in &keys {
+                let error = load(&api, key).await.err().map(|e| e.to_string()).unwrap_or_default();
+                assert!(!error.contains("Invalid request"), "{key:?}: {error}");
+            }
+            for action in actions {
+                let name = format!("{action:?}");
+                let error = mutate(&api, action).await.err().map(|e| e.to_string()).unwrap_or_default();
+                assert!(!error.contains("Invalid request"), "{name}: {error}");
+            }
+            let requests = tokio::time::timeout(Duration::from_secs(5), server).await.unwrap().unwrap();
+            assert!(requests.iter().all(|(_, body)| body["query"].as_str().is_some_and(|q| !q.is_empty())));
+        });
     }
 
     #[test]
