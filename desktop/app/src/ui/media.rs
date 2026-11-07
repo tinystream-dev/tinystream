@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! People and artwork: avatars (`Avatar.tsx`), images that develop as they arrive (`Img.tsx`).
+//! People and artwork: avatars (`Avatar.tsx`), images that develop as they arrive (`Img.tsx`)
+//! and drain once watched.
 
 use std::time::{Duration, Instant};
 
@@ -199,6 +200,151 @@ impl<Message> Widget<Message, Theme, Renderer> for Develop<'_, Message> {
                     renderer::Quad {
                         bounds,
                         border: Border::default().rounded(self.radius),
+                        ..renderer::Quad::default()
+                    },
+                    tint,
+                );
+            }
+        });
+    }
+}
+
+/// A picture drained of colour once it's been watched (`.drain`): grey and dimmed, wiped across
+/// from the left when it changes. `order` staggers a run of them down a list, and a new `key`
+/// (another episode in the same place) takes the state as it is.
+pub fn drain<'a, Message: 'a>(
+    content: impl Into<Element<'a, Message>>,
+    on: bool,
+    key: i64,
+    order: usize,
+    radius: f32,
+    look: &Look,
+) -> Element<'a, Message> {
+    Drain {
+        content: content.into(),
+        on,
+        key,
+        delay: DRAIN_STAGGER * order.min(16) as u32,
+        radius,
+        animate: !look.reduce_motion,
+    }
+    .boxed()
+}
+
+struct Drain<'a, Message> {
+    content: Element<'a, Message>,
+    on: bool,
+    key: i64,
+    delay: Duration,
+    radius: f32,
+    animate: bool,
+}
+
+struct Drained {
+    key: i64,
+    on: bool,
+    since: Option<Instant>,
+}
+
+const DRAIN: Duration = Duration::from_millis(700);
+const DRAIN_STAGGER: Duration = Duration::from_millis(45);
+const DRAIN_CURVE: motion::Curve = motion::Curve(0.65, 0.0, 0.35, 1.0);
+
+impl<Message> Drain<'_, Message> {
+    /// How much of the width is drained.
+    fn covered(&self, state: &Drained, now: Instant) -> f32 {
+        let t = state.since.map_or(1.0, |since| DRAIN_CURVE.at(motion::progress(since + self.delay, DRAIN, now)));
+        if state.on { t } else { 1.0 - t }
+    }
+}
+
+impl<Message> iced_core::widget::Meta for Drain<'_, Message> {}
+
+impl<Message> Widget<Message, Theme, Renderer> for Drain<'_, Message> {
+    fn tag(&self) -> tree::Tag {
+        tree::Tag::of::<Drained>()
+    }
+
+    fn state(&self) -> tree::State {
+        tree::State::new(Drained { key: self.key, on: self.on, since: None })
+    }
+
+    fn diff(&mut self, tree: &mut Tree) {
+        let state = tree.state.downcast_mut::<Drained>();
+        if state.key != self.key || !self.animate {
+            *state = Drained { key: self.key, on: self.on, since: None };
+        } else if state.on != self.on {
+            state.on = self.on;
+            state.since = Some(Instant::now());
+        }
+        tree.diff_children(std::slice::from_mut(&mut self.content));
+    }
+
+    fn size(&self) -> Size<Length> {
+        self.content.size()
+    }
+
+    fn layout(&mut self, tree: &mut Tree, renderer: &Renderer, limits: &layout::Limits) {
+        let size = self.content.size();
+        layout::padded(tree, limits, size.width, size.height, 0, |tree, limits| {
+            self.content.layout(tree, renderer, limits);
+            tree.size
+        });
+    }
+
+    fn update(
+        &mut self,
+        tree: &mut Tree,
+        event: &Event,
+        layout: Layout,
+        cursor: mouse::Cursor,
+        renderer: &Renderer,
+        shell: &mut iced_core::Shell<'_, Message>,
+        viewport: &Rectangle,
+    ) {
+        if let (Event::Window(window::Event::RedrawRequested(now)), Some(since)) =
+            (event, tree.state.downcast_ref::<Drained>().since)
+            && now.saturating_duration_since(since) < self.delay + DRAIN
+        {
+            shell.request_redraw();
+        }
+        let (child, tree) = layout.iter_mut(&mut tree.children).next().expect("content");
+        self.content.update(tree, event, child, cursor, renderer, shell, viewport);
+    }
+
+    fn draw(
+        &self,
+        tree: &Tree,
+        renderer: &mut Renderer,
+        theme: &Theme,
+        style: &renderer::Style,
+        layout: Layout,
+        cursor: mouse::Cursor,
+        viewport: &Rectangle,
+    ) {
+        let bounds = layout.bounds();
+        let covered = self.covered(tree.state.downcast_ref::<Drained>(), Instant::now());
+        let (child, tree) = layout.iter(&tree.children).next().expect("content");
+        self.content.draw(tree, renderer, theme, style, child, cursor, viewport);
+        if covered <= 0.0 {
+            return;
+        }
+        // A pixel past the picture's own (circular) corners, so its antialiased edge is covered
+        // and doesn't show colour through the backdrop's.
+        let shape = bounds.expand(1.0);
+        let radius = self.radius + 1.0;
+        let wiped = Rectangle { width: shape.width * covered, ..shape };
+        let Some(clip) = wiped.intersection(viewport) else { return };
+        // `grayscale(1) brightness(0.62)`: no colour, then 38% black painted over it.
+        let tint = Color::from_rgba(0.0, 0.0, 0.0, 0.38);
+        renderer.with_layer(clip, |renderer| {
+            if backdrop::available() {
+                renderer.draw_primitive(shape, Backdrop::new(0.0, 0.0, tint, radius, 0.0, 1.0));
+            } else {
+                renderer.fill_quad(
+                    renderer::Quad {
+                        bounds: shape,
+                        border: Border::default().rounded(radius),
                         ..renderer::Quad::default()
                     },
                     tint,

@@ -24,7 +24,7 @@ pub struct Frame {
 
 static FRAME: Mutex<Option<Frame>> = Mutex::new(None);
 
-fn frame() -> MutexGuard<'static, Option<Frame>> {
+pub(super) fn frame() -> MutexGuard<'static, Option<Frame>> {
     FRAME.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 

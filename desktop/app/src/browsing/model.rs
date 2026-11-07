@@ -147,7 +147,6 @@ pub struct Season {
     pub number: i64,
     pub name: String,
     pub title: Option<String>,
-    pub overview: Option<String>,
     pub poster: Option<String>,
     pub episodes: Vec<Video>,
 }

@@ -167,9 +167,15 @@ pub(super) fn title<'a>(b: &'a Browsing, id: i64, look: &Look) -> View<'a> {
         if let Some(s) = t.seasons.iter().find(|s| s.number == season) {
             let ids: Vec<_> = s.episodes.iter().map(|e| e.id).collect();
             let all = s.episodes.iter().all(|e| e.finished);
+            if season == 0 && tabs.len() == 1 {
+                page = page.push((text(&s.name, ty::S15, look.ink).font(SEMIBOLD)).boxed());
+            }
             page = page.push(
                 (row![
-                    text(s.title.as_deref().unwrap_or(&s.name), ty::S15, look.ink).font(SEMIBOLD).width(Fill),
+                    match s.title.as_deref().filter(|title| *title != c.name) {
+                        Some(title) => text(title, ty::SM, look.ink_3).width(Fill).boxed(),
+                        None => space().width(Fill).boxed(),
+                    },
                     button(if all { "Mark season unwatched" } else { "Mark season watched" }, look)
                         .plain()
                         .small()
@@ -179,11 +185,8 @@ pub(super) fn title<'a>(b: &'a Browsing, id: i64, look: &Look) -> View<'a> {
                 .align_y(Alignment::Center))
                 .boxed(),
             );
-            if let Some(o) = &s.overview {
-                page = page.push((text(o, ty::SM, look.ink_2)).boxed());
-            }
-            for v in &s.episodes {
-                page = page.push((episode(b, t, v, look)).boxed());
+            for (i, v) in s.episodes.iter().enumerate() {
+                page = page.push((episode(b, t, v, i, look)).boxed());
             }
         }
         if let Some(series) = b.data(&Key::Series(id)).and_then(|d| d.title.as_ref()).and_then(|t| t.series.as_ref()) {
@@ -267,7 +270,7 @@ fn artwork<'a>(b: &'a Browsing, id: i64, kind: Option<&str>, label: &str, custom
     }
     line(buttons)
 }
-fn episode<'a>(b: &'a Browsing, t: &'a Title, v: &'a Video, look: &Look) -> View<'a> {
+fn episode<'a>(b: &'a Browsing, t: &'a Title, v: &'a Video, order: usize, look: &Look) -> View<'a> {
     let next = t.next_up.as_ref().is_some_and(|n| n.video.id == v.id)
         && !t.seasons.iter().all(|s| s.episodes.iter().all(|e| e.finished));
     let value = v
@@ -276,7 +279,14 @@ fn episode<'a>(b: &'a Browsing, t: &'a Title, v: &'a Video, look: &Look) -> View
         .filter(|(_, duration)| *duration > 0.0)
         .map(|(p, d)| (p / d) as f32)
         .filter(|_| !v.finished);
-    let mut art_layers = vec![picture(b, v.still.as_deref(), 176.0, 99.0, 10.0, look)];
+    let mut art_layers = vec![media::drain(
+        picture(b, v.still.as_deref(), 176.0, 99.0, 10.0, look),
+        v.finished,
+        v.id,
+        order,
+        look.radius(10.0),
+        look,
+    )];
     if let Some(value) = value {
         art_layers.push(container(progress(Some(value), look.media_ink, look)).align_bottom(Fill).boxed());
     }

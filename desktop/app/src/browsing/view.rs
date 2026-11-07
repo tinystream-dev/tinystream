@@ -404,12 +404,12 @@ fn hero<'a>(b: &'a Browsing, props: Hero<'a>, look: &Look) -> View<'a> {
     layers.push(container(content).align_bottom(Fill).padding(padding).boxed());
     let destination = route;
     card_button(look)
-        .content(
-            squircle(iced_widget::Stack::with_children(layers).height(height).width(Fill), 22.0, look)
-                .width(Fill)
-                .edge()
-                .boxed(),
-        )
+        .content(crate::ui::tilt::card(
+            iced_widget::Stack::with_children(layers).height(height).width(Fill),
+            22.0,
+            0.0,
+            look,
+        ))
         .on_press_maybe(destination.map(AppMessage::Navigate))
         .boxed()
 }
@@ -425,8 +425,10 @@ struct WideCard<'a> {
 }
 fn wide_card<'a>(b: &'a Browsing, props: WideCard<'_>, look: &Look) -> View<'a> {
     let WideCard { name, subtitle, image, route, label, value, width } = props;
-    let mut layers =
-        vec![crate::ui::tilt::art(image.and_then(|p| b.images.get(p)).cloned(), 16.0, 9.0 / 16.0, look).boxed()];
+    let mut layers = vec![match image {
+        Some(path) => media::img(b.images.picture(path), 16.0, look),
+        None => squircle(space().width(Fill).height(Fill), 16.0, look).fill(look.raised).boxed(),
+    }];
     let shade = look.media_shade;
     layers.push(crate::ui::squircle::gradient(
         16.0,
@@ -457,15 +459,12 @@ fn wide_card<'a>(b: &'a Browsing, props: WideCard<'_>, look: &Look) -> View<'a> 
         image,
         container(
             card_button(look)
-                .content(
-                    squircle(
-                        iced_widget::Stack::with_children(layers).width(Fill).height(width * 9.0 / 16.0),
-                        16.0,
-                        look,
-                    )
-                    .edge()
-                    .width(Fill),
-                )
+                .content(crate::ui::tilt::card(
+                    iced_widget::Stack::with_children(layers).width(Fill).height(width * 9.0 / 16.0),
+                    16.0,
+                    4.0,
+                    look,
+                ))
                 .on_press_maybe(route.map(AppMessage::Navigate))
                 .boxed(),
         )

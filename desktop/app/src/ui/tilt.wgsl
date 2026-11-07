@@ -31,10 +31,17 @@ struct Out {
     @location(0) local: vec2<f32>,
     @location(1) coverage: f32,
     @location(2) edge: f32,
+    // Where in the card the picture is shown from, inside its outline.
+    @location(3) shown: vec2<f32>,
 }
 
 @vertex
-fn vs(@location(0) local: vec2<f32>, @location(1) coverage: f32, @location(2) edge: f32) -> Out {
+fn vs(
+    @location(0) local: vec2<f32>,
+    @location(1) coverage: f32,
+    @location(2) edge: f32,
+    @location(3) shown: vec2<f32>,
+) -> Out {
     let size = params.rect.zw;
     let p = local - size * 0.5;
     // perspective(d) rotateX(rx) rotateY(ry), applied to the point right to left, as CSS does.
@@ -49,7 +56,7 @@ fn vs(@location(0) local: vec2<f32>, @location(1) coverage: f32, @location(2) ed
     let w = (params.perspective - z2) / params.perspective;
     let screen = params.rect.xy + size * 0.5 + vec2<f32>(x1, y2) / w;
     let clip = screen / params.frame * vec2<f32>(2.0, -2.0) + vec2<f32>(-1.0, 1.0);
-    return Out(vec4<f32>(clip * w, 0.0, w), local, coverage, edge);
+    return Out(vec4<f32>(clip * w, 0.0, w), local, coverage, edge, shown);
 }
 
 fn soft_light(b: vec3<f32>, s: vec3<f32>) -> vec3<f32> {
@@ -61,7 +68,7 @@ fn soft_light(b: vec3<f32>, s: vec3<f32>) -> vec3<f32> {
 fn fs(input: Out) -> @location(0) vec4<f32> {
     let size = params.rect.zw;
     let uv = input.local / size;
-    let art = textureSample(picture, linear, uv * params.cover.xy + params.cover.zw);
+    let art = textureSample(picture, linear, input.shown / size * params.cover.xy + params.cover.zw);
     var color = params.background.rgb * (1.0 - art.a) + art.rgb * art.a;
 
     // radial-gradient(circle 65cqmin at gx gy, media-ink 55%, transparent 70%), soft-light.
