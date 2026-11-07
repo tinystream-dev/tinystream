@@ -67,7 +67,7 @@ pub(super) fn library<'a>(b: &'a Browsing, route: &Route, name: &'a str, look: &
             )
         } else {
             let l = *look;
-            layout::poster_grid(count, move |i| poster(b, list[i], None, &l))
+            layout::virtual_poster_grid(count, ty::S13.line + ty::XS.line + 8.0, move |i| poster(b, list[i], None, &l))
         }
     ]
     .boxed()
@@ -260,7 +260,7 @@ pub(super) fn books<'a>(b: &'a Browsing, name: &str, series: Option<&str>, look:
     let l = *look;
     let library = name.to_owned();
     let volume = series.is_some();
-    page.push(layout::poster_grid(groups.len(), move |i| {
+    page.push(layout::virtual_poster_grid(groups.len(), ty::S13.line + ty::XS.line + 12.0, move |i| {
         let (series, members) = &groups[i];
         let book = current_book(members).expect("a nonempty shelf");
         let route = series.map(|series| Route::Series { library: library.clone(), series: series.into() });

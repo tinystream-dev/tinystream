@@ -103,6 +103,41 @@ pub fn poster_grid<'a, Message: 'a>(
     .boxed()
 }
 
+/// A grid of 2:3 posters with fixed-height captions, building only nearby rows.
+pub fn virtual_poster_grid<'a, Message: 'a>(
+    count: usize,
+    caption_height: f32,
+    card: impl Fn(usize) -> Element<'a, Message> + 'a,
+) -> Element<'a, Message> {
+    let card = std::rc::Rc::new(card);
+    responsive(move |size| {
+        let columns = (((size.width + 20.0) / 172.0).floor() as usize).max(1);
+        let width = ((size.width - 20.0 * (columns - 1) as f32) / columns as f32).max(0.0);
+        let height = width * 1.5 + caption_height;
+        Column::with_children((0..count.div_ceil(columns)).map(|r| {
+            let card = card.clone();
+            super::visible::deferred(height, move || {
+                Row::with_children((0..columns).map(|c| {
+                    let i = r * columns + c;
+                    if i < count {
+                        container(card(i)).width(Length::Fill).boxed()
+                    } else {
+                        space().width(Length::Fill).boxed()
+                    }
+                }))
+                .spacing(20)
+                .width(Length::Fill)
+                .boxed()
+            })
+        }))
+        .spacing(28)
+        .width(Length::Fill)
+        .boxed()
+    })
+    .height(Length::Shrink)
+    .boxed()
+}
+
 /// `<Row>`: a shelf scrolling sideways, 20 apart, its edges fading into the page, with arrows
 /// for paging through it once the pointer's over it.
 pub fn shelf<'a, Message: Clone + 'a>(
@@ -162,4 +197,95 @@ pub fn shelf<'a, Message: Clone + 'a>(
     ];
     let edges = row![fade(false), space().width(Length::Fill), fade(true)];
     iced_widget::hover(stack![strip, edges], arrows).boxed()
+}
+
+#[cfg(test)]
+mod tests {
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    use iced_core::{Event, Layout, Point, Rectangle, Size, mouse, window};
+    use iced_wgpu::{Engine, wgpu};
+
+    use super::*;
+
+    #[test]
+    #[ignore = "requires a Vulkan adapter; checks virtual rows against real poster layouts"]
+    fn virtual_rows_keep_the_extent_and_follow_scroll_jumps_and_resizes() {
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
+        let adapter = futures::executor::block_on(instance.request_adapter(&Default::default())).unwrap();
+        let (device, queue) = futures::executor::block_on(adapter.request_device(&Default::default())).unwrap();
+        let engine = Engine::new(
+            &adapter,
+            device,
+            queue,
+            wgpu::TextureFormat::Rgba8Unorm,
+            None,
+            iced_wgpu::graphics::Shell::headless(),
+        );
+        let mut renderer = Renderer::new(engine, Default::default());
+        let built = Rc::new(RefCell::new(Vec::new()));
+        let card = |i| {
+            super::super::media::poster(
+                super::super::media::Poster {
+                    name: "A poster",
+                    picture: None,
+                    arrived: None,
+                    caption: format!("Card {i}"),
+                    progress: None,
+                    corner: None,
+                },
+                (),
+                &Look::default(),
+            )
+        };
+        let mut grid = virtual_poster_grid(400, type_::S13.line + type_::XS.line + 8.0, {
+            let built = built.clone();
+            move |i| {
+                built.borrow_mut().push(i);
+                card(i)
+            }
+        });
+        let mut tree = widget::Tree::new(&grid);
+        tree.diff(&mut grid);
+        let mut reference = poster_grid(400, card);
+        let mut reference_tree = widget::Tree::new(&reference);
+        reference_tree.diff(&mut reference);
+        for (width, scale) in [(1000.0, 1.0), (650.0, 1.25), (1000.0, 1.5), (650.0, 2.0)] {
+            iced_core::Renderer::hint(&mut renderer, iced_core::renderer::Scale { window: scale, application: 1.0 });
+            let limits = iced_core::layout::Limits::new(Size::new(width, 0.0), Size::new(width, f32::INFINITY));
+            grid.layout(&mut tree, &renderer, &limits);
+            reference.layout(&mut reference_tree, &renderer, &limits);
+            assert!(
+                (tree.size.height - reference_tree.size.height).abs() < 1.0,
+                "virtual {:?}, reference {:?}",
+                tree.size,
+                reference_tree.size
+            );
+            for y in [0.0, 6000.0, tree.size.height - 600.0, 0.0] {
+                let viewport = Rectangle::new(Point::new(0.0, y), Size::new(width, 600.0));
+                let waker = iced_core::shell::Waker::new(|| {});
+                let mut bus = iced_core::shell::Bus::new();
+                let mut shell = iced_core::Shell::new(&window::Headless, waker, &mut bus);
+                let layout = Layout::new(tree.size);
+                grid.update(
+                    &mut tree,
+                    &Event::Window(window::Event::RedrawRequested(std::time::Instant::now())),
+                    layout,
+                    mouse::Cursor::Unavailable,
+                    &renderer,
+                    &mut shell,
+                    &viewport,
+                );
+                built.borrow_mut().clear();
+                grid.layout(&mut tree, &renderer, &limits);
+                let built = built.borrow();
+                assert!(!built.is_empty());
+                assert!(built.len() < 40, "built {} cards", built.len());
+                assert_eq!(built.contains(&0), y == 0.0);
+                assert_eq!(built.contains(&399), y > tree.size.height - 1000.0);
+            }
+        }
+        iced_core::Renderer::tick(&mut renderer);
+    }
 }
