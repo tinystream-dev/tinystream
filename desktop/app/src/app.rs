@@ -26,6 +26,7 @@ pub enum Overlay {
 
 pub struct App {
     pub history: History,
+    pub browsing: crate::browsing::Browsing,
     pub chrome: Chrome,
     pub overlay: Option<Overlay>,
     pub query: String,
@@ -72,6 +73,7 @@ pub enum Message {
     /// For the player with this serial.
     Player(u64, crate::player::Message),
     LocalVideo(crate::player::local::Message),
+    Browsing(u64, crate::browsing::Message),
 }
 
 /// Sends the app a message from any thread.
@@ -102,6 +104,7 @@ impl App {
 
         Self {
             history: History::new(route),
+            browsing: crate::browsing::Browsing::default(),
             chrome,
             overlay: None,
             query: String::new(),
@@ -123,6 +126,11 @@ impl App {
     pub fn update(&mut self, message: Message, effects: &mut Vec<Effect>) {
         self.handle(message, effects);
         self.follow_route(effects);
+        if self.session.screen == crate::session::Screen::Ready
+            && let Some(api) = self.session.api.clone()
+        {
+            self.browsing.follow(&self.history.current().route, &api, effects);
+        }
         let active = self.player.as_ref().is_some_and(crate::player::Player::playback_active);
         if active != self.video_active {
             self.video_active = active;
@@ -132,6 +140,24 @@ impl App {
 
     fn handle(&mut self, message: Message, effects: &mut Vec<Effect>) {
         match message {
+            Message::Browsing(generation, message) => {
+                if generation != self.session.generation {
+                    return;
+                }
+                let unauthorized = matches!(&message, crate::browsing::Message::Loaded(_, _, _, Err(e)) | crate::browsing::Message::Mutated(_, Err(e)) if e.unauthorized);
+                if unauthorized {
+                    self.handle(
+                        Message::Session(crate::session::Message::Live(generation, crate::api::Live::Unauthorized)),
+                        effects,
+                    );
+                    return;
+                }
+                if let Some(api) = self.session.api.clone()
+                    && let Some(route) = self.browsing.update(message, &api, &self.history.current().route, effects)
+                {
+                    self.navigate(route, effects);
+                }
+            },
             Message::LocalVideo(message) => {
                 use crate::player::local::Message as Local;
                 match message {
@@ -166,6 +192,11 @@ impl App {
             Message::Session(message) => {
                 let generation = self.session.generation;
                 let focus = self.session.focus_target();
+                if let crate::session::Message::Live(g, ref live) = message
+                    && g == generation
+                {
+                    self.browsing.live(live);
+                }
                 self.session.update(message, effects);
                 if (self.session.focus_target() != focus || self.session.generation != generation)
                     && let Some(target) = self.session.focus_target()
@@ -177,6 +208,7 @@ impl App {
                         player.pip = false;
                     }
                     effects.push(Effect::PictureInPicture(false));
+                    self.browsing.reset(self.session.generation);
                     self.history = History::new(Route::Home);
                     self.overlay = None;
                     self.query.clear();
@@ -214,7 +246,10 @@ impl App {
             Message::Navigate(route) => self.navigate(route, effects),
             Message::Scrolled(y) => self.history.set_scroll(y),
             Message::Overlay(overlay) => self.open(overlay, effects),
-            Message::Query(query) => self.query = query,
+            Message::Query(query) => {
+                self.browsing.search(query.clone(), effects);
+                self.query = query;
+            },
             Message::Gallery(message) => {
                 if let Some(gallery) = &mut self.gallery
                     && let Some(operation) = gallery.update(message, self.reduce_motion)
@@ -227,7 +262,18 @@ impl App {
                 self.session.reduce_motion = reduce;
             },
             Message::Submit => {
-                if let Some((_, route)) = shell::commands(&self.query).into_iter().next() {
+                let result = self
+                    .browsing
+                    .data(&crate::browsing::Key::Search(self.browsing.search_query.clone()))
+                    .and_then(|d| d.search.as_ref())
+                    .and_then(|s| s.titles.first())
+                    .map(|c| Route::Title(c.id as u64));
+                if let Some(route) = result.or_else(|| {
+                    shell::commands(&self.query)
+                        .into_iter()
+                        .find(|(_, r)| crate::browsing::allowed(&self.browsing, r))
+                        .map(|(_, r)| r)
+                }) {
                     self.navigate(route, effects);
                 }
             },
@@ -335,6 +381,17 @@ impl App {
 
     /// Handles shell shortcuts, including search and Escape while a text field has focus.
     pub fn listen(&mut self, event: &Event, status: event::Status) -> Option<Message> {
+        if self.browsing.dialog.is_some()
+            && matches!(
+                event,
+                Event::Keyboard(keyboard::Event::KeyPressed {
+                    key: keyboard::Key::Named(keyboard::key::Named::Escape),
+                    ..
+                })
+            )
+        {
+            return Some(Message::Browsing(self.session.generation, crate::browsing::Message::Dialog(None)));
+        }
         let watching = matches!(self.history.current().route, Route::Watch(..));
         self.listen_in(event, status, watching)
     }
@@ -450,6 +507,7 @@ impl App {
         self.overlay = overlay;
         if overlay == Some(Overlay::Search) {
             self.query.clear();
+            self.browsing.search(String::new(), effects);
             effects.push(Effect::Operate(Box::new(operation::focusable::focus(shell::SEARCH.into()))));
         }
     }

@@ -15,6 +15,8 @@ use url::Url;
 
 #[allow(unused_imports, non_camel_case_types, clippy::all)]
 mod generated {
+    type Duration = String;
+    type Upload = serde_json::Value;
     include!(concat!(env!("OUT_DIR"), "/graphql.rs"));
 }
 
@@ -111,6 +113,14 @@ impl Api {
     }
 
     pub async fn request<Q: GraphQLQuery>(&self, variables: Q::Variables) -> Result<Q::ResponseData, Error> {
+        self.request_data::<Q, Q::ResponseData>(variables).await
+    }
+
+    /// Uses a shared view model for selections appearing in several generated operations.
+    pub async fn request_data<Q: GraphQLQuery, T: serde::de::DeserializeOwned>(
+        &self,
+        variables: Q::Variables,
+    ) -> Result<T, Error> {
         let mut request =
             self.http.post(self.origin.join("api/graphql").expect("validated origin")).json(&Q::build_query(variables));
         if let Some(token) = &self.token {
@@ -126,9 +136,72 @@ impl Api {
         if !response.status().is_success() {
             return Err(Error::message(format!("The server returned HTTP {}.", response.status().as_u16())));
         }
-        let body: Response<Q::ResponseData> =
+        let body: Response<T> =
             response.json().await.map_err(|_| Error::message("The server sent something unexpected."))?;
         decode(body)
+    }
+
+    pub async fn artwork(&self, id: i64, kind: Option<String>, reset: bool) -> Result<(), Error> {
+        use crate::platform::{Current, Desktop};
+        let (query, variables) = if let Some(kind) = kind {
+            (
+                "mutation Artwork($id:Int!,$kind:TitleArtwork!,$image:Upload){setTitleArtwork(id:$id,kind:$kind,image:$image){id}}",
+                json!({"id":id,"kind":kind,"image":null}),
+            )
+        } else {
+            (
+                "mutation Artwork($videoId:Int!,$image:Upload){setVideoArtwork(videoId:$videoId,image:$image){id}}",
+                json!({"videoId":id,"image":null}),
+            )
+        };
+        let operation = json!({"query":query,"variables":variables});
+        let mut request = self.http.post(self.origin.join("api/graphql").expect("validated origin"));
+        if let Some(token) = &self.token {
+            request = request.bearer_auth(&token.0);
+        }
+        if reset {
+            request = request.json(&operation);
+        } else {
+            let Some(path) = Current::choose_image().await.map_err(Error::message)? else {
+                return Ok(());
+            };
+            let metadata =
+                tokio::fs::metadata(&path).await.map_err(|_| Error::message("Couldn't read that picture."))?;
+            if metadata.len() > 8 * 1024 * 1024 {
+                return Err(Error::message("That picture is too big (8 MB at most)."));
+            }
+            let bytes = tokio::fs::read(path).await.map_err(|_| Error::message("Couldn't read that picture."))?;
+            if bytes.len() > 8 * 1024 * 1024 {
+                return Err(Error::message("That picture is too big (8 MB at most)."));
+            }
+            let format =
+                image::guess_format(&bytes).map_err(|_| Error::message("Choose a PNG, JPEG, WebP or GIF picture."))?;
+            let mime = match format {
+                image::ImageFormat::Png => "image/png",
+                image::ImageFormat::Jpeg => "image/jpeg",
+                image::ImageFormat::WebP => "image/webp",
+                image::ImageFormat::Gif => "image/gif",
+                _ => return Err(Error::message("Choose a PNG, JPEG, WebP or GIF picture.")),
+            };
+            let boundary = format!(
+                "tinystream{}",
+                std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos()
+            );
+            let mut body = format!("--{boundary}\r\nContent-Disposition: form-data; name=\"operations\"\r\n\r\n{operation}\r\n--{boundary}\r\nContent-Disposition: form-data; name=\"map\"\r\n\r\n{{\"0\":[\"variables.image\"]}}\r\n--{boundary}\r\nContent-Disposition: form-data; name=\"0\"; filename=\"artwork\"\r\nContent-Type: {mime}\r\n\r\n").into_bytes();
+            body.extend(bytes);
+            body.extend(format!("\r\n--{boundary}--\r\n").as_bytes());
+            request = request.header("Content-Type", format!("multipart/form-data; boundary={boundary}")).body(body);
+        }
+        let response = request.send().await.map_err(|_| Error::message("Couldn't upload the picture."))?;
+        if response.status() == StatusCode::UNAUTHORIZED {
+            return Err(Error::unauthorized());
+        }
+        if !response.status().is_success() {
+            return Err(Error::message(format!("The server returned HTTP {}.", response.status().as_u16())));
+        }
+        let body: Response<Value> =
+            response.json().await.map_err(|_| Error::message("The server sent something unexpected."))?;
+        decode(body).map(|_| ())
     }
 
     pub async fn connection(&self) -> Result<connection::ResponseData, Error> {

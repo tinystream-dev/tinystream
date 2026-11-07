@@ -16,6 +16,10 @@ mod linux;
 pub trait Desktop {
     fn secrets() -> crate::secrets::Store;
 
+    fn choose_image() -> BoxFuture<'static, Result<Option<std::path::PathBuf>, String>> {
+        Box::pin(async { Err("Choosing artwork is not supported on this platform.".into()) })
+    }
+
     fn picture_in_picture_attributes() -> iced_winit::winit::window::WindowAttributes {
         pip_attributes()
     }

@@ -6,10 +6,10 @@
 use std::time::Instant;
 
 use iced_core::Length::Fill;
-use iced_core::{Alignment, Background, Border, Color, Padding, Theme};
+use iced_core::{Alignment, Border, Padding, Theme};
 use iced_widget::{
     Column, Element, Row, Widget, center_x, column, container, mouse_area, opaque, responsive, row, scrollable, space,
-    stack, text_input,
+    stack,
 };
 
 use crate::app::{App, Message, Overlay, SCROLL};
@@ -24,7 +24,7 @@ use crate::ui::layout::{empty, page as page_column};
 use crate::ui::logo::logo;
 use crate::ui::media::avatar;
 use crate::ui::pressable::{Appearance, Status, pressable};
-use crate::ui::squircle::{Paint, squircle};
+use crate::ui::squircle::{Paint};
 use crate::ui::text::{self as type_, MEDIUM, SEMIBOLD, inherit, text, truncate};
 
 pub const SEARCH: &str = "search";
@@ -126,6 +126,9 @@ fn chrome<'a>(app: &'a App, base: Element<'a, Message>, focus: bool, look: &Look
     }
     layers.push(app.chrome.edges().map(Message::Chrome).boxed());
     let base = iced_widget::Stack::with_children(layers).width(Fill).height(Fill).boxed();
+    if let Some(dialog) = crate::browsing::dialog(app, look) {
+        return stack![base, dialog].width(Fill).height(Fill).boxed();
+    }
     if app.gallery.is_none()
         && let Some(overlay) = app.overlay
     {
@@ -169,12 +172,28 @@ fn sidebar<'a>(app: &'a App, route: &Route, look: &Look) -> Element<'a, Message>
     .padding([0, 10])
     .on_press(Message::Overlay(Some(Overlay::Search)));
 
-    let nav = column![
+    let mut nav = column![
         nav_link("Home", Icon::House, Route::Home, route, look),
         nav_link("Clips", Icon::Scissors, Route::Clips, route, look),
         nav_link("Downloads", Icon::ArrowDownToLine, Route::Downloads, route, look),
     ]
     .spacing(2);
+
+    for (label, to, _, glyph) in PAGES.iter().filter(|(_, to, ..)| {
+        matches!(to, Route::Calendar | Route::Discover | Route::Wanted | Route::Requests)
+            && crate::browsing::allowed(&app.browsing, to)
+    }) {
+        nav = nav.push(nav_link(
+            if *to == Route::Discover && !app.browsing.can().manage_shows { "Request shows" } else { label },
+            *glyph,
+            to.clone(),
+            route,
+            look,
+        ));
+    }
+    for library in app.browsing.libraries() {
+        nav = nav.push(nav_link(&library.name, Icon::Clapperboard, Route::Library(library.name.clone()), route, look));
+    }
 
     let user = app.session.config.active().and_then(|server| server.user.as_ref());
     let name = user.map_or("Signed out", |u| u.username.as_str());
@@ -208,7 +227,7 @@ fn sidebar<'a>(app: &'a App, route: &Route, look: &Look) -> Element<'a, Message>
         column![
             app.chrome.drag_area(container(logo_row).height(36).align_y(Alignment::Center), Message::Chrome),
             container(search).padding(Padding { top: 6.0, bottom: 12.0, ..Padding::ZERO }),
-            nav,
+            scrollable(nav).height(Fill),
             space().height(Fill),
             account,
         ]
@@ -261,6 +280,8 @@ fn page<'a>(app: &'a App, look: &Look) -> Element<'a, Message> {
     };
     let content: Element<'a, Message> = if *route == Route::Settings {
         app.session.settings(look)
+    } else if let Some(content) = crate::browsing::view(app, route, look) {
+        content
     } else {
         let title = route_title(route);
         responsive(move |_| {
@@ -395,9 +416,9 @@ pub fn commands(query: &str) -> Vec<(&'static str, Route)> {
 fn overlay<'a>(app: &'a App, overlay: Overlay, look: &Look) -> Element<'a, Message> {
     let (content, dim, at): (Element<'_, Message>, bool, Placement) = match overlay {
         Overlay::Credits => (crate::ui::credits::credits(Message::Overlay(None), look), true, Placement::Dialog),
-        Overlay::Search => (search(app, look), true, Placement::Palette),
+        Overlay::Search => (crate::browsing::search(app, look), true, Placement::Palette),
         Overlay::Shortcuts => (shortcuts(look), true, Placement::Dialog),
-        Overlay::Notifications => (notifications(look), false, Placement::TopLeft),
+        Overlay::Notifications => (crate::browsing::notifications(app, look), false, Placement::TopLeft),
         Overlay::Account => (account_menu(app, look), false, Placement::BottomLeft),
     };
     let content = enter(content, Entrance::pop(look), look);
@@ -442,93 +463,6 @@ enum Placement {
     BottomLeft,
 }
 
-/// `CommandPalette`.
-fn search<'a>(app: &'a App, look: &Look) -> Element<'a, Message> {
-    let l = *look;
-    let input = text_input("Search, or jump anywhere", &app.query)
-        .id(SEARCH)
-        .on_input(Message::Query)
-        .on_submit(Message::Submit)
-        .size(15)
-        .padding([16, 0])
-        .style(move |_: &Theme, _| text_input::Style {
-            background: Background::Color(Color::TRANSPARENT),
-            border: Border::default(),
-            placeholder: l.ink_3,
-            value: l.ink,
-            selection: l.selection,
-        });
-    let field = row![icon(Icon::Search, 18.0).color(look.ink_3), input, text("Esc", type_::XS2, look.ink_3)]
-        .spacing(12)
-        .align_y(Alignment::Center)
-        .padding([0, 16]);
-
-    let results = commands(&app.query);
-    let list: Element<'_, Message> = if results.is_empty() {
-        container(text(format!("Nothing called “{}”.", app.query.trim()), type_::SM, look.ink_3))
-            .center_x(Fill)
-            .padding([24, 12])
-            .boxed()
-    } else {
-        let rows = results.into_iter().enumerate().map(|(i, (title, route))| {
-            let (hint, glyph) = PAGES
-                .iter()
-                .find(|(t, ..)| *t == title)
-                .map(|(.., hint, glyph)| (*hint, *glyph))
-                .unwrap_or(("", Icon::House));
-            let first = i == 0;
-            pressable(
-                row![
-                    container(icon(glyph, 16.0).color(l.ink_3)).center_x(24),
-                    inherit(title, type_::SM).width(Fill),
-                    text(hint, type_::XS, l.ink_3),
-                    if first {
-                        icon(Icon::CornerDownLeft, 14.0).color(l.ink_3).boxed()
-                    } else {
-                        space().width(14).boxed()
-                    },
-                ]
-                .spacing(12)
-                .align_y(Alignment::Center),
-                10.0,
-                look,
-                move |status| Appearance {
-                    paint: Paint {
-                        fill: (first || matches!(status, Status::Hovered | Status::Pressed)).then_some(l.hover),
-                        ..Paint::NONE
-                    },
-                    ink: l.ink,
-                },
-            )
-            .width(Fill)
-            .padding([8, 12])
-            .on_press(Message::Navigate(route))
-            .boxed()
-        });
-
-        column![
-            container(text("GO TO", type_::XS2, look.ink_3).font(MEDIUM)).padding(Padding {
-                top: 10.0,
-                right: 12.0,
-                bottom: 4.0,
-                left: 12.0
-            }),
-            Column::with_children(rows),
-        ]
-        .padding(6)
-        .boxed()
-    };
-
-    container(
-        squircle(column![field, divider(look), list], 18.0, look)
-            .paint(Paint { fill: Some(look.float), material: look.material(), edge: true, lift: true, ..Paint::NONE })
-            .width(Fill),
-    )
-    .width(Fill.max(576))
-    .boxed()
-}
-
-/// `Shortcuts`.
 fn shortcuts<'a>(look: &Look) -> Element<'a, Message> {
     let l = *look;
     let groups = keys::SHEET.iter().map(|(group, keys)| {
@@ -576,20 +510,6 @@ fn shortcuts<'a>(look: &Look) -> Element<'a, Message> {
         .width(Fill),
     )
     .width(Fill.max(672))
-    .boxed()
-}
-
-fn notifications<'a>(look: &Look) -> Element<'a, Message> {
-    panel(
-        column![
-            row![text("Notifications", type_::SM, look.ink).font(MEDIUM)].padding([4, 4]),
-            empty("Nothing new", Some("What happens on your server shows up here."), look),
-        ],
-        14.0,
-        look,
-    )
-    .padding(12)
-    .width(320)
     .boxed()
 }
 

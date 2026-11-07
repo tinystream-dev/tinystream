@@ -1,0 +1,449 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+  query BrowseHome {
+    home {
+      continueWatching {
+        position
+        upNext
+        newEpisode
+        watchedAt
+        video {
+          id
+          label
+          name
+          still
+          duration
+          title {
+            id
+            name
+            poster
+            backdrop
+            posterTint
+            backdropTint
+          }
+        }
+      }
+      recentlyAdded {
+        library
+        titles {
+          ...Card
+        }
+      }
+      popularHere {
+        people
+        title {
+          ...Card
+        }
+      }
+    }
+  }
+
+
+  query BrowseComingUp($from: Int!, $to: Int!) {
+    calendar(from: $from, to: $to) {
+      ...CalendarEntryFields
+    }
+  }
+
+
+  query BrowseMusicHome {
+    musicHome {
+      recentlyPlayed {
+        ...AlbumCard
+      }
+      recentlyAdded {
+        ...AlbumCard
+      }
+    }
+  }
+
+
+  query BrowseDiscover($library: String, $query: String) {
+    discover(library: $library, query: $query) {
+      library
+      results {
+        ...DiscoverResultFields
+      }
+    }
+  }
+
+
+  query BrowseForYou($library: String) {
+    forYou(library: $library) {
+      library
+      shelves {
+        key
+        name
+        results {
+          ...DiscoverResultFields
+        }
+      }
+    }
+  }
+
+
+  query BrowseLibrary($name: String!) {
+    library(name: $name) {
+      titles {
+        ...Card
+      }
+    }
+  }
+
+
+  query BrowseTitle($id: Int!) {
+    title(id: $id) {
+      ...TitleDetail
+    }
+  }
+
+
+  query BrowseSimilar($id: Int!) {
+    title(id: $id) {
+      similar {
+        recommendations {
+          ...DiscoverResultFields
+        }
+        alsoWatched {
+          ...Card
+        }
+      }
+    }
+  }
+
+
+  query BrowseMatchCandidates($id: Int!, $query: String, $provider: Provider) {
+    title(id: $id) {
+      matchCandidates(query: $query, provider: $provider) {
+        query
+        results {
+          provider
+          id
+          name
+          year
+          poster
+          overview
+        }
+      }
+    }
+  }
+
+
+  query BrowseTitleDownloads {
+    downloads {
+      ...DownloadFields
+    }
+  }
+
+
+  mutation BrowseSetWatched($videoIds: [Int!]!, $watched: Boolean!) {
+    setWatched(videoIds: $videoIds, watched: $watched) {
+      id
+    }
+  }
+
+
+  mutation BrowseSetTitleWatched($id: Int!, $watched: Boolean!) {
+    setTitleWatched(id: $id, watched: $watched) {
+      id
+    }
+  }
+
+
+  mutation BrowseRefreshTitle($id: Int!) {
+    refreshTitle(id: $id) {
+      id
+    }
+  }
+
+
+  mutation BrowseMatchTitle($id: Int!, $provider: Provider!, $providerId: String!) {
+    matchTitle(id: $id, provider: $provider, providerId: $providerId) {
+      id
+    }
+  }
+
+
+  query BrowseCalendar($from: Int!, $to: Int!) {
+    calendar(from: $from, to: $to) {
+      ...CalendarEntryFields
+    }
+  }
+
+
+  query BrowseRequests {
+    requests {
+      id
+      user {
+        ...Person
+      }
+      name
+      year
+      poster
+      library
+      state
+      title {
+        id
+      }
+      note
+      createdAt
+      have
+      aired
+    }
+  }
+
+
+  mutation BrowseApproveRequest($id: Int!) {
+    approveRequest(id: $id) {
+      id
+    }
+  }
+
+
+  mutation BrowseDeclineRequest($id: Int!) {
+    declineRequest(id: $id) {
+      id
+    }
+  }
+
+
+  mutation BrowseDeleteRequest($id: Int!) {
+    deleteRequest(id: $id)
+  }
+
+
+  query BrowseWanted {
+    wanted {
+      seriesId
+      title {
+        id
+      }
+      show
+      season
+      episode
+      name
+      airAt
+      aired
+      state
+      attempts
+      searchedAt
+      nextSearch
+    }
+  }
+
+
+  query BrowseDownloads {
+    downloads {
+      ...DownloadFields
+    }
+  }
+
+
+  query BrowseEngine {
+    downloadEngine {
+      ...EngineFields
+    }
+  }
+
+
+  mutation BrowseDownloadsPause($ids: [Int!]!) {
+    pauseDownloads(ids: $ids) {
+      id
+    }
+  }
+
+
+  mutation BrowseDownloadsResume($ids: [Int!]!) {
+    resumeDownloads(ids: $ids) {
+      id
+    }
+  }
+
+
+  mutation BrowseDownloadsRecheck($ids: [Int!]!) {
+    recheckDownloads(ids: $ids) {
+      id
+    }
+  }
+
+
+  mutation BrowseImportDownload($id: Int!) {
+    importDownload(id: $id) {
+      id
+    }
+  }
+
+
+  mutation BrowseRemoveDownloads($ids: [Int!]!, $deleteFiles: Boolean!) {
+    removeDownloads(ids: $ids, deleteFiles: $deleteFiles)
+  }
+
+
+  mutation BrowseAddSeries($input: NewSeries!) {
+    addSeries(input: $input) {
+      id
+    }
+  }
+
+
+  query BrowseAiredEpisodes($provider: Provider!, $id: String!) {
+    airedEpisodes(provider: $provider, id: $id)
+  }
+
+
+  mutation BrowseCreateRequest($input: NewRequest!) {
+    createRequest(input: $input) {
+      id
+    }
+  }
+
+
+  query BrowseTitleSeries($id: Int!) {
+    title(id: $id) {
+      series {
+        ...SeriesFields
+      }
+    }
+  }
+
+
+  query BrowseTitleSchedule($id: Int!) {
+    title(id: $id) {
+      series {
+        id
+        monitor
+        status
+        next {
+          ...SeriesEpisodeFields
+        }
+      }
+    }
+  }
+
+
+  mutation BrowseManageTitle($titleId: Int!) {
+    manageTitle(titleId: $titleId) {
+      id
+    }
+  }
+
+
+  mutation BrowseUpdateSeries($id: Int!, $patch: SeriesPatch!) {
+    updateSeries(id: $id, patch: $patch) {
+      ...SeriesFields
+    }
+  }
+
+
+  mutation BrowseRefreshSeriesSchedule($id: Int!) {
+    refreshSeriesSchedule(id: $id) {
+      id
+    }
+  }
+
+
+  mutation BrowseRemoveSeries($id: Int!) {
+    removeSeries(id: $id)
+  }
+
+
+  query BrowseNamingPreview($id: Int!, $file: String!) {
+    series(id: $id) {
+      namingPreview(file: $file) {
+        samples
+        error
+      }
+    }
+  }
+
+
+  query BrowseReleases($seriesId: Int!, $season: Int!, $episodes: [Int!]!, $query: String) {
+    series(id: $seriesId) {
+      releases(season: $season, episodes: $episodes, query: $query) {
+        ...ReleaseCandidateFields
+      }
+    }
+  }
+
+
+  mutation BrowseGrabRelease($release: ReleaseInput!, $seriesId: Int, $episodes: [EpisodeNumberInput!]!) {
+    grabRelease(release: $release, seriesId: $seriesId, episodes: $episodes) {
+      id
+    }
+  }
+
+
+  mutation BrowseDeleteDownloaded($seriesId: Int!, $season: Int) {
+    deleteDownloaded(seriesId: $seriesId, season: $season) {
+      undone
+      problems
+    }
+  }
+
+
+  mutation BrowseLookForAgain($seriesId: Int!, $season: Int, $episode: Int) {
+    lookForAgain(seriesId: $seriesId, season: $season, episode: $episode)
+  }
+
+
+  query BrowseInbox {
+    notifications {
+      ...InboxFields
+    }
+  }
+
+
+  mutation BrowseMarkNotificationsRead($ids: [Int!]) {
+    markNotificationsRead(ids: $ids) {
+      ...InboxFields
+    }
+  }
+
+
+  mutation BrowseDeleteNotifications($id: Int) {
+    deleteNotifications(id: $id) {
+      ...InboxFields
+    }
+  }
+
+
+  query BrowseSearch($query: String!) {
+    musicSearch(query: $query, limit: 5) {
+      artists {
+        id
+        name
+        cover
+        albumCount
+      }
+      albums {
+        id
+        name
+        artist
+        cover
+        year
+      }
+      tracks {
+        ...MusicTrack
+      }
+    }
+    search(query: $query) {
+      titles {
+        ...Card
+      }
+      videos {
+        id
+        label
+        name
+        title {
+          name
+        }
+      }
+    }
+  }
+
+query BrowseShell { viewer { ...Viewer } libraries { name kind showCount movieCount albumCount trackCount bookCount } server { downloads } }
+query BrowseBooks($library: String!) { books(library: $library) { ...BookCard } }
+fragment InboxFields on Inbox { items { ...NotificationFields } unread }
+query BrowseOptions { settings { libraries { name metadataProvider managed profile } profiles { name } sources { name } automation { defaultMonitor } } }
+mutation BrowseTitleArtwork($id: Int!, $kind: TitleArtwork!, $image: Upload) { setTitleArtwork(id: $id, kind: $kind, image: $image) { id } }
+mutation BrowseVideoArtwork($videoId: Int!, $image: Upload) { setVideoArtwork(videoId: $videoId, image: $image) { id } }

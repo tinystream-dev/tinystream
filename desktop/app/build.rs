@@ -6,7 +6,6 @@ use std::path::PathBuf;
 use std::{env, fs};
 
 use graphql_client_codegen::{CodegenMode, GraphQLClientCodegenOptions, generate_module_token_stream_from_string};
-use graphql_parser::query::Definition;
 
 fn main() {
     let output = PathBuf::from(env::var_os("OUT_DIR").expect("Cargo output directory"));
@@ -15,25 +14,24 @@ fn main() {
 
     let schema = "../../packages/shared/schema.graphql";
     let fragments = "../../packages/shared/fragments.graphql";
-    let queries = ["graphql/session.graphql", "graphql/player.graphql"];
+    let queries = ["graphql/session.graphql", "graphql/player.graphql", "graphql/browsing.graphql"];
     for path in [schema, fragments].iter().chain(&queries) {
         println!("cargo:rerun-if-changed={path}");
     }
 
     let shared = fs::read_to_string(fragments).expect("shared fragments");
-    let mut shared = graphql_parser::parse_query::<String>(&shared).expect("valid shared fragments");
-    shared.definitions.retain(|definition| {
-        matches!(definition, Definition::Fragment(fragment) if matches!(fragment.name.as_str(), "Person" | "NotificationFields" | "Playback" | "TranscodingFields" | "SeriesEpisodeFields"))
-    });
+    let shared = graphql_parser::parse_query::<String>(&shared).expect("valid shared fragments");
     let operations = queries.map(|query| fs::read_to_string(query).expect("operations")).join("\n");
     let document = format!("{operations}\n{shared}");
     let mut options = GraphQLClientCodegenOptions::new(CodegenMode::Cli);
     options.set_module_visibility(syn::parse_str("pub").expect("public visibility"));
-    options.set_response_derives("Clone, Serialize".into());
+    options.set_variables_derives("Debug, Clone, Deserialize".into());
+    options.set_response_derives("Debug, Clone, Serialize".into());
     options.set_fragments_other_variant(true);
     let generated = generate_module_token_stream_from_string(&document, &PathBuf::from(schema), options)
         .expect("operations match the shared schema");
-    fs::write(output.join("graphql.rs"), generated.to_string()).expect("write generated API types");
+    fs::write(output.join("graphql.rs"), generated.to_string().replace(" ; ", ";\n").replace(" } ", " }\n"))
+        .expect("write generated API types");
 }
 
 /// The logo's shapes from the shared `logo.ts`, as steps like the icons'.

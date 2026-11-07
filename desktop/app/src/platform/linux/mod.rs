@@ -7,6 +7,8 @@ use futures::future::BoxFuture;
 use super::{Desktop, VideoSurface};
 use crate::chrome::ButtonLayout;
 
+mod file_picker;
+
 mod gpu;
 mod pip;
 mod portal;
@@ -16,6 +18,10 @@ mod video;
 pub struct Linux;
 
 impl Desktop for Linux {
+    fn choose_image() -> BoxFuture<'static, Result<Option<std::path::PathBuf>, String>> {
+        Box::pin(file_picker::image())
+    }
+
     fn secrets() -> crate::secrets::Store {
         std::sync::Arc::new(secrets::LinuxSecrets::default())
     }
