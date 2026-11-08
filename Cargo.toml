@@ -34,7 +34,7 @@ members = ["ffmpeg-sys", "libtorrent-sys", "native/*", "decoder/core", "web/deco
 exclude = ["mobile", "desktop", "native/mpv", "native/libplacebo", "native/libdrm", "native/libdisplay-info"]
 
 [workspace.package]
-version = "0.38.0"
+version = "0.40.0"
 edition = "2024"
 license = "AGPL-3.0-or-later"
 authors = ["Phrolova <me@phrolova.moe>"]

@@ -722,14 +722,14 @@ dependencies = [
 
 [[package]]
 name = "tinystream-about"
-version = "0.38.0"
+version = "0.40.0"
 dependencies = [
  "uniffi",
 ]
 
 [[package]]
 name = "tinystream-subtitles"
-version = "0.38.0"
+version = "0.40.0"
 dependencies = [
  "jni",
  "rustyass",
@@ -810,7 +810,7 @@ dependencies = [
 
 [[package]]
 name = "uniffi-bindgen"
-version = "0.38.0"
+version = "0.40.0"
 dependencies = [
  "uniffi",
 ]

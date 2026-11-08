@@ -1934,7 +1934,7 @@ dependencies = [
 
 [[package]]
 name = "mpv"
-version = "0.38.0"
+version = "0.40.0"
 dependencies = [
  "mpv-sys",
 ]
@@ -1952,7 +1952,7 @@ dependencies = [
 
 [[package]]
 name = "mpv-sys"
-version = "0.38.0"
+version = "0.40.0"
 dependencies = [
  "mpv-src",
  "pkg-config",
@@ -2011,7 +2011,7 @@ dependencies = [
 
 [[package]]
 name = "native-support"
-version = "0.38.0"
+version = "0.40.0"
 
 [[package]]
 name = "ndk"
@@ -3426,7 +3426,7 @@ dependencies = [
 
 [[package]]
 name = "tinystream-desktop"
-version = "0.38.0"
+version = "0.40.0"
 dependencies = [
  "anyhow",
  "ash",
@@ -3461,18 +3461,18 @@ dependencies = [
 
 [[package]]
 name = "tinystream-squircle"
-version = "0.38.0"
+version = "0.40.0"
 
 [[package]]
 name = "tinystream-subtitle-renderer"
-version = "0.38.0"
+version = "0.40.0"
 dependencies = [
  "rustyass",
 ]
 
 [[package]]
 name = "tinystream-theme"
-version = "0.38.0"
+version = "0.40.0"
 dependencies = [
  "base64 0.22.1",
  "thiserror 2.0.21",
