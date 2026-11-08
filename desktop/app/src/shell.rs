@@ -75,6 +75,29 @@ pub fn view(app: &App) -> Element<'_, Message> {
         .boxed()
     };
     let base = chrome(app, base, focus, &look);
+    if let Some(link) = &app.unknown_link {
+        use crate::ui::controls::button;
+        let mut actions = row![
+            button("Cancel", &look).on_press(Message::LinkChoice(0)).boxed(),
+            button("Add server", &look).primary().on_press(Message::LinkChoice(1)).boxed()
+        ]
+        .spacing(8);
+        if crate::together::link(link).is_some() {
+            actions = actions.push(button("Join as guest", &look).on_press(Message::LinkChoice(2)).boxed());
+        }
+        let host = url::Url::parse(link).map(|url| url.authority().to_owned()).unwrap_or_default();
+        let content = column![
+            text("Open a server link", type_::XL, look.ink),
+            text(format!("{host} isn't in your saved servers."), type_::SM, look.ink_3),
+            actions
+        ]
+        .spacing(16);
+        return crate::ui::modal::modal(
+            base,
+            iced_widget::center(panel(container(content).padding(24), 24.0, &look).width(480)).boxed(),
+            Message::LinkChoice(0),
+        );
+    }
     if signed_in
         && let Some(server) = app.session.removing.and_then(|id| app.session.config.servers.iter().find(|s| s.id == id))
     {

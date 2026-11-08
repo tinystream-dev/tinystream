@@ -632,6 +632,12 @@ impl Session {
             l
         )]
         .spacing(16);
+        updates = updates.push(setting(
+            "Show tray icon",
+            Some("Keep Together rooms open when closing the window."),
+            toggle(self.config.show_tray, |on| session(Message::ShowTray(on)), l),
+            l,
+        ));
         updates = updates.push(text(format!("This is version {}.", updates::VERSION), type_::SM, l.ink_3).boxed());
         if let Some(release) = &self.config.release {
             updates = updates.push(

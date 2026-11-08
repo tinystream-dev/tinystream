@@ -250,6 +250,7 @@ pub struct Player {
     pub preview_shown: Option<u32>,
     previews_failed: bool,
     last_save: Instant,
+    discontinuities: u64,
 }
 
 impl Player {
@@ -367,6 +368,7 @@ impl Player {
             preview_shown: None,
             previews_failed: false,
             last_save: Instant::now(),
+            discontinuities: 0,
         };
 
         player.apply_volume();
@@ -434,6 +436,46 @@ impl Player {
     fn request(&self, effects: &mut Vec<Effect>, future: impl Future<Output = Message> + Send + 'static) {
         let serial = self.serial;
         effects.push(Effect::Request(Box::pin(async move { AppMessage::Player(serial, future.await) })));
+    }
+
+    /// The active player exposed to desktop media controls.
+    pub fn desktop_media(&self) -> crate::platform::integration::Media {
+        let mut media = crate::platform::integration::Media {
+            track: format!("/dev/tinystream/track/{}_{}", self.serial, self.id),
+            length: self.duration(),
+            position: self.time,
+            playing: self.playback_active(),
+            rate: self.rate,
+            volume: if self.muted { 0.0 } else { self.volume },
+            seek: self.started,
+            discontinuities: self.discontinuities,
+            ..Default::default()
+        };
+        if let Some(pb) = &self.pb {
+            media.title = pb.name.clone().or_else(|| pb.label.clone()).unwrap_or_else(|| pb.title.name.clone());
+            media.artist = pb.title.name.clone();
+            media.album = pb
+                .label
+                .as_deref()
+                .and_then(|label| {
+                    if label.starts_with("Special ") {
+                        Some("Specials".into())
+                    } else {
+                        label
+                            .strip_prefix('S')?
+                            .split_once('E')?
+                            .0
+                            .parse::<u32>()
+                            .ok()
+                            .map(|season| format!("Season {season}"))
+                    }
+                })
+                .unwrap_or_default();
+            media.next = pb.next.is_some();
+            media.previous = pb.previous.is_some();
+            media.art = self.api.origin.join(&pb.still).map(|url| url.to_string()).unwrap_or_default();
+        }
+        media
     }
 
     /// Whether video playback should keep the desktop awake, including picture in picture.
@@ -832,6 +874,7 @@ impl Player {
                 }
             },
             Update::Restarted => {
+                self.discontinuities = self.discontinuities.wrapping_add(1);
                 self.waiting = false;
                 self.started = true;
             },

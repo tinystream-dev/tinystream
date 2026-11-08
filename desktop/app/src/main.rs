@@ -44,7 +44,7 @@ use crate::runner::{Runner, UserEvent};
 use crate::window_state::{MIN_SIZE, WindowState};
 
 /// The Wayland app id and X11 class, matching the desktop entry (#96).
-const APP_ID: &str = "dev.tinystream.Tinystream";
+const APP_ID: &str = "dev.tinystream.app";
 
 fn main() -> ExitCode {
     tracing_subscriber::fmt()
@@ -99,10 +99,7 @@ fn main() -> ExitCode {
         }
     }
     if let Some(link) = argument.filter(|arg| arg.contains("://")) {
-        match together::link(&link) {
-            Some(room) => app.pending_join = Some(room),
-            None => app.session.initial_link(link),
-        }
+        app.pending_link = Some(link);
     }
     if cfg!(debug_assertions) && flags.gallery {
         let mut gallery = ui::gallery::Gallery::default();
@@ -175,7 +172,23 @@ fn main() -> ExitCode {
         let _ = sender.send_event(UserEvent::Message(Message::ReducedMotion(reduce)));
     })));
 
+    let sender = proxy.clone();
+    let integration = runtime.block_on(platform::Current::integration(
+        std::env::args().skip(1).collect(),
+        std::sync::Arc::new(move |command| {
+            let _ = sender.send_event(UserEvent::Desktop(command));
+        }),
+    ));
+    let integration = match integration {
+        Ok(None) => return ExitCode::SUCCESS,
+        Ok(Some(integration)) => Some(integration),
+        Err(error) => {
+            tracing::warn!("desktop services unavailable: {error}");
+            None
+        },
+    };
     let mut runner = Runner::new(app, settings, proxy, runtime.handle().clone());
+    runner.integration = integration;
     let result = event_loop.run_app(&mut runner);
     runtime.block_on(runner.finish());
     match result {

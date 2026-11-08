@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
 
-pub const APP_ID: &str = "dev.tinystream.Tinystream.PiP";
+pub const APP_ID: &str = "dev.tinystream.app.PiP";
 
 pub fn opened() {
     let niri = std::env::var_os("NIRI_SOCKET");

@@ -107,6 +107,7 @@ pub enum Message {
     Login,
     Link(String),
     Updates(bool),
+    ShowTray(bool),
     ReduceMotion(Option<bool>),
     AskRemove(Option<u64>),
     DismissMismatch,
@@ -251,6 +252,13 @@ impl Session {
                     Ok(Outcome::Saved(
                         store.save(|config| config.check_updates = enabled).await.map_err(storage_error)?,
                     ))
+                });
+            },
+            Message::ShowTray(show) => {
+                let Some(store) = self.store.clone() else { return };
+                self.config.show_tray = show;
+                self.task(effects, async move {
+                    Ok(Outcome::Saved(store.save(|config| config.show_tray = show).await.map_err(storage_error)?))
                 });
             },
             Message::ReduceMotion(reduce) => {
@@ -723,10 +731,6 @@ impl Session {
     /// Whether saved servers are known and none is still connecting.
     pub fn loaded(&self) -> bool {
         self.store.is_some() && !self.busy
-    }
-
-    pub fn initial_link(&mut self, link: String) {
-        self.pending_link = Some(link);
     }
 
     fn mismatch_key(&self) -> Option<String> {

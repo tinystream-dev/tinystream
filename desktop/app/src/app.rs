@@ -48,6 +48,11 @@ pub struct App {
     pub local_video: Option<crate::player::local::Viewer>,
     players: u64,
     video_active: bool,
+    pub hidden: bool,
+    pub tray_available: bool,
+    pending_route: Option<(url::Url, Route)>,
+    pub pending_link: Option<String>,
+    pub unknown_link: Option<String>,
     /// Where async work runs, for what needs it on other threads (mpv's streams).
     pub runtime: Option<tokio::runtime::Handle>,
     keys: Keys,
@@ -63,6 +68,11 @@ pub enum Message {
         fullscreen: bool,
     },
     CloseRequested,
+    Quit,
+    OpenLink(String),
+    LinkChoice(u8),
+    Shown,
+    HideRequested,
     Chrome(chrome::Message),
     ButtonLayout(ButtonLayout),
     Shortcut(Shortcut),
@@ -93,6 +103,8 @@ pub enum Effect {
     Window(chrome::Action),
     Operate(Box<dyn Operation>),
     Exit,
+    Hide,
+    SaveWindow(WindowState),
     Task(futures::future::BoxFuture<'static, Message>),
     Live(Option<crate::api::Api>, u64),
     Request(futures::future::BoxFuture<'static, Message>),
@@ -130,6 +142,11 @@ impl App {
             local_video: None,
             players: 0,
             video_active: false,
+            hidden: false,
+            tray_available: false,
+            pending_route: None,
+            pending_link: None,
+            unknown_link: None,
             runtime: None,
             keys: Keys::default(),
             window_state,
@@ -140,9 +157,23 @@ impl App {
         self.browsing.reduce_motion = self.session.look().reduce_motion;
         self.handle(message, effects);
         if self.session.loaded()
+            && let Some(link) = self.pending_link.take()
+        {
+            self.open_link(&link, effects);
+        }
+        if self.session.loaded()
             && let Some((server, code)) = self.pending_join.take()
         {
             self.join_room(server, code, effects);
+        }
+        if self.session.screen == crate::session::Screen::Ready
+            && !self.session.busy
+            && self.pending_route.as_ref().is_some_and(|(server, _)| {
+                self.session.api.as_ref().is_some_and(|api| crate::route::same_server(server, &api.origin))
+            })
+            && let Some((_, route)) = self.pending_route.take()
+        {
+            self.navigate(route, effects);
         }
         self.follow_route(effects);
         if self.session.screen == crate::session::Screen::Ready
@@ -270,13 +301,47 @@ impl App {
                     self.window_state.height = size.height;
                 }
             },
-            Message::CloseRequested => {
+            Message::Shown => {
+                self.hidden = false;
+                self.follow_room(effects);
+            },
+            Message::LinkChoice(choice) => {
+                if let Some(link) = self.unknown_link.take()
+                    && let Ok(url) = url::Url::parse(&link)
+                {
+                    if choice == 1 {
+                        self.pending_route = Route::parse(&format!(
+                            "{}{}",
+                            url.path(),
+                            url.query().map(|q| format!("?{q}")).unwrap_or_default()
+                        ))
+                        .map(|route| (url.clone(), route));
+                        self.session.update(crate::session::Message::Add, effects);
+                        self.session.address = if url.scheme() == "tinystream" {
+                            url.authority().to_string()
+                        } else {
+                            url.origin().ascii_serialization()
+                        };
+                    } else if choice == 2
+                        && let Some((server, code)) = crate::together::link(&link)
+                    {
+                        self.join_room(server, code, effects);
+                    }
+                }
+            },
+            Message::OpenLink(link) => self.pending_link = Some(link),
+            Message::HideRequested if self.tray_available && self.session.config.show_tray => self.hide(effects),
+            Message::HideRequested => {},
+            Message::CloseRequested
+                if self.tray_available && self.session.config.show_tray && self.together.is_some() =>
+            {
+                self.hide(effects)
+            },
+            Message::CloseRequested | Message::Quit => {
                 if let Some(player) = &mut self.player {
                     player.save(effects);
                 }
-                if let Err(error) = self.window_state.save() {
-                    tracing::warn!("can't remember the window's size: {error}");
-                }
+                effects.push(Effect::SaveWindow(self.window_state));
                 effects.push(Effect::Exit);
             },
             Message::Chrome(chrome::Message::Control(chrome::Control::Close)) => {
@@ -338,6 +403,10 @@ impl App {
         shell::view(self)
     }
 
+    pub fn window_state(&self) -> WindowState {
+        self.window_state
+    }
+
     pub fn ui_scale(&self) -> f32 {
         self.window_state.ui_scale
     }
@@ -345,6 +414,9 @@ impl App {
     /// Starts the player when a video's route opens, and stops it (keeping its place) when it
     /// closes, or another video's opens.
     fn follow_route(&mut self, effects: &mut Vec<Effect>) {
+        if self.hidden {
+            return;
+        }
         if let Route::Together(code) = &self.history.current().route {
             if self.player.as_ref().is_some_and(|player| player.room.is_none())
                 && let Some(mut player) = self.player.take()
@@ -400,16 +472,71 @@ impl App {
         self.player = Some(player);
     }
 
+    fn hide(&mut self, effects: &mut Vec<Effect>) {
+        if let Some(player) = &mut self.player {
+            player.save(effects);
+            if let Some(room) = &player.room {
+                room.client.detach();
+            }
+        }
+        self.player = None;
+        self.local_video = None;
+        self.hidden = true;
+        effects.push(Effect::SaveWindow(self.window_state));
+        effects.push(Effect::Hide);
+    }
+
+    fn open_link(&mut self, link: &str, effects: &mut Vec<Effect>) {
+        let Ok(url) = url::Url::parse(link) else {
+            if let Some(route) = Route::parse(link) {
+                self.navigate(route, effects);
+            }
+            return;
+        };
+        if !matches!(url.scheme(), "http" | "https" | "tinystream")
+            || url.host_str().is_none()
+            || !url.username().is_empty()
+            || url.password().is_some()
+        {
+            return;
+        }
+        if matches!(url.path(), "/invite" | "/reset") {
+            self.session.update(crate::session::Message::Link(link.into()), effects);
+            return;
+        }
+        let path = format!("{}{}", url.path(), url.query().map(|q| format!("?{q}")).unwrap_or_default());
+        let Some(route) = Route::parse(&path) else { return };
+        let saved = self
+            .session
+            .config
+            .servers
+            .iter()
+            .find(|saved| url::Url::parse(&saved.url).is_ok_and(|origin| crate::route::same_server(&url, &origin)))
+            .map(|saved| saved.id);
+        if saved.is_none() {
+            self.unknown_link = Some(link.into());
+            return;
+        }
+        if let Route::Together(code) = route {
+            let mut server = url.clone();
+            server.set_path("/");
+            server.set_query(None);
+            server.set_fragment(None);
+            self.pending_join = Some((server, code));
+            return;
+        }
+        self.pending_route = Some((url, route));
+        if let Some(id) = saved
+            && self.session.config.active != Some(id)
+        {
+            self.session.update(crate::session::Message::Switch(id), effects);
+        }
+    }
+
     /// Joins the room `code` on `server`: signed in when it's the server in use, otherwise as a
     /// guest. Links to rooms (#92) come in here.
     pub fn join_room(&mut self, server: url::Url, code: String, effects: &mut Vec<Effect>) {
-        let same = |origin: &url::Url| {
-            if server.scheme() == "tinystream" {
-                origin.host_str() == server.host_str() && origin.port() == server.port()
-            } else {
-                origin.origin() == server.origin()
-            }
-        };
+        let same = |origin: &url::Url| crate::route::same_server(&server, origin);
         let api = match self.session.api.as_ref().filter(|api| same(&api.origin)) {
             Some(api) => api.clone(),
             None => {
@@ -440,6 +567,9 @@ impl App {
     /// Starts the room's player for the episode it's on, again for each new one, and keeps it
     /// up to date with the room.
     fn follow_room(&mut self, effects: &mut Vec<Effect>) {
+        if self.hidden {
+            return;
+        }
         let Some(together) = &mut self.together else { return };
         let Some(state) = together.snap.room.as_ref() else { return };
         let media_id = state.media_id;
@@ -559,6 +689,12 @@ impl App {
     }
 
     pub fn listen_in(&mut self, event: &Event, status: event::Status, watching: bool) -> Option<Message> {
+        if let Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. }) = event
+            && modifiers.control()
+            && matches!(key.as_ref(), keyboard::Key::Character("q" | "Q"))
+        {
+            return Some(Message::Quit);
+        }
         if let Some(viewer) = &self.local_video {
             return match event {
                 Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. })
@@ -811,5 +947,55 @@ mod tests {
             app.listen(&key("0", keyboard::Modifiers::CTRL | keyboard::Modifiers::ALT), event::Status::Captured)
                 .is_none()
         );
+    }
+}
+
+#[cfg(test)]
+mod desktop_tests {
+    use super::*;
+
+    #[test]
+    fn room_close_requires_a_tray_and_explicit_quit_always_exits() {
+        let mut app = App::new(Route::Home, WindowState::default());
+        let api = crate::api::Api::new("http://localhost:9876/".parse().unwrap(), None).unwrap();
+        let mut effects = vec![];
+        app.together = Some(crate::together::Together::new(1, api, "ROOM".into(), &mut effects));
+        app.history.replace(Route::Together("ROOM".into()));
+        effects.clear();
+        app.handle(Message::CloseRequested, &mut effects);
+        assert!(effects.iter().any(|e| matches!(e, Effect::Exit)));
+        effects.clear();
+        app.tray_available = true;
+        app.handle(Message::CloseRequested, &mut effects);
+        assert!(app.hidden);
+        assert!(app.together.is_some());
+        assert!(effects.iter().any(|e| matches!(e, Effect::Hide)));
+        effects.clear();
+        app.handle(Message::Quit, &mut effects);
+        assert!(effects.iter().any(|e| matches!(e, Effect::Exit)));
+        effects.clear();
+        app.hidden = false;
+        app.session.config.show_tray = false;
+        app.handle(Message::CloseRequested, &mut effects);
+        assert!(effects.iter().any(|e| matches!(e, Effect::Exit)));
+    }
+
+    #[test]
+    fn links_preserve_watch_time_and_prompt_before_contacting_unknown_servers() {
+        let mut app = App::new(Route::Home, WindowState::default());
+        let mut effects = vec![];
+        app.open_link("https://example.org/watch/42?t=12", &mut effects);
+        assert!(app.unknown_link.is_some());
+        assert!(effects.is_empty());
+        app.handle(Message::LinkChoice(1), &mut effects);
+        assert_eq!(app.pending_route.as_ref().map(|(_, route)| route), Some(&Route::Watch(42, Some(12))));
+        assert_eq!(app.session.address, "https://example.org");
+        app.unknown_link = Some("tinystream://example.org/together/ROOM".into());
+        app.handle(Message::LinkChoice(2), &mut effects);
+        assert_eq!(app.history.current().route, Route::Together("ROOM".into()));
+        assert!(app.together.is_some());
+        app.unknown_link = None;
+        app.open_link("https://user:password@example.org/title/1", &mut effects);
+        assert!(app.unknown_link.is_none());
     }
 }

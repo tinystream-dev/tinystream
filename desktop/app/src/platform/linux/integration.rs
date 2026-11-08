@@ -144,12 +144,17 @@ impl Player {
 
     #[zbus(property)]
     fn rate(&self) -> f64 {
-        self.media.borrow().rate.max(0.01)
+        let media = self.media.borrow();
+        if media.track.is_empty() { 1.0 } else { media.rate.max(0.25) }
     }
 
     #[zbus(property)]
     fn set_rate(&self, rate: f64) -> zbus::fdo::Result<()> {
-        (self.send)(Command::Rate(valid(rate, 0.25, 3.0)?));
+        if rate == 0.0 {
+            (self.send)(Command::Pause);
+        } else {
+            (self.send)(Command::Rate(valid(rate, 0.25, 3.0)?));
+        }
         Ok(())
     }
 

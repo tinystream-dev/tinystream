@@ -109,6 +109,16 @@ impl fmt::Display for Route {
     }
 }
 
+/// A custom-scheme link uses the saved server's transport; web URLs keep their own scheme.
+pub fn same_server(link: &url::Url, origin: &url::Url) -> bool {
+    if link.scheme() == "tinystream" {
+        link.host_str() == origin.host_str()
+            && link.port().or(origin.port_or_known_default()) == origin.port_or_known_default()
+    } else {
+        link.origin() == origin.origin()
+    }
+}
+
 /// Where the user has been, newest last, with how far down each page was scrolled.
 #[derive(Debug)]
 pub struct History {

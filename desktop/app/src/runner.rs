@@ -27,6 +27,7 @@ use crate::chrome::Action;
 use crate::platform::{self, Desktop};
 
 pub enum UserEvent {
+    Desktop(platform::integration::Command),
     Message(Message),
     /// An event from outside the loop for the widgets, like a finished clipboard read.
     Event(Event),
@@ -54,6 +55,11 @@ impl iced_wgpu::graphics::shell::Notifier for RendererNotifier {
 
 pub struct Runner {
     app: App,
+    pub integration: Option<platform::integration::Integration>,
+    focused: bool,
+    inhibit: Option<Box<dyn platform::IdleInhibit>>,
+    inhibit_window: Option<WindowId>,
+    notified: platform::integration::NotificationHistory,
     runtime: tokio::runtime::Handle,
     live: Option<(u64, tokio::task::JoinHandle<()>)>,
     requests: Vec<tokio::task::JoinHandle<()>>,
@@ -61,9 +67,17 @@ pub struct Runner {
     proxy: EventLoopProxy<UserEvent>,
     theme: Theme,
     window: Option<Window>,
+    gpu: Option<Gpu>,
     pip: Option<Window>,
     clipboard: Clipboard,
     effects: Vec<Effect>,
+}
+
+struct Gpu {
+    instance: wgpu::Instance,
+    adapter: wgpu::Adapter,
+    device: wgpu::Device,
+    queue: wgpu::Queue,
 }
 
 struct Window {
@@ -103,6 +117,11 @@ impl Runner {
     ) -> Self {
         Self {
             app,
+            integration: None,
+            focused: true,
+            inhibit: None,
+            inhibit_window: None,
+            notified: platform::integration::NotificationHistory::load(),
             runtime,
             live: None,
             requests: Vec::new(),
@@ -110,6 +129,7 @@ impl Runner {
             proxy,
             theme: crate::ui::Look::default().theme(),
             window: None,
+            gpu: None,
             pip: None,
             clipboard: Clipboard::new(),
             effects: Vec::new(),
@@ -117,6 +137,8 @@ impl Runner {
     }
 
     pub async fn finish(&mut self) {
+        self.integration = None;
+        self.inhibit = None;
         platform::Current::video_activity(false);
         self.pip = None;
         self.window = None;
@@ -131,19 +153,23 @@ impl Runner {
             conversion::window_attributes(self.settings.clone(), "tinystream", 1.0, event_loop.primary_monitor(), None);
         let raw = Arc::new(event_loop.create_window(attributes).map_err(|error| error.to_string())?);
 
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
-            backends: wgpu::Backends::from_env().unwrap_or(wgpu::Backends::PRIMARY),
-            ..wgpu::InstanceDescriptor::new_with_display_handle(Box::new(raw.clone()))
+        let instance = self.gpu.as_ref().map(|gpu| gpu.instance.clone()).unwrap_or_else(|| {
+            wgpu::Instance::new(wgpu::InstanceDescriptor {
+                backends: wgpu::Backends::from_env().unwrap_or(wgpu::Backends::PRIMARY),
+                ..wgpu::InstanceDescriptor::new_with_display_handle(Box::new(event_loop.owned_display_handle()))
+            })
         });
         let surface = instance.create_surface(raw.clone()).map_err(|error| error.to_string())?;
-
-        let adapter = futures::executor::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-            power_preference: wgpu::PowerPreference::from_env().unwrap_or(wgpu::PowerPreference::HighPerformance),
-            compatible_surface: Some(&surface),
-            force_fallback_adapter: false,
-            apply_limit_buckets: false,
-        }))
-        .map_err(|error| format!("no GPU adapter: {error}"))?;
+        let adapter = match &self.gpu {
+            Some(gpu) => gpu.adapter.clone(),
+            None => futures::executor::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+                power_preference: wgpu::PowerPreference::from_env().unwrap_or(wgpu::PowerPreference::HighPerformance),
+                compatible_surface: Some(&surface),
+                force_fallback_adapter: false,
+                apply_limit_buckets: false,
+            }))
+            .map_err(|error| format!("no GPU adapter: {error}"))?,
+        };
         tracing::info!("GPU: {}", adapter.get_info().name);
 
         let capabilities = surface.get_capabilities(&adapter);
@@ -182,11 +208,20 @@ impl Runner {
             trace: wgpu::Trace::Off,
             experimental_features: wgpu::ExperimentalFeatures::disabled(),
         };
-        let (device, queue) = match platform::Current::request_device(&adapter, &descriptor) {
-            Some(device) => device,
-            None => futures::executor::block_on(adapter.request_device(&descriptor))
-                .map_err(|error| format!("can't open the GPU: {error}"))?,
+        let (device, queue) = match &self.gpu {
+            Some(gpu) => (gpu.device.clone(), gpu.queue.clone()),
+            None => match platform::Current::request_device(&adapter, &descriptor) {
+                Some(device) => device,
+                None => futures::executor::block_on(adapter.request_device(&descriptor))
+                    .map_err(|error| format!("can't open the GPU: {error}"))?,
+            },
         };
+        self.gpu = Some(Gpu {
+            instance: instance.clone(),
+            adapter: adapter.clone(),
+            device: device.clone(),
+            queue: queue.clone(),
+        });
 
         let engine = Engine::new(
             &adapter,
@@ -311,12 +346,33 @@ impl Runner {
 
     /// Runs `message` through the app and carries out what it asks for.
     fn update(&mut self, event_loop: &ActiveEventLoop, message: Message) {
+        self.notify(&message);
         let quiet = quiet(&message);
         self.app.update(message, &mut self.effects);
 
         for effect in std::mem::take(&mut self.effects) {
             match effect {
-                Effect::VideoActivity(active) => platform::Current::video_activity(active),
+                Effect::SaveWindow(state) => {
+                    if let Err(error) = state.save() {
+                        tracing::warn!("can't remember the window's size: {error}");
+                    }
+                },
+                Effect::Hide => {
+                    let state = self.app.window_state();
+                    self.settings.size = state.size();
+                    self.settings.maximized = state.maximized;
+                    self.inhibit = None;
+                    self.inhibit_window = None;
+                    self.pip = None;
+                    self.window = None;
+                    crate::ui::backdrop::set_frame(None);
+                    self.focused = false;
+                },
+                Effect::VideoActivity(active) => {
+                    if !active && let Some(inhibit) = &mut self.inhibit {
+                        inhibit.set(false);
+                    }
+                },
                 Effect::PipWindow(action) => {
                     if let Some(window) = &self.pip {
                         window.act(action);
@@ -421,12 +477,171 @@ impl Runner {
         if !self.app.player.as_ref().is_some_and(|player| player.pip) {
             self.pip = None;
         }
-        if quiet {
+        let target = self.pip.as_ref().or(self.window.as_ref()).map(|window| window.raw.clone());
+        let id = target.as_ref().map(|window| window.id());
+        if self.inhibit_window != id {
+            self.inhibit = None;
+            self.inhibit_window = id;
+            if let Some(window) = target {
+                self.inhibit = platform::Current::idle_inhibit(window, self.runtime.clone());
+            }
+        }
+        if let Some(inhibit) = &mut self.inhibit {
+            inhibit
+                .set(!self.app.hidden && self.app.player.as_ref().is_some_and(crate::player::Player::playback_active));
+        }
+        if let Some(integration) = &self.integration {
+            let mut media = self.app.player.as_ref().map(|player| player.desktop_media()).unwrap_or_default();
+            media.tray = self.app.session.config.show_tray;
+            integration.media.send_if_modified(|current| {
+                if *current == media {
+                    false
+                } else {
+                    *current = media;
+                    true
+                }
+            });
+        }
+        if quiet || self.app.hidden {
             return;
         }
         for window in self.window.iter_mut().chain(self.pip.iter_mut()) {
             window.ui_dirty = true;
             window.raw.request_redraw();
+        }
+    }
+
+    fn notify(&mut self, message: &Message) {
+        let Message::Session(crate::session::Message::Live(generation, crate::api::Live::Event(event))) = message
+        else {
+            return;
+        };
+        if *generation != self.app.session.generation {
+            return;
+        }
+        let crate::api::events::EventsEvents::NotificationReceived(event) = &event.events else { return };
+        let n = &event.notification;
+        let Some(api) = &self.app.session.api else { return };
+        let user = self.app.session.config.active().and_then(|s| s.user.as_ref()).map_or(0, |u| u.id);
+        if !self.notified.receive(api.origin.to_string(), user, n.id)
+            || n.read_at.is_some()
+            || n.expires_at.is_some_and(|at| {
+                at <= std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs()
+                    as i64
+            })
+            || self.focused && !self.app.hidden
+        {
+            return;
+        }
+        if let Some(integration) = &self.integration {
+            let _ = integration.notifications.send(platform::integration::Notification {
+                title: n.title.clone(),
+                body: n.body.clone().unwrap_or_default(),
+                link: n
+                    .link
+                    .as_ref()
+                    .and_then(|link| api.origin.join(link).ok())
+                    .map(|url| url.to_string())
+                    .unwrap_or_default(),
+            });
+        }
+    }
+
+    fn show(&mut self, event_loop: &ActiveEventLoop) {
+        if self.window.is_none() {
+            match self.open(event_loop) {
+                Ok(window) => self.window = Some(window),
+                Err(error) => {
+                    tracing::error!("can't restore the window: {error}");
+                    return;
+                },
+            }
+        }
+        self.app.hidden = false;
+        if let Some(window) = &self.window {
+            window.raw.set_visible(true);
+            window.raw.set_minimized(false);
+            window.raw.focus_window();
+        }
+        self.update(event_loop, Message::Shown);
+    }
+
+    fn desktop(&mut self, event_loop: &ActiveEventLoop, command: platform::integration::Command) {
+        use platform::integration::Command;
+        match command {
+            Command::Tray(available) => {
+                self.app.tray_available = available;
+                if !available && self.app.hidden {
+                    self.show(event_loop);
+                }
+            },
+            Command::Show => self.show(event_loop),
+            Command::ToggleWindow => {
+                if self.app.hidden {
+                    self.show(event_loop);
+                } else {
+                    self.update(event_loop, Message::HideRequested);
+                }
+            },
+            Command::Quit => self.update(event_loop, Message::Quit),
+            Command::Open(arguments) => {
+                self.show(event_loop);
+                for argument in arguments {
+                    if argument.starts_with('/') || argument.contains("://") {
+                        self.update(event_loop, Message::OpenLink(argument));
+                    }
+                }
+            },
+            Command::Notification(link) => {
+                self.show(event_loop);
+                if !link.is_empty()
+                    && let Some(route) = crate::route::Route::parse(&link)
+                {
+                    self.update(event_loop, Message::Navigate(route));
+                } else if link.contains("://") {
+                    self.update(event_loop, Message::OpenLink(link));
+                } else {
+                    self.update(event_loop, Message::Overlay(Some(crate::app::Overlay::Notifications)));
+                }
+            },
+            command => {
+                let Some(player) = &self.app.player else { return };
+                use crate::player::Message as P;
+                let message = match command {
+                    Command::Play if !player.playing => P::Toggle,
+                    Command::Pause if player.playing => P::Toggle,
+                    Command::Stop => {
+                        let serial = player.serial;
+                        if player.playing {
+                            self.update(event_loop, Message::Player(serial, P::Toggle));
+                        }
+                        self.update(event_loop, Message::Player(serial, P::Seek(0.0)));
+                        return;
+                    },
+                    Command::Toggle => P::Toggle,
+                    Command::Seek(offset) if offset.is_finite() && player.started => P::SeekBy(offset),
+                    Command::Position(track, at)
+                        if track == player.desktop_media().track
+                            && at.is_finite()
+                            && at >= 0.0
+                            && at <= player.duration() =>
+                    {
+                        P::Seek(at)
+                    },
+                    Command::Rate(rate) => P::Rate(rate),
+                    Command::Volume(volume) => P::Volume(volume),
+                    Command::Next => {
+                        let Some(next) = player.pb.as_ref().and_then(|pb| pb.next.as_ref()) else { return };
+                        P::Go(next.id)
+                    },
+                    Command::Previous => {
+                        let Some(previous) = player.pb.as_ref().and_then(|pb| pb.previous.as_ref()) else { return };
+                        P::Go(previous.id)
+                    },
+                    _ => return,
+                };
+                self.update(event_loop, Message::Player(player.serial, message));
+            },
         }
     }
 
@@ -720,7 +935,7 @@ impl Window {
 
 impl ApplicationHandler<UserEvent> for Runner {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
-        if self.window.is_some() {
+        if self.window.is_some() || self.app.hidden {
             return;
         }
 
@@ -781,6 +996,9 @@ impl ApplicationHandler<UserEvent> for Runner {
 
         match &event {
             WindowEvent::RedrawRequested => {
+                if self.app.hidden {
+                    return;
+                }
                 self.redraw(event_loop, pip);
                 return;
             },
@@ -805,6 +1023,7 @@ impl ApplicationHandler<UserEvent> for Runner {
                     self.update(event_loop, flags);
                 }
             },
+            WindowEvent::Focused(focused) if !pip => self.focused = *focused,
             WindowEvent::ThemeChanged(_) => window.ui_dirty = true,
             WindowEvent::CursorMoved { position, .. } => {
                 window.cursor =
@@ -824,6 +1043,7 @@ impl ApplicationHandler<UserEvent> for Runner {
 
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: UserEvent) {
         match event {
+            UserEvent::Desktop(command) => self.desktop(event_loop, command),
             UserEvent::Message(message) => self.update(event_loop, message),
             UserEvent::Event(event) => {
                 if let Some(window) = &mut self.window {
@@ -831,6 +1051,8 @@ impl ApplicationHandler<UserEvent> for Runner {
                     window.raw.request_redraw();
                 }
             },
+            UserEvent::Wake if self.app.hidden => {},
+            UserEvent::VideoFrame if self.app.hidden => {},
             UserEvent::Wake => {
                 for window in self.window.iter_mut().chain(self.pip.iter_mut()) {
                     window.ui_dirty = true;
@@ -894,6 +1116,58 @@ mod tests {
     use super::*;
     use crate::player::Message as PlayerMessage;
     use crate::route::Route;
+
+    #[test]
+    #[ignore = "opens native windows; requires a Wayland compositor and Vulkan"]
+    fn tray_destroys_the_window_and_restores_it_on_the_same_device() {
+        struct Test {
+            runner: Runner,
+            rendered: bool,
+        }
+        impl ApplicationHandler<UserEvent> for Test {
+            fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+                let window = self.runner.open(event_loop).unwrap();
+                let previous = Arc::downgrade(&window.raw);
+                let device = window.device.clone();
+                let id = window.raw.id();
+                self.runner.window = Some(window);
+                self.runner.app.tray_available = true;
+                self.runner.update(event_loop, Message::HideRequested);
+                assert!(self.runner.app.hidden);
+                assert!(self.runner.window.is_none());
+                assert!(previous.upgrade().is_none(), "the hidden native window was retained");
+                self.runner.show(event_loop);
+                let window = self.runner.window.as_ref().unwrap();
+                assert_ne!(window.raw.id(), id);
+                assert_eq!(window.device, device);
+                assert!(!self.runner.app.hidden);
+                window.raw.request_redraw();
+            }
+
+            fn window_event(&mut self, event_loop: &ActiveEventLoop, id: WindowId, event: WindowEvent) {
+                let redraw = matches!(event, WindowEvent::RedrawRequested);
+                self.runner.window_event(event_loop, id, event);
+                if redraw {
+                    self.rendered = true;
+                    event_loop.exit();
+                }
+            }
+
+            fn user_event(&mut self, event_loop: &ActiveEventLoop, event: UserEvent) {
+                self.runner.user_event(event_loop, event);
+            }
+        }
+        let mut builder = EventLoop::<UserEvent>::with_user_event();
+        EventLoopBuilderExtWayland::with_any_thread(&mut builder, true);
+        let event_loop = builder.build().unwrap();
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let app = App::new(Route::Home, crate::window_state::WindowState::default());
+        let runner = Runner::new(app, window::Settings::default(), event_loop.create_proxy(), runtime.handle().clone());
+        let mut test = Test { runner, rendered: false };
+        event_loop.run_app(&mut test).unwrap();
+        assert!(test.rendered);
+        runtime.block_on(test.runner.finish());
+    }
 
     #[test]
     #[ignore = "opens native windows; requires a Wayland compositor and Vulkan"]
@@ -985,7 +1259,7 @@ mod tests {
                         .iter()
                         .find(|window| {
                             window["pid"].as_u64() == Some(u64::from(std::process::id()))
-                                && window["app_id"] == "dev.tinystream.Tinystream.PiP"
+                                && window["app_id"] == "dev.tinystream.app.PiP"
                         })
                         .unwrap();
                     assert_eq!(window["is_floating"], true);
