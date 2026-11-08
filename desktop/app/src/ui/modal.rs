@@ -73,7 +73,13 @@ impl<Message: Clone> Widget<Message, Theme, Renderer> for Modal<'_, Message> {
         }
         if !*tree.state.downcast_ref::<bool>() && matches!(event, Event::Window(window::Event::RedrawRequested(_))) {
             *tree.state.downcast_mut::<bool>() = true;
-            self.operate(tree, layout, viewport, renderer, &mut operation::focusable::unfocus::<()>());
+            self.operate(
+                tree,
+                layout,
+                viewport,
+                renderer,
+                &mut operation::focusable::focus::<()>(crate::shell::SEARCH.into()),
+            );
         }
         if matches!(
             event,

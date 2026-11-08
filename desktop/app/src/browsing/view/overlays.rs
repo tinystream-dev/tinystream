@@ -150,12 +150,14 @@ pub fn search<'a>(app: &'a App, look: &Look) -> View<'a> {
             group = item.group;
             results = results.push(container(text(group, ty::XS2, look.ink_3)).padding([8, 10]).boxed());
         }
-        let content = row![
-            picture(b, item.image.as_deref(), 28.0, 42.0, 6.0, look),
-            text(item.label.clone(), ty::SM, look.ink).width(Fill)
-        ]
-        .spacing(12)
-        .align_y(Alignment::Center);
+        let thumbnail = if item.image.is_some() {
+            picture(b, item.image.as_deref(), 28.0, 42.0, 6.0, look)
+        } else {
+            container(crate::ui::icon::icon(Icon::Search, 18.0).color(look.ink_3)).center_x(28).center_y(28).boxed()
+        };
+        let content = row![thumbnail, text(item.label.clone(), ty::SM, look.ink).width(Fill)]
+            .spacing(12)
+            .align_y(Alignment::Center);
         results = results.push(
             iced_widget::mouse_area(menu_item(
                 None,
@@ -201,7 +203,10 @@ pub fn search<'a>(app: &'a App, look: &Look) -> View<'a> {
         column![
             field,
             divider(look),
-            scrollable(results).id("palette-results").height(iced_core::Length::Shrink.max(440)),
+            scrollable(results.padding([0, 8]))
+                .direction(iced_widget::scrollable::Direction::Vertical(iced_widget::scrollable::Scrollbar::hidden()))
+                .id("palette-results")
+                .height(iced_core::Length::Shrink.max(440)),
             container(text("↑ ↓ Navigate    Enter Open    Esc Close", ty::XS2, look.ink_3)).padding([8, 16])
         ],
         16.0,
