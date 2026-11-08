@@ -652,6 +652,17 @@ impl Session {
         let mut cards = vec![
             page_title("Settings", None, l),
             card(
+                "Desktop playback",
+                None,
+                setting(
+                    "Hardware decoding",
+                    Some("Use the GPU to decode video. Changes apply to the next video."),
+                    toggle(self.config.hardware_decoding, |on| session(Message::HardwareDecoding(on)), l),
+                    l,
+                ),
+                l,
+            ),
+            card(
                 "Appearance",
                 None,
                 setting("Reduce motion", Some("Follows your desktop unless you pick."), motion, l),
@@ -694,6 +705,21 @@ impl Session {
                 button("Licenses", l).on_press(AppMessage::Overlay(Some(crate::app::Overlay::Credits))).boxed(),
             ]
             .spacing(10)
+            .boxed(),
+            l,
+        ));
+        cards.push(card(
+            "Secrets",
+            None,
+            text(
+                if self.fallback {
+                    "Tokens are stored in permission 0600 files in the app’s state folder."
+                } else {
+                    "Tokens are stored in the desktop Secret Service."
+                },
+                type_::SM,
+                l.ink_2,
+            )
             .boxed(),
             l,
         ));

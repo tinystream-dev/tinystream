@@ -486,6 +486,7 @@ impl App {
             self.runtime.clone(),
             effects,
         );
+        player.hardware_decoding(self.session.config.hardware_decoding);
         player.fullscreen = self.chrome.fullscreen;
         player.pip = keep_pip;
         self.player = Some(player);
@@ -632,6 +633,7 @@ impl App {
             self.runtime.clone(),
             effects,
         );
+        player.hardware_decoding(self.session.config.hardware_decoding);
         player.fullscreen = self.chrome.fullscreen;
         player.room_changed(snap, effects);
         self.player = Some(player);

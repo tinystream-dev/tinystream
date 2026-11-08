@@ -108,6 +108,7 @@ pub enum Message {
     Link(String),
     Updates(bool),
     ShowTray(bool),
+    HardwareDecoding(bool),
     ReduceMotion(Option<bool>),
     AskRemove(Option<u64>),
     DismissMismatch,
@@ -251,6 +252,15 @@ impl Session {
                 self.task(effects, async move {
                     Ok(Outcome::Saved(
                         store.save(|config| config.check_updates = enabled).await.map_err(storage_error)?,
+                    ))
+                });
+            },
+            Message::HardwareDecoding(enabled) => {
+                let Some(store) = self.store.clone() else { return };
+                self.config.hardware_decoding = enabled;
+                self.task(effects, async move {
+                    Ok(Outcome::Saved(
+                        store.save(|config| config.hardware_decoding = enabled).await.map_err(storage_error)?,
                     ))
                 });
             },

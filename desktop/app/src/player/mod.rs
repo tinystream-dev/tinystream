@@ -284,6 +284,12 @@ impl Player {
         Self::create(serial, id, None, api, runtime, prefs, Some(room), effects)
     }
 
+    pub fn hardware_decoding(&self, enabled: bool) {
+        if let Some(engine) = &self.engine {
+            engine.set("hwdec", if enabled { "auto-safe" } else { "no" });
+        }
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn create(
         serial: u64,
