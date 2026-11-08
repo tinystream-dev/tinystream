@@ -772,7 +772,9 @@ impl Browsing {
             },
             Message::Provider(provider) => self.provider = provider,
             Message::Follow(n) => {
-                self.act(Action::Read(Some(vec![n.id])), api, effects);
+                if n.read_at.is_none() {
+                    self.act(Action::Read(Some(vec![n.id])), api, effects);
+                }
                 return n.link.and_then(|link| Route::parse(&link));
             },
             Message::DownloadGroup(key) => {

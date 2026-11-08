@@ -223,7 +223,7 @@ pub fn notifications<'a>(app: &'a App, look: &Look) -> View<'a> {
     let mut items = Column::<View<'a>>::new().spacing(2);
     if let Some(i) = inbox {
         for fresh in [true, false] {
-            if i.items.iter().any(|n| n.read_at.is_none() == fresh) {
+            if i.items.iter().any(|n| n.read_at.is_none()) && i.items.iter().any(|n| n.read_at.is_some()) {
                 items = items.push(
                     (container(text(if fresh { "New" } else { "Earlier" }, ty::XS, look.ink_3)).padding([6, 10]))
                         .boxed(),
@@ -270,8 +270,9 @@ pub fn notifications<'a>(app: &'a App, look: &Look) -> View<'a> {
                     .plain()
                     .small()
                     .on_press_maybe(
-                        (!b.busy)
-                            .then(|| act(b, if unread > 0 { Action::Read(None) } else { Action::DeleteNotice(None) }))
+                        inbox
+                            .filter(|i| !i.items.is_empty())
+                            .map(|_| act(b, if unread > 0 { Action::Read(None) } else { Action::DeleteNotice(None) }))
                     )
                     .boxed()
             ]
