@@ -95,6 +95,15 @@ impl Api {
         self.get(&self.http, path)
     }
 
+    /// Artwork may live on a metadata provider; only our server receives credentials.
+    pub fn image(&self, path: &str) -> Result<reqwest::RequestBuilder, Error> {
+        let url = self.origin.join(path).map_err(|_| Error::message("Invalid image address."))?;
+        if !matches!(url.scheme(), "http" | "https") {
+            return Err(Error::message("Invalid image address."));
+        }
+        if url.origin() == self.origin.origin() { self.media(path) } else { Ok(self.http.get(url)) }
+    }
+
     /// Like [`Api::media`], for a stream read while it plays.
     pub fn stream(&self, path: &str) -> Result<reqwest::RequestBuilder, Error> {
         self.get(&self.streams, path)
@@ -445,6 +454,18 @@ mod tests {
 mod transport_tests {
     use super::*;
     use crate::test_support::{self, run};
+
+    #[test]
+    fn provider_artwork_does_not_receive_server_credentials() {
+        let api = Api::new(Url::parse("https://server.example/").unwrap(), Some(Token("test-session".into()))).unwrap();
+        let external = api.image("https://image.tmdb.org/t/p/w500/poster.jpg").unwrap().build().unwrap();
+        assert_eq!(external.url().host_str(), Some("image.tmdb.org"));
+        assert!(!external.headers().contains_key(reqwest::header::AUTHORIZATION));
+        let local = api.image("/api/images/poster").unwrap().build().unwrap();
+        assert_eq!(local.headers()[reqwest::header::AUTHORIZATION], "Bearer test-session");
+        assert!(api.image("file:///tmp/poster").is_err());
+        assert!(api.media("https://image.tmdb.org/t/p/w500/poster.jpg").is_err());
+    }
 
     #[test]
     fn http_uses_bearer_auth_and_detects_a_revoked_session() {

@@ -101,7 +101,7 @@ pub async fn cached(api: &Api, path: &str) -> Option<Vec<u8>> {
 
 /// `path` from the server, saved to disk for next time.
 pub async fn fetch(api: &Api, path: &str) -> Option<Vec<u8>> {
-    let mut response = api.media(path).ok()?.send().await.ok()?.error_for_status().ok()?;
+    let mut response = api.image(path).ok()?.send().await.ok()?.error_for_status().ok()?;
     let mut bytes = Vec::new();
     while let Some(chunk) = response.chunk().await.ok()? {
         if bytes.len() + chunk.len() > LIMIT {
