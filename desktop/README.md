@@ -115,8 +115,7 @@ disabled on transcodes. Track choices are remembered; switching never reloads th
 P opens a native picture-in-picture window using the same decoder and
 GPU device; closing it returns to the player. X opens a clip draft on that player, with frame
 stepping, range selection, server rendering and return to the original watch position.
-Screenshot links preserve `/clips?clip=<id>` for #93's full Clips screen. The player exposes
-activity transitions for #92's idle inhibitor; actual OS inhibition remains in #92.
+Screenshot links preserve `/clips?clip=<id>` for #93's full Clips screen. Active video inhibits screen blanking through the platform idle-inhibition guard, including PiP.
 
 ## Watch Together
 
@@ -128,8 +127,8 @@ routes, direct by default or a transcode from the quality menu, so guests need n
 links (`https://<server>/together/<code>` or `tinystream://<host[:port]>/together/<code>`) given
 on the command line go through `App::join_room`, signed in when they're for the server in use and
 as a guest otherwise. The player's Users button starts a room, and its panel invites people on
-the server. Picture in picture and clips inside rooms, and hiding to the tray while a room is open
-(#92) aren't there yet.
+the server. Closing a room hides it to the tray when a tray host is available and the setting is enabled.
+Picture in picture and clips inside rooms aren't there yet.
 
 The steering loop can be checked against real mpv, and the protocol against an isolated server
 (with a second user there, it checks invites too):
@@ -295,3 +294,10 @@ credential or configuration writes. The gallery is available only in debug build
 Geist and Lucide notices are embedded in Settings → About → Licenses and collected in
 `THIRD_PARTY_LICENSES`. Native and Rust dependency notices are collected by release packaging
 (#96) alongside these asset notices.
+
+## Desktop services
+
+Linux provides MPRIS media controls, native Wayland idle inhibition (portal/X11 fallbacks),
+notifications, single-instance link routing and a StatusNotifierItem tray. Settings → Show tray
+icon controls close-to-tray. Ctrl+Q always quits. See [OS integration](docs/os-integration.md)
+for interfaces, packaging resources and focused validation commands.
