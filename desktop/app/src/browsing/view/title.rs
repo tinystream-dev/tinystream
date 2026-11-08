@@ -49,6 +49,14 @@ pub(super) fn title<'a>(b: &'a Browsing, id: i64, look: &Look) -> View<'a> {
                 .boxed(),
         );
     }
+    if can.watch_together
+        && let Some(video) =
+            t.next_up.as_ref().map(|next| next.video.id).or_else(|| t.movie.as_ref().map(|video| video.id))
+    {
+        actions.push(
+            button("Watch together", look).large().icon(Icon::Users).on_press(AppMessage::HostRoom(video)).boxed(),
+        );
+    }
     let done = c.video_count > 0 && c.watched_count >= c.video_count;
     actions.push(
         button(if done { "Watched" } else { "Mark watched" }, look)

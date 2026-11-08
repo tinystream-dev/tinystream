@@ -42,6 +42,7 @@ pub struct App {
     /// The watch-together room, while a `/together` route is open.
     pub together: Option<crate::together::Together>,
     /// A room link to join once saved servers are known.
+    pending_host: Option<i64>,
     pub pending_join: Option<(url::Url, String)>,
     rooms: u64,
     pub local_file: Option<std::path::PathBuf>,
@@ -77,6 +78,7 @@ pub enum Message {
     ButtonLayout(ButtonLayout),
     Shortcut(Shortcut),
     Navigate(Route),
+    HostRoom(i64),
     Scrolled(f32),
     Overlay(Option<Overlay>),
     Query(String),
@@ -137,6 +139,7 @@ impl App {
             player: None,
             together: None,
             pending_join: None,
+            pending_host: None,
             rooms: 0,
             local_file: None,
             local_video: None,
@@ -176,6 +179,18 @@ impl App {
             self.navigate(route, effects);
         }
         self.follow_route(effects);
+        if let Some(id) = self.pending_host {
+            if !matches!(self.history.current().route, Route::Watch(video, _) if video == id as u64) {
+                self.pending_host = None;
+            } else if let Some(player) = &mut self.player
+                && player.pb.is_some()
+            {
+                self.pending_host = None;
+                if player.can_together {
+                    player.update(crate::player::Message::Together, effects);
+                }
+            }
+        }
         if self.session.screen == crate::session::Screen::Ready
             && let Some(api) = self.session.api.clone()
         {
@@ -350,6 +365,10 @@ impl App {
             Message::Chrome(message) => effects.extend(self.chrome.update(message).map(Effect::Window)),
             Message::ButtonLayout(layout) => self.chrome.layout = layout,
             Message::Shortcut(shortcut) => self.shortcut(shortcut, effects),
+            Message::HostRoom(id) => {
+                self.pending_host = Some(id);
+                self.navigate(Route::Watch(id as u64, None), effects);
+            },
             Message::Navigate(route) => self.navigate(route, effects),
             Message::Scrolled(y) => self.history.set_scroll(y),
             Message::Overlay(overlay) => self.open(overlay, effects),
@@ -576,8 +595,11 @@ impl App {
         if together.snap.ended {
             // Whoever ended it carries on alone, right where they were.
             if together.is_host() {
-                let at = self.player.as_ref().map(|player| player.time as u32);
-                self.history.replace(Route::Watch(media_id as u64, at));
+                if let Some(player) = &mut self.player {
+                    player.leave_room();
+                }
+                self.history.replace(Route::Watch(media_id as u64, None));
+                self.together = None;
             }
             return;
         }

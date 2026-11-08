@@ -1083,6 +1083,14 @@ impl Player {
         }
     }
 
+    /// Keeps the decoder and its position when the host ends a room.
+    pub fn leave_room(&mut self) {
+        if let Some(room) = self.room.take() {
+            room.client.detach();
+        }
+        self.base = format!("api/media/{}", self.id);
+    }
+
     /// Moves this video into a new room, right where it is.
     fn start_together(&mut self, effects: &mut Vec<Effect>) {
         let Some(pb) = &self.pb else { return };
