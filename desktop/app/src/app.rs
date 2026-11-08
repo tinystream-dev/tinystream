@@ -27,6 +27,7 @@ pub enum Overlay {
 pub struct App {
     pub history: History,
     pub browsing: crate::browsing::Browsing,
+    pub settings: crate::settings::Settings,
     pub chrome: Chrome,
     pub overlay: Option<Overlay>,
     pub query: String,
@@ -95,6 +96,7 @@ pub enum Message {
     Together(u64, crate::together::Message),
     LocalVideo(crate::player::local::Message),
     Browsing(u64, crate::browsing::Message),
+    Settings(crate::settings::Message),
 }
 
 /// Sends the app a message from any thread.
@@ -129,6 +131,7 @@ impl App {
         Self {
             history: History::new(route),
             browsing: crate::browsing::Browsing::default(),
+            settings: crate::settings::Settings::default(),
             chrome,
             overlay: None,
             query: String::new(),
@@ -196,6 +199,19 @@ impl App {
         {
             self.browsing.follow(&self.history.current().route, &api, effects);
         }
+        if self.session.screen == crate::session::Screen::Ready
+            && self.history.current().route == Route::Settings
+            && let Some(api) = self.session.api.clone()
+        {
+            self.settings.follow(
+                self.session.generation,
+                self.session.revision,
+                self.browsing.viewer().is_some_and(|u| u.is_admin),
+                self.browsing.features(),
+                &api,
+                effects,
+            );
+        }
         let active = self.player.as_ref().is_some_and(crate::player::Player::playback_active);
         if active != self.video_active {
             self.video_active = active;
@@ -205,6 +221,30 @@ impl App {
 
     fn handle(&mut self, message: Message, effects: &mut Vec<Effect>) {
         match message {
+            Message::Settings(message) => {
+                if matches!(&message, crate::settings::Message::Loaded(g,_,_,_) | crate::settings::Message::Done(g,_) if *g != self.session.generation)
+                {
+                    return;
+                }
+                let unauthorized = matches!(&message, crate::settings::Message::Loaded(_,_,_,Err(e)) | crate::settings::Message::Done(_,Err(e)) if e.unauthorized);
+                if unauthorized {
+                    self.handle(
+                        Message::Session(crate::session::Message::Live(
+                            self.session.generation,
+                            crate::api::Live::Unauthorized,
+                        )),
+                        effects,
+                    );
+                    return;
+                }
+                if matches!(&message, crate::settings::Message::Done(_, Ok(_))) {
+                    self.browsing.invalidate(|_| true);
+                    self.session.refresh(effects);
+                }
+                if let Some(api) = self.session.api.clone() {
+                    self.settings.update(message, &api, effects);
+                }
+            },
             Message::Browsing(generation, message) => {
                 if generation != self.session.generation {
                     return;
@@ -284,6 +324,11 @@ impl App {
                     && g == generation
                 {
                     self.browsing.live(live);
+                    if matches!(live, crate::api::Live::Connected)
+                        || matches!(live,crate::api::Live::Event(e) if matches!(&e.events,crate::api::events::EventsEvents::ConfigChanged(_) | crate::api::events::EventsEvents::ListChanged(_) | crate::api::events::EventsEvents::ClipChanged(_)))
+                    {
+                        self.settings.invalidate();
+                    }
                 }
                 self.session.update(message, effects);
                 if (self.session.focus_target() != focus || self.session.generation != generation)
@@ -297,6 +342,7 @@ impl App {
                     }
                     effects.push(Effect::PictureInPicture(false));
                     self.browsing.reset(self.session.generation);
+                    self.settings = crate::settings::Settings::default();
                     self.history = History::new(Route::Home);
                     self.overlay = None;
                     self.query.clear();
@@ -487,6 +533,12 @@ impl App {
             effects,
         );
         player.hardware_decoding(self.session.config.hardware_decoding);
+        player.quality = self
+            .session
+            .config
+            .default_quality
+            .filter(|h| [1080, 720, 480].contains(h))
+            .map_or(crate::player::Quality::Auto, crate::player::Quality::Height);
         player.fullscreen = self.chrome.fullscreen;
         player.pip = keep_pip;
         self.player = Some(player);
@@ -634,6 +686,12 @@ impl App {
             effects,
         );
         player.hardware_decoding(self.session.config.hardware_decoding);
+        player.quality = self
+            .session
+            .config
+            .default_quality
+            .filter(|h| [1080, 720, 480].contains(h))
+            .map_or(crate::player::Quality::Auto, crate::player::Quality::Height);
         player.fullscreen = self.chrome.fullscreen;
         player.room_changed(snap, effects);
         self.player = Some(player);

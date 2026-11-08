@@ -11,15 +11,15 @@ use super::text::{self as type_, SEMIBOLD, text};
 use super::theme::Look;
 
 pub fn credits<'a, Message: Clone + 'a>(close: Message, look: &Look) -> Element<'a, Message> {
-    let notices = column![
-        text("Geist Variable", type_::S15, look.ink).font(SEMIBOLD),
-        text(include_str!("../../assets/Geist-OFL.txt"), type_::XS, look.ink_2),
-        text("Noto Sans", type_::S15, look.ink).font(SEMIBOLD),
-        text(include_str!("../../../../assets/fonts/OFL.txt"), type_::XS, look.ink_2),
-        text("Lucide 1.48.0", type_::S15, look.ink).font(SEMIBOLD),
-        text(include_str!("../../assets/lucide/LICENSE"), type_::XS, look.ink_2),
-    ]
-    .spacing(16);
+    static LICENSES: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    let bundled = LICENSES.get_or_init(|| {
+        std::env::current_exe()
+            .ok()
+            .and_then(|exe| exe.parent().map(|p| p.join("THIRD_PARTY_LICENSES")))
+            .and_then(|path| std::fs::read_to_string(path).ok())
+            .unwrap_or_else(|| include_str!("../../../THIRD_PARTY_LICENSES").to_owned())
+    });
+    let notices = text(bundled.as_str(), type_::XS, look.ink_2);
     panel(
         column![
             row![

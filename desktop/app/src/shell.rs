@@ -361,7 +361,7 @@ fn page<'a>(app: &'a App, look: &Look) -> Element<'a, Message> {
         _ => &app.history.current().route,
     };
     let content: Element<'a, Message> = if *route == Route::Settings {
-        app.session.settings(look)
+        crate::settings::view::view(app, look)
     } else if let Some(content) = crate::browsing::view(app, route, look) {
         content
     } else {

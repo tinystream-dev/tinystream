@@ -512,6 +512,9 @@ impl Runner {
     }
 
     fn notify(&mut self, message: &Message) {
+        if !self.app.session.config.notifications {
+            return;
+        }
         let Message::Session(crate::session::Message::Live(generation, crate::api::Live::Event(event))) = message
         else {
             return;
@@ -945,7 +948,11 @@ impl ApplicationHandler<UserEvent> for Runner {
                 window.raw.request_redraw();
                 self.window = Some(window);
                 if let Some(path) = self.app.local_file.take() {
-                    match crate::player::local::Viewer::open(&path, &mut self.effects) {
+                    match crate::player::local::Viewer::open(
+                        &path,
+                        self.app.session.config.hardware_decoding,
+                        &mut self.effects,
+                    ) {
                         Ok(viewer) => self.app.local_video = Some(viewer),
                         Err(error) => {
                             tracing::error!("can't play local video: {error}");

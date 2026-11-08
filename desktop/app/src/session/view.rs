@@ -11,7 +11,6 @@ use crate::app::Message as AppMessage;
 use crate::servers::Server;
 use crate::ui::controls::{banner, button, field, icon_button, input, panel, segmented, spinner, toggle};
 use crate::ui::icon::{Icon, icon};
-use crate::ui::layout::{page, page_title};
 use crate::ui::logo::logo;
 use crate::ui::media::avatar;
 use crate::ui::overlay::confirm;
@@ -617,7 +616,7 @@ impl Session {
     }
 
     /// The desktop's own settings, at the top of the Settings page.
-    pub fn settings(&self, look: &Look) -> Element<'_, AppMessage> {
+    pub fn desktop_settings(&self, look: &Look) -> Element<'_, AppMessage> {
         let l = look;
         let motion = segmented(
             self.config.reduce_motion,
@@ -634,7 +633,7 @@ impl Session {
         .spacing(16);
         updates = updates.push(setting(
             "Show tray icon",
-            Some("Keep Together rooms open when closing the window."),
+            Some("Closing hides the window while music plays or a room is open; otherwise it quits."),
             toggle(self.config.show_tray, |on| session(Message::ShowTray(on)), l),
             l,
         ));
@@ -650,16 +649,30 @@ impl Session {
             );
         }
         let mut cards = vec![
-            page_title("Settings", None, l),
             card(
-                "Desktop playback",
+                "Playback",
                 None,
-                setting(
-                    "Hardware decoding",
-                    Some("Use the GPU to decode video. Changes apply to the next video."),
-                    toggle(self.config.hardware_decoding, |on| session(Message::HardwareDecoding(on)), l),
-                    l,
-                ),
+                column![
+                    setting(
+                        "Default quality",
+                        Some("Auto plays the original file directly."),
+                        segmented(
+                            self.config.default_quality,
+                            &[(None, "Auto"), (Some(1080), "1080p"), (Some(720), "720p"), (Some(480), "480p")],
+                            |v| session(Message::DefaultQuality(v)),
+                            l
+                        ),
+                        l
+                    ),
+                    setting(
+                        "Hardware decoding",
+                        Some("Use the GPU to decode video. Changes apply to the next video."),
+                        toggle(self.config.hardware_decoding, |on| session(Message::HardwareDecoding(on)), l),
+                        l,
+                    )
+                ]
+                .spacing(16)
+                .boxed(),
                 l,
             ),
             card(
@@ -713,9 +726,14 @@ impl Session {
             None,
             text(
                 if self.fallback {
-                    "Tokens are stored in permission 0600 files in the app’s state folder."
+                    format!(
+                        "Tokens are stored in permission 0600 files in {}.",
+                        crate::paths::state_dir()
+                            .map(|p| p.display().to_string())
+                            .unwrap_or_else(|| "the app's state folder".into())
+                    )
                 } else {
-                    "Tokens are stored in the desktop Secret Service."
+                    "Tokens are stored in the desktop Secret Service.".into()
                 },
                 type_::SM,
                 l.ink_2,
@@ -731,7 +749,7 @@ impl Session {
                 l,
             ));
         }
-        page(Column::with_children(cards).width(Length::Fill), false)
+        Column::with_children(cards).width(Length::Fill).boxed()
     }
 }
 

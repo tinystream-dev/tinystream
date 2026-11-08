@@ -109,6 +109,8 @@ pub enum Message {
     Updates(bool),
     ShowTray(bool),
     HardwareDecoding(bool),
+    DefaultQuality(Option<u32>),
+    Notifications(bool),
     ReduceMotion(Option<bool>),
     AskRemove(Option<u64>),
     DismissMismatch,
@@ -252,6 +254,27 @@ impl Session {
                 self.task(effects, async move {
                     Ok(Outcome::Saved(
                         store.save(|config| config.check_updates = enabled).await.map_err(storage_error)?,
+                    ))
+                });
+            },
+            Message::DefaultQuality(height) => {
+                if height.is_some_and(|h| ![1080, 720, 480].contains(&h)) {
+                    return;
+                }
+                let Some(store) = self.store.clone() else { return };
+                self.config.default_quality = height;
+                self.task(effects, async move {
+                    Ok(Outcome::Saved(
+                        store.save(|config| config.default_quality = height).await.map_err(storage_error)?,
+                    ))
+                });
+            },
+            Message::Notifications(enabled) => {
+                let Some(store) = self.store.clone() else { return };
+                self.config.notifications = enabled;
+                self.task(effects, async move {
+                    Ok(Outcome::Saved(
+                        store.save(|config| config.notifications = enabled).await.map_err(storage_error)?,
                     ))
                 });
             },
@@ -554,7 +577,7 @@ impl Session {
         });
     }
 
-    fn refresh(&self, effects: &mut Vec<Effect>) {
+    pub fn refresh(&self, effects: &mut Vec<Effect>) {
         if let Some(api) = self.api.clone() {
             self.request(effects, async move { api.connection().await.map(|data| Outcome::Refreshed(Box::new(data))) });
         }

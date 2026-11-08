@@ -1,8 +1,8 @@
 # tinystream desktop
 
 The Linux desktop client lives in its own Cargo workspace. It provides the window, navigation
-shell, server connections, sign-in, live API events, browsing and the video player. Other media
-players, settings and admin screens arrive in later parts of [#80](https://github.com/tinystream-dev/tinystream/issues/80).
+shell, server connections, sign-in, live API events, browsing, settings, admin screens and the video player. Other media
+players arrive in later parts of [#80](https://github.com/tinystream-dev/tinystream/issues/80).
 
 From `desktop/`:
 
@@ -301,3 +301,26 @@ Linux provides MPRIS media controls, native Wayland idle inhibition (portal/X11 
 notifications, single-instance link routing and a StatusNotifierItem tray. Settings → Show tray
 icon controls close-to-tray. Ctrl+Q always quits. See [OS integration](docs/os-integration.md)
 for interfaces, packaging resources and focused validation commands.
+
+## Settings and administration
+
+Settings has the same personal, library, downloads, server and credits sections as the web.
+Admin sections follow the signed-in user's role, and download settings appear when downloads
+are enabled. Editors use the shared GraphQL schema and the web's server mutations; server
+validation errors keep the draft open. Live config, user and appearance events refresh loaded
+settings without replacing an open draft. Destructive actions ask for confirmation.
+
+Appearance supports server defaults, personal overrides, system light/dark schemes, component
+styles, scheme creation/forking/publishing and `ts1` import/export. The scheme editor derives its
+live preview and contrast warnings with the shared theme crate. Passkeys are listed read-only
+until #95. Profile pictures use the desktop image picker.
+
+The Desktop tab stores default playback quality, hardware decoding, motion, tray and update
+preferences on this machine. Auto quality means direct play; changes apply to newly opened
+videos. It also shows the mpv configuration path and token storage backend. Credits reads the
+generated `THIRD_PARTY_LICENSES` beside the packaged executable, with embedded asset notices
+as the development fallback.
+
+Focused settings tests run with `cargo test --locked settings::`. The optional native rendering
+and input test needs Vulkan: `cargo test --locked settings_editor_renders_and_saves -- --ignored`.
+Set `TINYSTREAM_TEST_ARTIFACT_DIR` to retain its account, music and scheme-editor PNGs.

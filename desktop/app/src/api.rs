@@ -160,7 +160,6 @@ impl Api {
     }
 
     pub async fn artwork(&self, id: i64, kind: Option<String>, reset: bool) -> Result<(), Error> {
-        use crate::platform::{Current, Desktop};
         let operation = if let Some(kind) = kind {
             let variables = serde_json::from_value(json!({"id":id,"kind":kind,"image":null}))
                 .map_err(|_| Error::message("Invalid artwork target."))?;
@@ -171,6 +170,25 @@ impl Api {
             serde_json::to_value(BrowseVideoArtwork::build_query(variables))
         }
         .map_err(|_| Error::message("Couldn't prepare the picture upload."))?;
+        self.upload_picture(operation, reset).await
+    }
+
+    pub async fn avatar(&self, user: Option<i64>, reset: bool) -> Result<(), Error> {
+        use graphql_client::GraphQLQuery;
+        let operation = if reset {
+            serde_json::to_value(SettingsRemoveAvatar::build_query(settings_remove_avatar::Variables { user_id: user }))
+        } else {
+            serde_json::to_value(SettingsSetAvatar::build_query(settings_set_avatar::Variables {
+                user_id: user,
+                image: Value::Null,
+            }))
+        }
+        .map_err(|_| Error::message("Couldn't prepare the picture upload."))?;
+        self.upload_picture(operation, reset).await
+    }
+
+    async fn upload_picture(&self, operation: Value, reset: bool) -> Result<(), Error> {
+        use crate::platform::{Current, Desktop};
         let mut request = self.http.post(self.origin.join("api/graphql").expect("validated origin"));
         if let Some(token) = &self.token {
             request = request.bearer_auth(&token.0);

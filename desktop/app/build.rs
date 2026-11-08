@@ -15,7 +15,8 @@ fn main() {
 
     let schema = "../../packages/shared/schema.graphql";
     let fragments = "../../packages/shared/fragments.graphql";
-    let queries = ["graphql/session.graphql", "graphql/player.graphql", "graphql/browsing.graphql"];
+    let queries =
+        ["graphql/session.graphql", "graphql/player.graphql", "graphql/browsing.graphql", "graphql/settings.graphql"];
     for path in [schema, fragments].iter().chain(&queries) {
         println!("cargo:rerun-if-changed={path}");
     }

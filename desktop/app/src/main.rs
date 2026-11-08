@@ -21,6 +21,7 @@ mod runner;
 mod secrets;
 mod servers;
 mod session;
+mod settings;
 mod shell;
 #[cfg(debug_assertions)]
 mod snapshot;
@@ -133,6 +134,7 @@ fn main() -> ExitCode {
             }
             if matches!(scene.as_str(), "settings" | "credits") {
                 app.history = route::History::new(Route::Settings);
+                app.settings.tab = settings::Tab::Desktop;
             }
             browsing::preview::prepare(&mut app, scene, flags.style, flags.custom, flags.still);
             app.history.set_scroll(flags.scroll);

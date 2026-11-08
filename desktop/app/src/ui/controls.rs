@@ -280,12 +280,37 @@ pub fn input<'a, Message: Clone + 'a>(
     on_input: impl Fn(String) -> Message + 'a,
     look: &Look,
 ) -> Input<'a, Message> {
-    Input { id, value, placeholder, on_input: Box::new(on_input), on_submit: None, secure: false, look: *look }
+    Input {
+        id: id.into(),
+        value: value.into(),
+        placeholder,
+        on_input: Box::new(on_input),
+        on_submit: None,
+        secure: false,
+        look: *look,
+    }
+}
+
+pub fn owned_input<'a, Message: Clone + 'a>(
+    id: impl Into<String>,
+    value: String,
+    on_input: impl Fn(String) -> Message + 'a,
+    look: &Look,
+) -> Input<'a, Message> {
+    Input {
+        id: id.into(),
+        value: value.into(),
+        placeholder: "",
+        on_input: Box::new(on_input),
+        on_submit: None,
+        secure: false,
+        look: *look,
+    }
 }
 
 pub struct Input<'a, Message> {
-    id: &'static str,
-    value: &'a str,
+    id: String,
+    value: std::borrow::Cow<'a, str>,
     placeholder: &'a str,
     on_input: Box<dyn Fn(String) -> Message + 'a>,
     on_submit: Option<Message>,

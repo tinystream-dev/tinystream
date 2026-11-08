@@ -1,0 +1,570 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+  query SettingsLibraries {
+    libraries {
+      name
+      kind
+      showCount
+      movieCount
+      albumCount
+      trackCount
+      bookCount
+    }
+  }
+
+
+
+  query SettingsSettings {
+    settings {
+      ...SettingsFields
+    }
+    server {
+      transcoding {
+        ...TranscodingFields
+      }
+    }
+  }
+
+
+
+  mutation SettingsScan($library: String) {
+    scan(library: $library)
+  }
+
+
+
+  mutation SettingsAddLibrary($input: LibraryInput!) {
+    addLibrary(input: $input) {
+      raw
+    }
+  }
+
+
+
+  mutation SettingsUpdateLibrary($name: String!, $input: LibraryInput!) {
+    updateLibrary(name: $name, input: $input) {
+      raw
+    }
+  }
+
+
+
+  mutation SettingsRemoveLibrary($name: String!) {
+    removeLibrary(name: $name) {
+      raw
+    }
+  }
+
+
+
+  query SettingsFolders($path: String) {
+    folders(path: $path) {
+      path
+      parent
+      home
+      folders {
+        name
+        path
+      }
+    }
+  }
+
+
+
+  query SettingsPasskeys {
+    viewer {
+      passkeys {
+        id
+        name
+        createdAt
+        lastUsed
+      }
+    }
+  }
+
+
+
+  mutation SettingsChangePassword($current: String!, $new: String!) {
+    changePassword(current: $current, new: $new)
+  }
+
+
+
+  query SettingsMyEmail {
+    viewer {
+      email
+    }
+  }
+
+
+
+  mutation SettingsSetEmail($email: String, $password: String!) {
+    setEmail(email: $email, password: $password)
+  }
+
+
+
+  mutation SettingsSendTestEmail($to: String!) {
+    sendTestEmail(to: $to)
+  }
+
+
+
+  mutation SettingsReplaceConfig($text: String!) {
+    replaceConfig(text: $text) {
+      raw
+    }
+  }
+
+
+
+  query SettingsSkippedFiles {
+    skippedFiles {
+      library
+      path
+      reason
+    }
+  }
+
+
+
+  mutation SettingsSaveSection($patch: ConfigPatch!) {
+    updateSettings(patch: $patch) {
+      raw
+    }
+  }
+
+
+
+  query SettingsSettingsEngine {
+    downloadEngine {
+      downloadPath
+      killSwitch
+    }
+  }
+
+
+
+  mutation SettingsAddSource($input: SourceInput!) {
+    addSource(input: $input) {
+      raw
+    }
+  }
+
+
+
+  mutation SettingsUpdateSource($name: String!, $input: SourceInput!) {
+    updateSource(name: $name, input: $input) {
+      raw
+    }
+  }
+
+
+
+  mutation SettingsRemoveSource($name: String!) {
+    removeSource(name: $name) {
+      raw
+    }
+  }
+
+
+
+  query SettingsDetectSource($url: String!, $apiKey: String) {
+    detectSource(url: $url, apiKey: $apiKey) {
+      kind
+      url
+      feed
+      name
+      searchable
+      sample {
+        link
+        title
+        size
+        seeders
+        published
+      }
+    }
+  }
+
+
+
+  mutation SettingsAddProfile($input: ProfileInput!) {
+    addProfile(input: $input) {
+      raw
+    }
+  }
+
+
+
+  mutation SettingsUpdateProfile($name: String!, $input: ProfileInput!) {
+    updateProfile(name: $name, input: $input) {
+      raw
+    }
+  }
+
+
+
+  mutation SettingsRemoveProfile($name: String!) {
+    removeProfile(name: $name) {
+      raw
+    }
+  }
+
+
+
+  query SettingsRenameSuggestions {
+    renameSuggestions {
+      id
+      library
+      managed
+      root
+      src
+      dst
+      reason
+      confidence
+    }
+  }
+
+
+
+  query SettingsFileHistory {
+    fileHistory {
+      batch
+      label
+      at
+      count
+      undone
+      operations {
+        kind
+        src
+        dst
+      }
+    }
+  }
+
+
+
+  mutation SettingsRefreshRenameSuggestions {
+    refreshRenameSuggestions
+  }
+
+
+
+  mutation SettingsApplyRenames($ids: [Int!]!) {
+    applyRenames(ids: $ids) {
+      renamed
+      problems
+    }
+  }
+
+
+
+  mutation SettingsDismissRenames($ids: [Int!]!) {
+    dismissRenames(ids: $ids)
+  }
+
+
+
+  mutation SettingsUndoFileChanges($batch: String!) {
+    undoFileChanges(batch: $batch) {
+      undone
+      problems
+    }
+  }
+
+
+
+  query SettingsClipStorage {
+    clipStorage {
+      usage {
+        user {
+          ...Person
+        }
+        bytes
+        rendered
+        clips
+        storage
+        limit
+      }
+      publicClips {
+        ...ClipFields
+      }
+      bytes
+      dir
+    }
+  }
+
+
+
+  mutation SettingsDropClipRenders {
+    dropClipRenders
+  }
+
+
+
+  mutation SettingsUnpublishClip($id: Int!) {
+    updateClip(id: $id, input: { public: false }) {
+      id
+    }
+  }
+
+
+
+  mutation SettingsAdminDeleteClip($id: Int!) {
+    deleteClip(id: $id)
+  }
+
+
+
+  query SettingsAppPasswords {
+    appPasswords {
+      id
+      name
+      createdAt
+      lastUsed
+      client
+    }
+  }
+
+
+
+  mutation SettingsCreateAppPassword($name: String!) {
+    createAppPassword(name: $name) {
+      secret
+      password {
+        id
+        name
+      }
+    }
+  }
+
+
+
+  mutation SettingsDeleteAppPassword($id: Int!) {
+    deleteAppPassword(id: $id)
+  }
+
+
+
+  query SettingsUsers {
+    users {
+      ...Viewer
+      createdAt
+      lastSeen
+      overrides {
+        allLibraries
+        libraries
+        request
+        autoApprove
+        requestLimit
+        manageRequests
+        manageShows
+        downloads
+        editMetadata
+        watchTogether
+        shareLinks
+        clip
+        clipMaxLength
+        clipLimit
+        clipStorage
+        clipLinks
+      }
+    }
+  }
+
+
+
+  query SettingsPermissionDefaults {
+    permissionDefaults {
+      ...PermissionsFields
+    }
+  }
+
+
+
+  mutation SettingsSetPermissionDefaults($permissions: PermissionsInput!) {
+    setPermissionDefaults(permissions: $permissions) {
+      ...PermissionsFields
+    }
+  }
+
+
+
+  mutation SettingsUpdateUser($id: Int!, $input: UserPatch!) {
+    updateUser(id: $id, input: $input) {
+      id
+    }
+  }
+
+
+
+  mutation SettingsDeleteUser($id: Int!) {
+    deleteUser(id: $id)
+  }
+
+
+
+  mutation SettingsCreateUser($input: NewUser!) {
+    createUser(input: $input) {
+      id
+    }
+  }
+
+
+
+  query SettingsInvites {
+    invites {
+      id
+      label
+      expiresAt
+      maxUses
+      uses
+      revoked
+    }
+  }
+
+
+
+  mutation SettingsCreateInvite($label: String!, $maxUses: Int!, $expiresInHours: Int!, $email: String) {
+    createInvite(label: $label, maxUses: $maxUses, expiresInHours: $expiresInHours, email: $email) {
+      link
+    }
+  }
+
+
+
+  mutation SettingsRevokeInvite($id: Int!) {
+    revokeInvite(id: $id)
+  }
+
+
+
+  query SettingsColorSchemes {
+    colorSchemes {
+      ...SchemeFields
+    }
+  }
+
+
+
+  query SettingsAppearanceSettings {
+    appearanceSettings {
+      colors {
+        mode
+        single
+        light
+        dark
+      }
+      style
+      mediaTint
+    }
+  }
+
+
+
+  query SettingsServerAppearance {
+    serverAppearance {
+      colors {
+        mode
+        single
+        light
+        dark
+      }
+      style
+    }
+  }
+
+
+
+  mutation SettingsSetAppearance($input: AppearanceSettingsInput!) {
+    setAppearance(input: $input) {
+      mode
+    }
+  }
+
+
+
+  mutation SettingsSetServerAppearance($input: ServerAppearanceInput!) {
+    setServerAppearance(input: $input) {
+      style
+    }
+  }
+
+
+
+  mutation SettingsSaveScheme($id: String, $input: SchemeInput!) {
+    saveScheme(id: $id, input: $input) {
+      ...SchemeFields
+    }
+  }
+
+
+
+  mutation SettingsForkScheme($id: String!) {
+    forkScheme(id: $id) {
+      ...SchemeFields
+    }
+  }
+
+
+
+  mutation SettingsImportScheme($code: String!, $name: String) {
+    importScheme(code: $code, name: $name) {
+      ...SchemeFields
+    }
+  }
+
+
+
+  mutation SettingsDeleteScheme($id: String!) {
+    deleteScheme(id: $id)
+  }
+
+
+
+  mutation SettingsPublishScheme($id: String!, $published: Boolean!) {
+    publishScheme(id: $id, published: $published) {
+      id
+    }
+  }
+
+
+
+  fragment SchemeFields on ColorScheme {
+    id
+    name
+    builtIn
+    published
+    editable
+    code
+    shareCode
+    forkedFrom {
+      id
+      name
+    }
+    palette {
+      seeds {
+        name
+        value
+      }
+      overrides {
+        name
+        value
+      }
+      tokens {
+        name
+        value
+      }
+      warnings {
+        foreground
+        background
+        ratio
+        minimum
+      }
+    }
+  }
+
+
+mutation SettingsSetAvatar($image: Upload!, $userId: Int) { setAvatar(image: $image, userId: $userId) { id avatar } }
+
+mutation SettingsRemoveAvatar($userId: Int) { removeAvatar(userId: $userId) { id avatar } }

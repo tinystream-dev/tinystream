@@ -40,6 +40,8 @@ pub struct Config {
     pub check_updates: bool,
     pub show_tray: bool,
     pub hardware_decoding: bool,
+    pub default_quality: Option<u32>,
+    pub notifications: bool,
     pub last_check: u64,
     pub release: Option<Release>,
     pub dismissed: Vec<String>,
@@ -56,6 +58,8 @@ impl Default for Config {
             check_updates: true,
             show_tray: true,
             hardware_decoding: true,
+            default_quality: None,
+            notifications: true,
             last_check: 0,
             release: None,
             dismissed: vec![],
@@ -178,6 +182,35 @@ impl Store {
 mod tests {
     use super::*;
     use crate::test_support::{Directory, MemorySecrets, run};
+
+    #[test]
+    fn desktop_preferences_survive_restart_and_old_configs_keep_defaults() {
+        run(async {
+            let legacy: Config = serde_json::from_str("{}").unwrap();
+            assert!(legacy.hardware_decoding);
+            assert!(legacy.notifications);
+            assert_eq!(legacy.default_quality, None);
+            let dir = Directory::new("desktop-preferences");
+            let path = dir.0.join("servers.json");
+            let secrets = Arc::new(MemorySecrets::default());
+            let store = Store::open(path.clone(), secrets.clone()).await.unwrap();
+            store
+                .save(|config| {
+                    config.default_quality = Some(720);
+                    config.hardware_decoding = false;
+                    config.notifications = false;
+                    config.reduce_motion = Some(true);
+                })
+                .await
+                .unwrap();
+            let restarted = Store::open(path, secrets).await.unwrap();
+            let saved = restarted.config.lock().await;
+            assert_eq!(saved.default_quality, Some(720));
+            assert!(!saved.hardware_decoding);
+            assert!(!saved.notifications);
+            assert_eq!(saved.reduce_motion, Some(true));
+        });
+    }
 
     #[test]
     fn two_servers_keep_their_own_credentials_across_restarts() {

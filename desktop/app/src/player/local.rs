@@ -40,8 +40,9 @@ pub struct Viewer {
 }
 
 impl Viewer {
-    pub fn open(path: &Path, effects: &mut Vec<Effect>) -> Result<Self, String> {
+    pub fn open(path: &Path, hardware_decoding: bool, effects: &mut Vec<Effect>) -> Result<Self, String> {
         let engine = Engine::local()?;
+        engine.set("hwdec", if hardware_decoding { "auto-safe" } else { "no" });
         let screen = Screen::new(engine.mpv.clone());
         let listener = engine.listener();
         effects.push(Effect::Listen(Box::new(move |send| {
