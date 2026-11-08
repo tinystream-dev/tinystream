@@ -74,14 +74,6 @@ impl<Message: Clone> Widget<Message, Theme, Renderer> for Modal<'_, Message> {
         if !*tree.state.downcast_ref::<bool>() && matches!(event, Event::Window(window::Event::RedrawRequested(_))) {
             *tree.state.downcast_mut::<bool>() = true;
             self.operate(tree, layout, viewport, renderer, &mut operation::focusable::unfocus::<()>());
-            let mut operation: Box<dyn Operation> = Box::new(operation::focusable::focus_next());
-            loop {
-                self.operate(tree, layout, viewport, renderer, operation.as_mut());
-                match operation.finish() {
-                    operation::Outcome::Chain(next) => operation = next,
-                    _ => break,
-                }
-            }
         }
         if matches!(
             event,
