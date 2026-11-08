@@ -923,15 +923,11 @@ pub fn banner<'a, Message: Clone + 'a>(
     dismiss: Option<Message>,
     look: &Look,
 ) -> Element<'a, Message> {
-    let mut content = row![
-        container(icon(glyph, 18.0).color(tone)).padding(Padding { top: 1.0, ..Padding::ZERO }),
-        container(body).width(Length::Fill)
-    ]
-    .spacing(12);
+    let mut content = row![icon(glyph, 18.0).color(tone), container(body).width(Length::Fill)].spacing(12);
     if let Some(dismiss) = dismiss {
         content = content.push(icon_button(Icon::X, "Dismiss", Some(dismiss), look));
     }
-    squircle(content.align_y(Alignment::Start), 14.0, look)
+    squircle(content.align_y(Alignment::Center), 14.0, look)
         .fill(tone.scale_alpha(0.1))
         .padding(14)
         .width(Length::Fill)
