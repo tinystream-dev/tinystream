@@ -224,7 +224,7 @@ fn sidebar<'a>(app: &'a App, route: &Route, look: &Look) -> Element<'a, Message>
     .padding([0, 10])
     .on_press(Message::Overlay(Some(Overlay::Search)));
 
-    let mut nav = column![nav_link("Home", Icon::House, Route::Home, route, look)];
+    let mut nav = column![nav_link("Home", Icon::House, Route::Home, route, look)].spacing(2);
     if app.browsing.data(&crate::browsing::Key::Shell).and_then(|d| d.server.as_ref()).is_some_and(|s| s.clips) {
         nav = nav.push(nav_link("Clips", Icon::Scissors, Route::Clips, route, look));
     }
