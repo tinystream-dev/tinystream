@@ -55,7 +55,9 @@ pub fn view(app: &App) -> Element<'_, Message> {
     }
     let look = app.session.look();
     let route = &app.history.current().route;
-    let signed_in = app.session.screen == crate::session::Screen::Ready;
+    // Guests join rooms without signing in, as on web.
+    let in_room = matches!(route, Route::Together(_)) && app.together.is_some();
+    let signed_in = app.session.screen == crate::session::Screen::Ready || in_room;
     let focus = route.is_focus() || !signed_in;
 
     let base: Element<'_, Message> = if !signed_in {
@@ -104,7 +106,9 @@ fn chrome<'a>(app: &'a App, base: Element<'a, Message>, focus: bool, look: &Look
         .player
         .as_ref()
         .filter(|player| {
-            matches!(app.history.current().route, Route::Watch(..)) && !player.pip && player.clipping.is_none()
+            matches!(app.history.current().route, Route::Watch(..) | Route::Together(_))
+                && !player.pip
+                && player.clipping.is_none()
         })
         .map_or(1.0, |player| if look.reduce_motion { f32::from(player.show_chrome()) } else { player.chrome_alpha() });
     let hidden = alpha == 0.0;
@@ -321,6 +325,9 @@ fn page<'a>(app: &'a App, look: &Look) -> Element<'a, Message> {
     if let (Route::Watch(..), Some(player)) = (&app.history.current().route, &app.player) {
         let serial = player.serial;
         return crate::player::view(player, look).map(move |message| Message::Player(serial, message)).boxed();
+    }
+    if let Route::Together(_) = &app.history.current().route {
+        return crate::together::view(app, look);
     }
     let l = *look;
     let transition = app.transition.as_ref().filter(|_| !look.reduce_motion).and_then(|(start, from)| {

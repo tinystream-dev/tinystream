@@ -26,6 +26,7 @@ mod shell;
 mod snapshot;
 #[cfg(test)]
 mod test_support;
+mod together;
 mod ui;
 mod updates;
 mod window_state;
@@ -98,7 +99,10 @@ fn main() -> ExitCode {
         }
     }
     if let Some(link) = argument.filter(|arg| arg.contains("://")) {
-        app.session.initial_link(link);
+        match together::link(&link) {
+            Some(room) => app.pending_join = Some(room),
+            None => app.session.initial_link(link),
+        }
     }
     if cfg!(debug_assertions) && flags.gallery {
         let mut gallery = ui::gallery::Gallery::default();

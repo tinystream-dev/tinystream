@@ -414,6 +414,7 @@ impl Runner {
                         window.act(action);
                     }
                 },
+                Effect::Copy(text) => self.clipboard.write(clipboard::Content::Text(text), |_| {}),
             }
         }
 

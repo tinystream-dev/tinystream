@@ -116,8 +116,28 @@ P opens a native picture-in-picture window using the same decoder and
 GPU device; closing it returns to the player. X opens a clip draft on that player, with frame
 stepping, range selection, server rendering and return to the original watch position.
 Screenshot links preserve `/clips?clip=<id>` for #93's full Clips screen. The player exposes
-activity transitions for #92's idle inhibitor; actual OS inhibition and Watch Together (#88)
-remain in their own milestones.
+activity transitions for #92's idle inhibitor; actual OS inhibition remains in #92.
+
+## Watch Together
+
+`/together/<code>` opens a room (#88). `player/sync.rs` is the web's `sync.ts`, with the same
+constants: the room clock, the NTP-style offset from the quickest round trip, and the loop that
+nudges mpv's `speed` for small drift, seeks on big drift and only says it's ready again after
+refilling five seconds. It talks to `/api/together/{code}/ws` and plays from the room's own media
+routes, direct by default or a transcode from the quality menu, so guests need no account. Room
+links (`https://<server>/together/<code>` or `tinystream://<host[:port]>/together/<code>`) given
+on the command line go through `App::join_room`, signed in when they're for the server in use and
+as a guest otherwise. The player's Users button starts a room, and its panel invites people on
+the server. Picture in picture and clips inside rooms, and hiding to the tray while a room is open
+(#92) aren't there yet.
+
+The steering loop can be checked against real mpv, and the protocol against an isolated server
+(with a second user there, it checks invites too):
+
+```sh
+TINYSTREAM_TEST_VIDEO='/absolute/path/to/a-minute-or-more.mp4' cargo test --locked steers_mpv_onto_the_room_clock -- --ignored
+cargo test --locked hosts_and_guests_share_a_room_on_the_server -- --ignored
+```
 
 To visibly play a local file through the same mpv/GPU path, without a server:
 

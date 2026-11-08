@@ -104,6 +104,12 @@ pub fn view<'a>(player: &'a Player, look: &Look) -> Element<'a, Message> {
         layers.push(top_bar(player, alpha, look));
     }
 
+    if let Some(room) = &player.room
+        && let Some(notice) = super::room::notice_view(room, look)
+    {
+        layers.push(notice);
+    }
+
     // Skip and up next, over the controls' right end.
     let mut corner = Column::new().spacing(12).align_x(Alignment::End);
     if let Some(chapter) = player.skippable()
@@ -145,6 +151,22 @@ pub fn view<'a>(player: &'a Player, look: &Look) -> Element<'a, Message> {
 
     if let Some(shot) = &player.shot {
         layers.push(shot_card(player, shot, look));
+    }
+
+    if let Some(room) = player.room.as_ref().filter(|room| room.panel) {
+        let dismiss =
+            mouse_area(space().width(Fill).height(Fill)).on_press(Message::Room(super::room::Message::Panel(false)));
+        layers.push(dismiss.boxed());
+        layers.push(
+            container(opaque(enter(
+                super::room::panel_view(room, &player.pictures, Message::Room, look),
+                Entrance::pop(look),
+                look,
+            )))
+            .align_right(Fill)
+            .padding(Padding { top: 64.0, right: room_inset(player), ..Padding::ZERO })
+            .boxed(),
+        );
     }
 
     if let Some(menu) = player.menu {
@@ -311,21 +333,28 @@ fn top_bar<'a>(player: &'a Player, alpha: f32, look: &Look) -> Element<'a, Messa
         words = words.push(truncate(line, type_::S13, l.media_ink.scale_alpha(0.6 * alpha)));
     }
     let shade = l.media_shade;
-    container(
-        row![
-            chrome_button((Icon::ArrowLeft, 20.0, false), "Back", Some(Message::Back), false, alpha, look),
-            container(words).width(Fill).padding(Padding { top: 4.0, ..Padding::ZERO }),
-        ]
-        .spacing(12)
-        .align_y(Alignment::Start),
-    )
-    .width(Fill)
-    .padding(Padding { top: 16.0, right: 20.0, bottom: 64.0, left: 20.0 })
-    .style(move |_| container::Style {
-        background: Some(downwards(&[(0.0, shade.scale_alpha(0.7 * alpha)), (1.0, Color::TRANSPARENT)])),
-        ..container::Style::default()
-    })
-    .boxed()
+    let mut bar = row![
+        chrome_button((Icon::ArrowLeft, 20.0, false), "Back", Some(Message::Back), false, alpha, look),
+        container(words).width(Fill).padding(Padding { top: 4.0, ..Padding::ZERO }),
+    ]
+    .spacing(12)
+    .align_y(Alignment::Start);
+    if let Some(room) = &player.room {
+        bar = bar.push(super::room::button_view(room, &player.pictures, alpha, Message::Room, look));
+    }
+    container(bar)
+        .width(Fill)
+        .padding(Padding { top: 16.0, right: room_inset(player), bottom: 64.0, left: 20.0 })
+        .style(move |_| container::Style {
+            background: Some(downwards(&[(0.0, shade.scale_alpha(0.7 * alpha)), (1.0, Color::TRANSPARENT)])),
+            ..container::Style::default()
+        })
+        .boxed()
+}
+
+/// How far in from the right the room's button sits, clear of the window's controls.
+fn room_inset(player: &Player) -> f32 {
+    if player.room.is_some() && !player.fullscreen { 120.0 } else { 20.0 }
 }
 
 /// The episode's code and name, under the show's (`subtitleLine`).
@@ -443,7 +472,17 @@ fn controls<'a>(player: &'a Player, alpha: f32, look: &Look) -> Element<'a, Mess
         buttons =
             buttons.push(chrome_button((Icon::Settings2, 20.0, false), "Quality", Some(toggle), open, alpha, look));
     }
-    if player.can_clip && pb.is_some() {
+    if player.can_together && pb.is_some() {
+        buttons = buttons.push(chrome_button(
+            (Icon::Users, 20.0, false),
+            "Watch together",
+            Some(Message::Together),
+            false,
+            alpha,
+            look,
+        ));
+    }
+    if player.can_clip && pb.is_some() && player.room.is_none() {
         buttons = buttons.push(chrome_button(
             (Icon::Scissors, 20.0, false),
             "Clip (x)",
@@ -452,6 +491,8 @@ fn controls<'a>(player: &'a Player, alpha: f32, look: &Look) -> Element<'a, Mess
             alpha,
             look,
         ));
+    }
+    if player.can_clip && pb.is_some() {
         buttons = buttons.push(chrome_button(
             (Icon::Camera, 20.0, false),
             "Screenshot (shift+s)",
@@ -461,14 +502,16 @@ fn controls<'a>(player: &'a Player, alpha: f32, look: &Look) -> Element<'a, Mess
             look,
         ));
     }
-    buttons = buttons.push(chrome_button(
-        (Icon::PictureInPicture2, 20.0, false),
-        "Picture in picture (p)",
-        Some(Message::PictureInPicture),
-        false,
-        alpha,
-        look,
-    ));
+    if player.room.is_none() {
+        buttons = buttons.push(chrome_button(
+            (Icon::PictureInPicture2, 20.0, false),
+            "Picture in picture (p)",
+            Some(Message::PictureInPicture),
+            false,
+            alpha,
+            look,
+        ));
+    }
     let fullscreen = player.fullscreen;
     buttons = buttons.push(chrome_button(
         (if fullscreen { Icon::Minimize } else { Icon::Maximize }, 20.0, false),

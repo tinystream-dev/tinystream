@@ -720,6 +720,11 @@ impl Session {
         }
     }
 
+    /// Whether saved servers are known and none is still connecting.
+    pub fn loaded(&self) -> bool {
+        self.store.is_some() && !self.busy
+    }
+
     pub fn initial_link(&mut self, link: String) {
         self.pending_link = Some(link);
     }

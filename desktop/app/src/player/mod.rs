@@ -18,16 +18,23 @@ use crate::ui::video::Screen;
 mod clip;
 mod engine;
 pub mod local;
+pub mod room;
 pub mod stream;
 pub mod subtitles;
+pub mod sync;
 mod timeline;
 mod tracks;
 mod view;
 
 pub use engine::config_file;
 use engine::{Engine, Source, Update};
+use room::Room;
+use sync::SharedTracks;
 use tracks::Prefs;
 pub use view::{pip_view, view};
+
+/// Pictures fetched for the player, by server path.
+pub type Pictures = HashMap<String, Handle>;
 
 /// How long the controls stay after the pointer stops.
 const IDLE: Duration = Duration::from_millis(2600);
@@ -139,6 +146,13 @@ pub enum Message {
     Editor(clip::Message),
     Retry,
     Convert,
+    /// Start watching this together.
+    Together,
+    Started(Result<String, String>),
+    Room(room::Message),
+    /// The room is somewhere a transcode hasn't cached: start it again there.
+    Rebuild(f64),
+    People(Vec<api::people::PeopleUsers>),
 }
 
 impl std::fmt::Debug for Message {
@@ -161,6 +175,9 @@ pub enum Out {
     PipWindow(crate::chrome::Action),
     /// Open a clip in Clips.
     Clip(i64),
+    /// Watch together in this room, which now plays this video.
+    Together(String),
+    Copy(String),
 }
 
 pub struct Player {
@@ -174,6 +191,10 @@ pub struct Player {
     pub info_error: Option<String>,
     vaapi: bool,
     pub can_clip: bool,
+    pub can_together: bool,
+    starting: bool,
+    /// The watch-together room this plays in.
+    pub room: Option<Room>,
     /// Whether the window is full screen, for the button.
     pub fullscreen: bool,
     pub pip: bool,
@@ -222,7 +243,7 @@ pub struct Player {
     overview_asked: bool,
     pub series: Option<Arc<player_schedule::PlayerScheduleTitleSeries>>,
     series_asked: bool,
-    pub pictures: HashMap<String, Handle>,
+    pub pictures: Pictures,
     pub previews: HashMap<u32, Handle>,
     preview_wanted: Option<(u32, Instant)>,
     previews_asked: Vec<u32>,
@@ -244,9 +265,25 @@ impl Player {
         effects: &mut Vec<Effect>,
     ) -> Self {
         let prefs = Prefs::load(server, user);
-        Self::create(serial, id, start_at, api, runtime, prefs, effects)
+        Self::create(serial, id, start_at, api, runtime, prefs, None, effects)
     }
 
+    /// Opens video `id` in `room`, which decides where it plays and what's heard.
+    #[allow(clippy::too_many_arguments)]
+    pub fn in_room(
+        serial: u64,
+        id: i64,
+        room: Room,
+        api: Api,
+        (server, user): (u64, i64),
+        runtime: Option<tokio::runtime::Handle>,
+        effects: &mut Vec<Effect>,
+    ) -> Self {
+        let prefs = Prefs::load(server, user);
+        Self::create(serial, id, None, api, runtime, prefs, Some(room), effects)
+    }
+
+    #[allow(clippy::too_many_arguments)]
     fn create(
         serial: u64,
         id: i64,
@@ -254,6 +291,7 @@ impl Player {
         api: Api,
         runtime: Option<tokio::runtime::Handle>,
         prefs: Prefs,
+        room: Option<Room>,
         effects: &mut Vec<Effect>,
     ) -> Self {
         let engine = match runtime {
@@ -265,7 +303,11 @@ impl Player {
         let mut player = Self {
             serial,
             id,
-            base: format!("api/media/{id}"),
+            // Rooms have their own copies of the media endpoints, so guests can play.
+            base: match &room {
+                Some(room) => format!("api/together/{}/media/{id}", room.code),
+                None => format!("api/media/{id}"),
+            },
             screen: engine.as_ref().map(|engine| Screen::new(engine.mpv.clone())),
             error: engine.is_none().then(|| "the video player couldn't start".to_owned()),
             engine,
@@ -274,10 +316,14 @@ impl Player {
             info_error: None,
             vaapi: false,
             can_clip: false,
+            can_together: false,
+            starting: false,
             fullscreen: false,
             pip: false,
             volume: prefs.f64("volume").unwrap_or(1.0).clamp(0.0, 1.0),
-            rate: prefs.f64("rate").unwrap_or(1.0).clamp(0.25, 3.0),
+            // In a room, the room sets the pace.
+            rate: if room.is_some() { 1.0 } else { prefs.f64("rate").unwrap_or(1.0).clamp(0.25, 3.0) },
+            room,
             prefs,
             start_at,
             source: Source::Direct,
@@ -339,10 +385,50 @@ impl Player {
                 });
             })));
         }
-        player.request(effects, async move {
-            Message::Info(api.request::<api::Playback>(playback::Variables { id }).await.map(Arc::new))
-        });
+        player.ask_info(effects);
+        if player.room.as_ref().is_some_and(|room| room.can_invite) {
+            let api = player.api.clone();
+            player.request(effects, async move {
+                let people = api.request::<api::People>(api::people::Variables).await;
+                Message::People(people.map(|data| data.users).unwrap_or_default())
+            });
+        }
         player
+    }
+
+    /// What the player needs about the video, alone or through the room.
+    fn ask_info(&self, effects: &mut Vec<Effect>) {
+        #[derive(serde::Deserialize)]
+        struct RoomVideo {
+            video: Option<playback::PlaybackVideo>,
+        }
+        #[derive(serde::Deserialize)]
+        struct RoomPlayback {
+            room: RoomVideo,
+            server: playback::PlaybackServer,
+            viewer: Option<playback::PlaybackViewer>,
+        }
+        let (api, id) = (self.api.clone(), self.id);
+        match &self.room {
+            Some(room) => {
+                let code = room.code.clone();
+                self.request(effects, async move {
+                    let data = api
+                        .request_data::<api::RoomPlayback, RoomPlayback>(api::room_playback::Variables { code, id })
+                        .await;
+                    Message::Info(data.map(|data| {
+                        Arc::new(playback::ResponseData {
+                            video: data.room.video,
+                            server: data.server,
+                            viewer: data.viewer,
+                        })
+                    }))
+                })
+            },
+            None => self.request(effects, async move {
+                Message::Info(api.request::<api::Playback>(playback::Variables { id }).await.map(Arc::new))
+            }),
+        }
     }
 
     fn request(&self, effects: &mut Vec<Effect>, future: impl Future<Output = Message> + Send + 'static) {
@@ -375,6 +461,7 @@ impl Player {
             || (!self.playing && !self.is_rested())
             || !self.idle()
             || self.failure().is_some()
+            || self.room.as_ref().is_some_and(|room| room.panel)
     }
 
     /// Why the video can't play, if it can't.
@@ -466,6 +553,7 @@ impl Player {
             || self.idle_since.is_some_and(|since| since.elapsed() < IDLE + Duration::from_millis(300))
             || (self.waiting && self.error.is_none())
             || !self.started
+            || self.room.as_ref().is_some_and(Room::animating)
     }
 
     pub fn update(&mut self, message: Message, effects: &mut Vec<Effect>) -> Option<Out> {
@@ -477,13 +565,26 @@ impl Player {
                 };
                 self.vaapi = data.server.transcoding.vaapi.is_some();
                 self.can_clip = data.server.clips && data.viewer.as_ref().is_some_and(|v| v.permissions.clip);
-                self.audio = tracks::default_audio(&pb, &self.prefs);
-                self.subtitle = tracks::default_subtitle(&pb, &self.prefs);
-                let start = self.start_at.unwrap_or(match (pb.finished, pb.position) {
-                    (Some(true), _) => 0.0,
-                    (_, Some(position)) if position > 5.0 => position,
-                    _ => 0.0,
-                });
+                self.can_together =
+                    self.room.is_none() && data.viewer.as_ref().is_some_and(|v| v.permissions.watch_together);
+                let shared = self
+                    .room
+                    .as_ref()
+                    .and_then(|room| room.snap.room.as_ref())
+                    .map(|state| sync::pick_shared(&pb, &state.tracks));
+                (self.audio, self.subtitle) = match shared {
+                    Some(shared) => shared,
+                    None => (tracks::default_audio(&pb, &self.prefs), tracks::default_subtitle(&pb, &self.prefs)),
+                };
+                // In a room, start wherever the room is; it takes over from there.
+                let start = match &self.room {
+                    Some(room) => room.client.target(),
+                    None => self.start_at.unwrap_or(match (pb.finished, pb.position) {
+                        (Some(true), _) => 0.0,
+                        (_, Some(position)) if position > 5.0 => position,
+                        _ => 0.0,
+                    }),
+                };
                 let wanted: Vec<String> = [Some(pb.still.clone()), pb.next.as_ref().map(|next| next.still.clone())]
                     .into_iter()
                     .flatten()
@@ -493,7 +594,8 @@ impl Player {
                     self.picture(path, effects);
                 }
                 self.load_subtitle(effects);
-                self.play_from(start, false);
+                self.play_from(start, self.room.is_some());
+                self.attach(effects);
             },
             Message::SubtitleLoaded(revision, result) => {
                 if revision == self.subtitle_loader.revision() {
@@ -508,6 +610,35 @@ impl Player {
                 }
             },
             Message::Info(Err(error)) => self.info_error = Some(error.message),
+            Message::Together => self.start_together(effects),
+            Message::Started(Ok(code)) => {
+                self.save(effects);
+                return Some(Out::Together(code));
+            },
+            Message::Started(Err(error)) => {
+                self.starting = false;
+                self.flash(HudKind::Notice(error));
+            },
+            Message::Room(message) => {
+                let room = self.room.as_mut()?;
+                if let Some(link) = room.update(message) {
+                    return Some(Out::Copy(link));
+                }
+            },
+            Message::People(people) => {
+                for path in people.iter().filter_map(|p| p.avatar.clone()) {
+                    self.picture(path, effects);
+                }
+                if let Some(room) = &mut self.room {
+                    room.people = people;
+                    room.people.sort_by_key(|p| p.username.to_lowercase());
+                }
+            },
+            Message::Rebuild(at) => {
+                if self.room.is_some() {
+                    self.play_from(at, !self.playing);
+                }
+            },
             Message::Mpv(update) => return self.mpv(update, effects),
             Message::Tick => return self.tick(effects),
             Message::Picture(path, handle) => {
@@ -607,10 +738,7 @@ impl Player {
                 self.save(effects);
                 return Some(Out::Back { title: self.pb.as_ref().map(|pb| pb.title.id) });
             },
-            Message::Go(id) => {
-                self.save(effects);
-                return Some(Out::Go(id));
-            },
+            Message::Go(id) => return self.go(id, effects),
             Message::Skip => {
                 if let Some(end) = self.skippable().map(|c| c.end) {
                     self.seek(end);
@@ -633,10 +761,7 @@ impl Player {
             },
             Message::Retry => {
                 if self.info_error.take().is_some() {
-                    let (api, id) = (self.api.clone(), self.id);
-                    self.request(effects, async move {
-                        Message::Info(api.request::<api::Playback>(playback::Variables { id }).await.map(Arc::new))
-                    });
+                    self.ask_info(effects);
                     return None;
                 }
                 self.error = None;
@@ -747,6 +872,9 @@ impl Player {
 
     fn tick(&mut self, effects: &mut Vec<Effect>) -> Option<Out> {
         self.tick_clip(effects);
+        if let Some(room) = &mut self.room {
+            room.tick();
+        }
         let now = Instant::now();
         if self.hud.as_ref().is_some_and(|hud| now.duration_since(hud.at) >= HUD) {
             self.hud = None;
@@ -841,10 +969,108 @@ impl Player {
             && let Some(next) = self.pb.as_ref().and_then(|pb| pb.next.as_ref()).map(|next| next.id)
         {
             self.countdown = None;
-            self.save(effects);
-            return Some(Out::Go(next));
+            return self.go(next, effects);
         }
         None
+    }
+
+    /// Plays video `id` next; in a room, everyone moves together and the room puts it on.
+    fn go(&mut self, id: i64, effects: &mut Vec<Effect>) -> Option<Out> {
+        self.save(effects);
+        if self.room.is_none() {
+            return Some(Out::Go(id));
+        }
+        if !self.held()
+            && let Some(room) = &self.room
+        {
+            room.client.change_media(id, self.id);
+        }
+        None
+    }
+
+    /// Whether someone else holds the room's controls, saying so if they do.
+    fn held(&mut self) -> bool {
+        let Some(words) = self.room.as_ref().and_then(room::held_by) else { return false };
+        self.flash(HudKind::Notice(words));
+        true
+    }
+
+    /// Hands the video to the room to steer.
+    fn attach(&self, effects: &mut Vec<Effect>) {
+        let (Some(room), Some(engine)) = (&self.room, &self.engine) else { return };
+        let (client, mpv, serial, id) = (room.client.clone(), engine.mpv.clone(), self.serial, self.id);
+        let (duration, direct) = (self.duration(), self.source == Source::Direct);
+        effects.push(Effect::Listen(Box::new(move |send| {
+            client.attach(
+                mpv,
+                id,
+                duration,
+                direct,
+                Arc::new(move |at| send(AppMessage::Player(serial, Message::Rebuild(at)))),
+            );
+        })));
+    }
+
+    /// Takes in what the room is now: its tracks, unless we picked our own, and its pace.
+    pub fn room_changed(&mut self, snap: sync::Snapshot, effects: &mut Vec<Effect>) {
+        let Some(room) = &mut self.room else { return };
+        room.changed(snap);
+        let Some(state) = &room.snap.room else { return };
+        self.rate = state.clock.rate;
+        let (own_audio, own_subtitle) = (room.own_audio, room.own_subtitle);
+        let Some(pb) = &self.pb else { return };
+        let (audio, subtitle) = sync::pick_shared(pb, &state.tracks);
+        let wanted: Vec<String> = state
+            .members
+            .iter()
+            .filter_map(|m| room::avatar_path(&room.code, m))
+            .filter(|path| !self.pictures.contains_key(path))
+            .collect();
+        if !own_audio && audio.is_some() && audio != self.audio {
+            self.audio = audio;
+            self.apply_audio();
+        }
+        if !own_subtitle && subtitle != self.subtitle {
+            self.subtitle = subtitle;
+            self.load_subtitle(effects);
+            self.apply_subtitle();
+        }
+        for path in wanted {
+            self.picture(path, effects);
+        }
+    }
+
+    /// Moves this video into a new room, right where it is.
+    fn start_together(&mut self, effects: &mut Vec<Effect>) {
+        let Some(pb) = &self.pb else { return };
+        if self.starting || self.room.is_some() {
+            return;
+        }
+        self.starting = true;
+        let tracks = SharedTracks::of(pb, self.audio, self.subtitle.as_deref());
+        let input = api::start_room::NewRoom {
+            video_id: self.id,
+            position: self.time,
+            paused: !self.playing,
+            tracks: api::start_room::TracksInput {
+                audio: tracks.audio,
+                audio_language: tracks.audio_language,
+                audio_title: tracks.audio_title,
+                audio_channels: tracks.audio_channels,
+                audio_codec: tracks.audio_codec,
+                subtitle: tracks.subtitle,
+                subtitle_language: tracks.subtitle_language,
+                subtitle_title: tracks.subtitle_title,
+                subtitle_forced: tracks.subtitle_forced,
+                subtitle_codec: tracks.subtitle_codec,
+            },
+            public: false,
+        };
+        let api = self.api.clone();
+        self.request(effects, async move {
+            let result = api.request::<api::StartRoom>(api::start_room::Variables { input }).await;
+            Message::Started(result.map(|data| data.start_room.code).map_err(|error| error.message))
+        });
     }
 
     /// mpv's id for the audio track the server calls `index`.
@@ -871,6 +1097,9 @@ impl Player {
         let path = self.source.path(&self.base, self.audio, self.audio_codec());
         if let Some(engine) = &self.engine {
             engine.load(&path, start, paused);
+        }
+        if let Some(room) = &self.room {
+            room.client.set_direct(self.source == Source::Direct);
         }
     }
 
@@ -906,6 +1135,20 @@ impl Player {
 
     /// Plays or pauses (toggles with `None`); returns whether it's now playing.
     fn set_playing(&mut self, play: Option<bool>) -> bool {
+        if let Some(room) = &self.room {
+            let Some(paused) = room.snap.room.as_ref().map(|state| state.clock.paused) else { return self.playing };
+            let client = room.client.clone();
+            if self.held() {
+                return self.playing;
+            }
+            let want = play.unwrap_or(paused);
+            if want {
+                client.play(self.time);
+            } else {
+                client.pause(self.time);
+            }
+            return want;
+        }
         let want = play.unwrap_or(!self.playing);
         if want && self.ended {
             self.seek(0.0);
@@ -920,8 +1163,16 @@ impl Player {
     fn seek(&mut self, to: f64) {
         let duration = self.duration();
         let to = to.max(0.0).min(if duration > 0.0 { duration } else { f64::INFINITY });
-        self.time = to;
         self.poke();
+        if let Some(room) = &self.room {
+            let client = room.client.clone();
+            if !self.held() {
+                self.time = to;
+                client.seek(to);
+            }
+            return;
+        }
+        self.time = to;
         let Some(engine) = &self.engine else { return };
         match self.source {
             Source::Direct => engine.seek(to),
@@ -943,6 +1194,16 @@ impl Player {
 
     fn change_rate(&mut self, rate: f64) {
         let rate = (rate.clamp(0.25, 3.0) * 100.0).round() / 100.0;
+        if let Some(room) = &self.room {
+            let client = room.client.clone();
+            if self.held() {
+                return;
+            }
+            client.set_rate(rate);
+            self.rate = rate;
+            self.flash(HudKind::Speed(format!("{}×", number(rate))));
+            return;
+        }
         self.rate = rate;
         if let Some(engine) = &self.engine {
             engine.set("speed", rate);
@@ -956,6 +1217,12 @@ impl Player {
         let Some(track) = pb.media.audio.iter().find(|a| a.index == index) else { return };
         tracks::remember_audio(pb, track, &mut self.prefs);
         self.audio = Some(index);
+        self.share_tracks(true);
+        self.apply_audio();
+    }
+
+    fn apply_audio(&mut self) {
+        let Some(index) = self.audio else { return };
         match self.source {
             Source::Direct => {
                 if let (Some(engine), Some(id)) = (&self.engine, self.mpv_audio(index)) {
@@ -967,6 +1234,25 @@ impl Player {
         }
     }
 
+    /// In a room, changes its tracks for everyone, or, when someone else holds the controls, goes
+    /// our own way.
+    fn share_tracks(&mut self, audio: bool) {
+        let Some(room) = &mut self.room else { return };
+        if !room.can_control() {
+            if audio {
+                room.own_audio = true;
+            } else {
+                room.own_subtitle = true;
+            }
+            return;
+        }
+        room.own_audio = false;
+        room.own_subtitle = false;
+        if let Some(pb) = &self.pb {
+            room.client.set_tracks(SharedTracks::of(pb, self.audio, self.subtitle.as_deref()));
+        }
+    }
+
     fn choose_subtitle(&mut self, id: Option<String>, effects: &mut Vec<Effect>) {
         let Some(pb) = &self.pb else { return };
         let track = id.as_ref().and_then(|id| pb.media.subtitles.iter().find(|s| &s.id == id));
@@ -975,6 +1261,7 @@ impl Player {
         }
         tracks::remember_subtitle(pb, track, &mut self.prefs);
         self.subtitle = id;
+        self.share_tracks(false);
         self.load_subtitle(effects);
         self.apply_subtitle();
     }
@@ -1032,7 +1319,12 @@ impl Player {
     pub fn save(&mut self, effects: &mut Vec<Effect>) {
         self.last_save = Instant::now();
         let duration = self.duration();
-        if self.clipping.is_some() || duration <= 0.0 || self.time < 1.0 || !self.started {
+        if self.clipping.is_some()
+            || duration <= 0.0
+            || self.time < 1.0
+            || !self.started
+            || self.room.as_ref().is_some_and(|room| !room.signed_in)
+        {
             return;
         }
         let (api, video_id, position) = (self.api.clone(), self.id, self.time);
@@ -1110,6 +1402,9 @@ impl Player {
         if self.menu.is_some() {
             return matches!(key, Key::Named(key::Named::Escape)).then_some(Message::Menu(None));
         }
+        if self.room.as_ref().is_some_and(|room| room.panel) && matches!(key, Key::Named(key::Named::Escape)) {
+            return Some(Message::Room(room::Message::Panel(false)));
+        }
         let pb = self.pb.as_ref();
         let message = match (key.as_ref(), modified.as_ref()) {
             (Key::Named(key::Named::Space), _) | (Key::Character("k" | "K"), _) => Message::Toggle,
@@ -1142,8 +1437,8 @@ impl Player {
             (_, Key::Character(">")) => Message::Rate(self.rate + 0.25),
             (_, Key::Character("<")) => Message::Rate(self.rate - 0.25),
             (_, Key::Character("S")) if self.can_clip => Message::Screenshot,
-            (Key::Character("x" | "X"), _) if self.can_clip => Message::MakeClip,
-            (Key::Character("p" | "P"), _) => Message::PictureInPicture,
+            (Key::Character("x" | "X"), _) if self.can_clip && self.room.is_none() => Message::MakeClip,
+            (Key::Character("p" | "P"), _) if self.room.is_none() => Message::PictureInPicture,
             (Key::Character("f" | "F"), _) => Message::Fullscreen,
             (Key::Character("n" | "N"), _) if pb.is_some_and(|pb| pb.next.is_some()) => {
                 Message::Go(pb.and_then(|pb| pb.next.as_ref()).map(|next| next.id)?)
@@ -1253,6 +1548,7 @@ pub(crate) mod tests {
             Api::new("http://127.0.0.1/".parse().unwrap(), None).unwrap(),
             None,
             Prefs::default(),
+            None,
             &mut Vec::new(),
         );
         player.error = None;
@@ -1289,7 +1585,7 @@ pub(crate) mod tests {
     pub(crate) fn live_player(api: Api, id: i64, runtime: tokio::runtime::Handle, effects: &mut Vec<Effect>) -> Player {
         let mut prefs = Prefs::default();
         prefs.set("volume", "0");
-        Player::create(1, id, Some(1.0), api, Some(runtime), prefs, effects)
+        Player::create(1, id, Some(1.0), api, Some(runtime), prefs, None, effects)
     }
 
     #[test]

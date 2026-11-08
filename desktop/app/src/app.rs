@@ -39,6 +39,11 @@ pub struct App {
     pub transition: Option<(Instant, Route)>,
     /// The video playing, while a `/watch` route is open.
     pub player: Option<crate::player::Player>,
+    /// The watch-together room, while a `/together` route is open.
+    pub together: Option<crate::together::Together>,
+    /// A room link to join once saved servers are known.
+    pub pending_join: Option<(url::Url, String)>,
+    rooms: u64,
     pub local_file: Option<std::path::PathBuf>,
     pub local_video: Option<crate::player::local::Viewer>,
     players: u64,
@@ -74,6 +79,8 @@ pub enum Message {
     ReducedMotion(bool),
     /// For the player with this serial.
     Player(u64, crate::player::Message),
+    /// For the room with this serial.
+    Together(u64, crate::together::Message),
     LocalVideo(crate::player::local::Message),
     Browsing(u64, crate::browsing::Message),
 }
@@ -95,6 +102,7 @@ pub enum Effect {
     PipWindow(chrome::Action),
     /// Starts something that sends messages for as long as it likes, like mpv's events.
     Listen(Box<dyn FnOnce(Sender) + Send>),
+    Copy(String),
 }
 
 pub const SCROLL: &str = "page";
@@ -115,6 +123,9 @@ impl App {
             reduce_motion: false,
             transition: None,
             player: None,
+            together: None,
+            pending_join: None,
+            rooms: 0,
             local_file: None,
             local_video: None,
             players: 0,
@@ -128,6 +139,11 @@ impl App {
     pub fn update(&mut self, message: Message, effects: &mut Vec<Effect>) {
         self.browsing.reduce_motion = self.session.look().reduce_motion;
         self.handle(message, effects);
+        if self.session.loaded()
+            && let Some((server, code)) = self.pending_join.take()
+        {
+            self.join_room(server, code, effects);
+        }
         self.follow_route(effects);
         if self.session.screen == crate::session::Screen::Ready
             && let Some(api) = self.session.api.clone()
@@ -183,6 +199,13 @@ impl App {
                         }
                     },
                 }
+            },
+            Message::Together(serial, message) => {
+                let Some(together) = self.together.as_mut().filter(|together| together.serial == serial) else {
+                    return;
+                };
+                together.update(message, effects);
+                self.follow_room(effects);
             },
             Message::Player(serial, message) => {
                 if matches!(message, crate::player::Message::Saved) {
@@ -322,6 +345,27 @@ impl App {
     /// Starts the player when a video's route opens, and stops it (keeping its place) when it
     /// closes, or another video's opens.
     fn follow_route(&mut self, effects: &mut Vec<Effect>) {
+        if let Route::Together(code) = &self.history.current().route {
+            if self.player.as_ref().is_some_and(|player| player.room.is_none())
+                && let Some(mut player) = self.player.take()
+            {
+                player.save(effects);
+            }
+            if self.together.as_ref().is_none_or(|together| &together.code != code)
+                && self.session.screen == crate::session::Screen::Ready
+                && let Some(api) = self.session.api.clone()
+            {
+                self.rooms += 1;
+                self.together = Some(crate::together::Together::new(self.rooms, api, code.clone(), effects));
+            }
+            return;
+        }
+        if self.together.take().is_some()
+            && self.player.as_ref().is_some_and(|player| player.room.is_some())
+            && let Some(mut player) = self.player.take()
+        {
+            player.save(effects);
+        }
         let watching = match self.history.current().route {
             Route::Watch(id, start) if self.session.screen == crate::session::Screen::Ready => Some((id as i64, start)),
             _ => None,
@@ -353,6 +397,91 @@ impl App {
         );
         player.fullscreen = self.chrome.fullscreen;
         player.pip = keep_pip;
+        self.player = Some(player);
+    }
+
+    /// Joins the room `code` on `server`: signed in when it's the server in use, otherwise as a
+    /// guest. Links to rooms (#92) come in here.
+    pub fn join_room(&mut self, server: url::Url, code: String, effects: &mut Vec<Effect>) {
+        let same = |origin: &url::Url| {
+            if server.scheme() == "tinystream" {
+                origin.host_str() == server.host_str() && origin.port() == server.port()
+            } else {
+                origin.origin() == server.origin()
+            }
+        };
+        let api = match self.session.api.as_ref().filter(|api| same(&api.origin)) {
+            Some(api) => api.clone(),
+            None => {
+                let saved = self
+                    .session
+                    .config
+                    .servers
+                    .iter()
+                    .filter_map(|saved| url::Url::parse(&saved.url).ok())
+                    .find(|origin| same(origin));
+                let origin = match saved {
+                    Some(origin) => origin,
+                    None if server.scheme() == "tinystream" => {
+                        let Ok(origin) = url::Url::parse(&format!("https://{}/", server.authority())) else { return };
+                        origin
+                    },
+                    None => server,
+                };
+                let Ok(api) = crate::api::Api::new(origin, None) else { return };
+                api
+            },
+        };
+        self.rooms += 1;
+        self.together = Some(crate::together::Together::new(self.rooms, api, code.clone(), effects));
+        self.navigate(Route::Together(code), effects);
+    }
+
+    /// Starts the room's player for the episode it's on, again for each new one, and keeps it
+    /// up to date with the room.
+    fn follow_room(&mut self, effects: &mut Vec<Effect>) {
+        let Some(together) = &mut self.together else { return };
+        let Some(state) = together.snap.room.as_ref() else { return };
+        let media_id = state.media_id;
+        if together.snap.ended {
+            // Whoever ended it carries on alone, right where they were.
+            if together.is_host() {
+                let at = self.player.as_ref().map(|player| player.time as u32);
+                self.history.replace(Route::Watch(media_id as u64, at));
+            }
+            return;
+        }
+        if self.player.as_ref().is_some_and(|player| player.room.is_none() || player.id != media_id)
+            && let Some(mut player) = self.player.take()
+        {
+            player.save(effects);
+        }
+        let snap = together.snap.clone();
+        if let Some(player) = &mut self.player {
+            player.room_changed(snap, effects);
+            return;
+        }
+        let Some(room) = together.room() else { return };
+        let api = together.api.clone();
+        let signed_in = room.signed_in;
+        let server = if signed_in { self.session.config.active.unwrap_or_default() } else { 0 };
+        let user = if signed_in {
+            self.session.config.active().and_then(|server| server.user.as_ref()).map_or(0, |user| user.id)
+        } else {
+            0
+        };
+        self.players += 1;
+        let mut player = crate::player::Player::in_room(
+            self.players,
+            media_id,
+            room,
+            api,
+            (server, user),
+            self.runtime.clone(),
+            effects,
+        );
+        player.fullscreen = self.chrome.fullscreen;
+        player.room_changed(snap, effects);
         self.player = Some(player);
     }
 
@@ -391,6 +520,8 @@ impl App {
             },
             Out::PipWindow(action) => effects.push(Effect::PipWindow(action)),
             Out::Clip(id) => self.navigate(Route::Clip(id as u64), effects),
+            Out::Together(code) => self.history.replace(Route::Together(code)),
+            Out::Copy(text) => effects.push(Effect::Copy(text)),
         }
     }
 
@@ -423,7 +554,7 @@ impl App {
         {
             return Some(Message::Browsing(self.session.generation, crate::browsing::Message::Dialog(None)));
         }
-        let watching = matches!(self.history.current().route, Route::Watch(..));
+        let watching = matches!(self.history.current().route, Route::Watch(..) | Route::Together(_));
         self.listen_in(event, status, watching)
     }
 

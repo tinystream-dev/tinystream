@@ -124,7 +124,11 @@ impl Engine {
         Self::with_config(api, runtime, config_file())
     }
 
-    fn with_config(api: Api, runtime: tokio::runtime::Handle, config: Option<PathBuf>) -> Result<Self, String> {
+    pub(super) fn with_config(
+        api: Api,
+        runtime: tokio::runtime::Handle,
+        config: Option<PathBuf>,
+    ) -> Result<Self, String> {
         let mpv = Self::configured(config)?;
         let opener = Opener::new(api, runtime);
         let open = opener.clone();
