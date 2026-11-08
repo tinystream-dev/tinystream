@@ -3455,6 +3455,8 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "url",
+ "wayland-client",
+ "wayland-protocols",
  "wgpu",
  "zbus",
 ]

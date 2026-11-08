@@ -8,6 +8,8 @@ use super::{Desktop, VideoSurface};
 use crate::chrome::ButtonLayout;
 
 mod file_picker;
+mod idle;
+mod integration;
 
 mod gpu;
 mod pip;
@@ -18,6 +20,20 @@ mod video;
 pub struct Linux;
 
 impl Desktop for Linux {
+    fn idle_inhibit(
+        window: Arc<iced_winit::winit::window::Window>,
+        runtime: tokio::runtime::Handle,
+    ) -> Option<Box<dyn super::IdleInhibit>> {
+        Some(Box::new(idle::Inhibit::new(window, runtime)))
+    }
+
+    fn integration(
+        arguments: Vec<String>,
+        send: Arc<dyn Fn(super::integration::Command) + Send + Sync>,
+    ) -> BoxFuture<'static, Result<Option<super::integration::Integration>, String>> {
+        Box::pin(integration::start(arguments, send))
+    }
+
     fn choose_image() -> BoxFuture<'static, Result<Option<std::path::PathBuf>, String>> {
         Box::pin(file_picker::image())
     }

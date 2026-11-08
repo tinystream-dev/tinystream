@@ -39,6 +39,8 @@ url = "2"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 ash = "0.38"
+wayland-client = { version = "=0.31.15", features = ["system", "dlopen"] }
+wayland-protocols = { version = "=0.32.13", features = ["client", "unstable"] }
 # Vulkan only: mpv's frames reach wgpu through Vulkan-allocated memory (#86).
 wgpu = { version = "30", default-features = false, features = ["vulkan"] }
 zbus = { version = "=5.19.0", default-features = false, features = ["tokio"] }

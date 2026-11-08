@@ -10,10 +10,30 @@ use iced_wgpu::wgpu;
 
 use crate::chrome::ButtonLayout;
 
+pub mod integration;
+
 #[cfg(target_os = "linux")]
 mod linux;
 
+pub trait IdleInhibit {
+    fn set(&mut self, active: bool);
+}
+
 pub trait Desktop {
+    fn idle_inhibit(
+        _window: Arc<iced_winit::winit::window::Window>,
+        _runtime: tokio::runtime::Handle,
+    ) -> Option<Box<dyn IdleInhibit>> {
+        None
+    }
+
+    fn integration(
+        _arguments: Vec<String>,
+        _send: std::sync::Arc<dyn Fn(integration::Command) + Send + Sync>,
+    ) -> BoxFuture<'static, Result<Option<integration::Integration>, String>> {
+        Box::pin(async { Err("Desktop services are unavailable on this platform.".into()) })
+    }
+
     fn secrets() -> crate::secrets::Store;
 
     fn choose_image() -> BoxFuture<'static, Result<Option<std::path::PathBuf>, String>> {
