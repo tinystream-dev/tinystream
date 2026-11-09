@@ -66,16 +66,31 @@ struct FoundMedia {
 struct Walk {
     items: Vec<FoundItem>,
     skipped: Vec<(PathBuf, String)>,
+    failures: Vec<PathBuf>,
 }
 
 impl Walk {
+    fn unreadable(&mut self, path: &Path) {
+        self.failures.push(path.to_path_buf());
+        self.skip(path, "incomplete scan: can't read this folder or entry; existing catalog kept");
+    }
+
+    fn ensure_complete(&self) -> anyhow::Result<()> {
+        anyhow::ensure!(
+            self.failures.is_empty(),
+            "incomplete scan; keeping the existing catalog because these paths could not be read: {}",
+            self.failures.iter().map(|p| p.display().to_string()).collect::<Vec<_>>().join(", ")
+        );
+        Ok(())
+    }
+
     fn skip(&mut self, path: &Path, reason: impl Into<String>) {
         self.skipped.push((path.to_path_buf(), reason.into()));
     }
 }
 
 fn sorted_entries(dir: &Path) -> std::io::Result<Vec<std::fs::DirEntry>> {
-    let mut entries: Vec<_> = std::fs::read_dir(dir)?.filter_map(Result::ok).collect();
+    let mut entries: Vec<_> = std::fs::read_dir(dir)?.collect::<std::io::Result<Vec<_>>>()?;
     entries.sort_by_key(|e| e.file_name());
     Ok(entries)
 }
@@ -118,7 +133,14 @@ fn walk(root: &Path, download_dirs: &[PathBuf]) -> std::io::Result<Walk> {
             continue;
         }
 
-        let Ok(ft) = entry.file_type() else { continue };
+        let Ok(ft) = entry.file_type() else {
+            walk.unreadable(&path);
+            continue;
+        };
+        if ft.is_symlink() && std::fs::metadata(&path).is_err() {
+            walk.unreadable(&path);
+            continue;
+        }
         let is_dir = ft.is_dir() || (ft.is_symlink() && path.is_dir());
 
         if !is_dir {
@@ -137,7 +159,7 @@ fn walk(root: &Path, download_dirs: &[PathBuf]) -> std::io::Result<Walk> {
 
 fn walk_title_folder(dir: &Path, walk: &mut Walk) {
     let Ok(entries) = sorted_entries(dir) else {
-        return walk.skip(dir, "can't read this folder (permissions?)");
+        return walk.unreadable(dir);
     };
 
     let name = dir.file_name().unwrap_or_default().to_string_lossy().to_string();
@@ -248,7 +270,7 @@ fn walk_season_folder(
     walk: &mut Walk,
 ) {
     let Ok(entries) = sorted_entries(dir) else {
-        return walk.skip(dir, "can't read this folder (permissions?)");
+        return walk.unreadable(dir);
     };
 
     for entry in entries {
@@ -326,7 +348,7 @@ fn walk_season_folder(
 
 fn walk_extras(dir: &Path, season: u32, media: &mut Vec<FoundMedia>, walk: &mut Walk) {
     let Ok(entries) = sorted_entries(dir) else {
-        return walk.skip(dir, "can't read this folder (permissions?)");
+        return walk.unreadable(dir);
     };
 
     for entry in entries {
@@ -412,6 +434,24 @@ async fn scan_library(state: &Arc<AppState>, name: &str) -> anyhow::Result<()> {
         tokio::task::spawn_blocking(move || walk(&root, &download_dirs)).await??
     };
 
+    if let Err(error) = walk.ensure_complete() {
+        for path in &walk.failures {
+            sqlx::query("INSERT OR REPLACE INTO skipped (path, library, reason, seen_at) VALUES (?, ?, ?, ?)")
+                .bind(path.to_string_lossy().as_ref())
+                .bind(name)
+                .bind("incomplete scan: path could not be read; existing catalog kept")
+                .bind(now())
+                .execute(&state.db)
+                .await?;
+        }
+        state.events.send(Event::ScanFinished {
+            library: name.to_string(),
+            items: walk.items.len(),
+            media: 0,
+            skipped: walk.skipped.len(),
+        });
+        return Err(error);
+    }
     let db = &state.db;
 
     let existing: i64 =
@@ -775,6 +815,23 @@ mod tests {
         fn drop(&mut self) {
             let _ = std::fs::remove_dir_all(&self.0);
         }
+    }
+
+    #[test]
+    fn unreadable_regions_make_the_scan_non_authoritative() {
+        let library = Library::new(&["Good/Season 01/Good S01E01.mkv"]);
+        for season in [false, true] {
+            let mut scan = library.scan();
+            let missing = library.0.join("Unavailable");
+            if season {
+                walk_season_folder(&missing, 2, &mut Vec::new(), &mut HashMap::new(), &mut scan);
+            } else {
+                walk_title_folder(&missing, &mut scan);
+            }
+            assert_eq!(scan.items.len(), 1);
+            assert!(scan.ensure_complete().unwrap_err().to_string().contains("keeping the existing catalog"));
+        }
+        assert!(library.scan().ensure_complete().is_ok());
     }
 
     #[test]
