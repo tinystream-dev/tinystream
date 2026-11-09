@@ -40,6 +40,11 @@ pub trait Desktop {
         Box::pin(async { Err("Choosing artwork is not supported on this platform.".into()) })
     }
 
+    /// Asks where to save a file called `name`; `None` when the person cancelled.
+    fn save_file(_name: String, _title: String) -> BoxFuture<'static, Result<Option<std::path::PathBuf>, String>> {
+        Box::pin(async { Err("Saving files is not supported on this platform.".into()) })
+    }
+
     fn picture_in_picture_attributes() -> iced_winit::winit::window::WindowAttributes {
         pip_attributes()
     }

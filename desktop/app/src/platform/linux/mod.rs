@@ -38,6 +38,10 @@ impl Desktop for Linux {
         Box::pin(file_picker::image())
     }
 
+    fn save_file(name: String, title: String) -> BoxFuture<'static, Result<Option<std::path::PathBuf>, String>> {
+        Box::pin(file_picker::save(name, title))
+    }
+
     fn secrets() -> crate::secrets::Store {
         std::sync::Arc::new(secrets::LinuxSecrets::default())
     }

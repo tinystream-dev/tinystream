@@ -109,12 +109,21 @@ impl Api {
         self.get(&self.streams, path)
     }
 
+    /// Like [`Api::media`], for only what the server would send about it.
+    pub fn head(&self, path: &str) -> Result<reqwest::RequestBuilder, Error> {
+        self.at(&self.http, reqwest::Method::HEAD, path)
+    }
+
     fn get(&self, client: &Client, path: &str) -> Result<reqwest::RequestBuilder, Error> {
+        self.at(client, reqwest::Method::GET, path)
+    }
+
+    fn at(&self, client: &Client, method: reqwest::Method, path: &str) -> Result<reqwest::RequestBuilder, Error> {
         let url = self.origin.join(path).map_err(|_| Error::message("Invalid media address."))?;
         if url.origin() != self.origin.origin() {
             return Err(Error::message("Invalid media address."));
         }
-        let request = client.get(url);
+        let request = client.request(method, url);
         Ok(match &self.token {
             Some(token) => request.bearer_auth(&token.0),
             None => request,
