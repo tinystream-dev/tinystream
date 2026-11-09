@@ -622,6 +622,20 @@ fn media_view<'a>(app: &'a App, open: &'a Open, c: &'a Clip, look: &Look) -> Vie
     {
         let id = open.id;
         let generation = app.session.generation;
+        if player.pip {
+            return frame(
+                container(
+                    button("Return from picture in picture", look)
+                        .on_press(AppMessage::Clips(
+                            generation,
+                            Message::Player(id, crate::player::clip_player::Message::PictureInPicture),
+                        ))
+                        .boxed(),
+                )
+                .center(Fill)
+                .boxed(),
+            );
+        }
         let poster = c.poster.as_deref().and_then(|p| app.browsing.images.get(p));
         let view = player
             .view(poster, app.chrome.fullscreen, look)
@@ -782,7 +796,7 @@ fn send_to<'a>(app: &'a App, open: &'a Open, look: &Look) -> View<'a> {
 
 /// The open clip's player filling the window, while it's full screen.
 pub fn expanded<'a>(app: &'a App, look: &Look) -> Option<View<'a>> {
-    if !app.clips.expanded || !matches!(app.history.current().route, Route::Clip(_)) {
+    if app.clips.pip() || !app.clips.expanded || !matches!(app.history.current().route, Route::Clip(_)) {
         return None;
     }
     let open = app.clips.open.as_ref()?;

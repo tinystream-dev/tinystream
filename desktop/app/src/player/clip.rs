@@ -81,6 +81,7 @@ pub struct Editor {
     pub(super) key: u64,
     /// Where playback was when the editor opened, to go back to.
     pub at: f64,
+    still: Option<(String, std::time::Instant, bool)>,
     quality: Quality,
     audio_before: Option<i64>,
     subtitle_before: Option<String>,
@@ -129,6 +130,7 @@ impl Editor {
         Self {
             key,
             at: player.time,
+            still: None,
             quality: player.quality,
             audio_before: player.audio,
             subtitle_before: player.subtitle.clone(),
@@ -207,13 +209,19 @@ impl Player {
         if !self.can_clip || self.pb.is_none() || self.clipping.is_some() {
             return;
         }
-        self.set_playing(Some(false));
+        if let Some(room) = &self.room {
+            room.client.detach();
+        }
         self.save(effects);
         self.shots += 1;
         let key = self.shots;
         let editor = Editor::new(self, key, changing);
         let (audio, subtitle) = (editor.audio, editor.subtitle.clone());
         self.clipping = Some(editor);
+        self.set_playing(Some(false));
+        if let Some(engine) = &self.engine {
+            engine.set("speed", 1.0);
+        }
         self.preview_tracks(audio, subtitle, effects);
         self.menu = None;
         self.rested = None;
@@ -632,13 +640,63 @@ impl Player {
             self.apply_subtitle();
         }
         self.quality = editor.quality;
-        self.play_from(editor.at, true);
+        if self.room.is_some() {
+            self.play_from(self.room.as_ref().unwrap().client.target(), true);
+            self.attach(effects);
+            if let Some(snap) = self.room.as_ref().map(|r| r.snap.clone()) {
+                self.room_changed(snap, effects);
+            }
+        } else {
+            self.play_from(editor.at, true);
+        }
         self.poke();
     }
 
     /// The clip sent off from the editor, while its render is being followed.
     pub fn rendering(&self) -> Option<i64> {
         self.clipping.as_ref()?.made.as_ref().map(|made| made.id)
+    }
+
+    pub fn accepts_still(&self, path: &str) -> bool {
+        !path.starts_with("api/clips/still/")
+            || self.clipping.as_ref().and_then(|e| e.still.as_ref()).is_some_and(|s| s.0 == path)
+    }
+
+    pub fn clip_still(&mut self, effects: &mut Vec<Effect>) {
+        let track = self
+            .clipping
+            .as_ref()
+            .and_then(|e| e.subtitle.as_ref())
+            .and_then(|id| self.pb.as_ref()?.media.subtitles.iter().find(|t| &t.id == id))
+            .filter(|t| super::tracks::bitmap(t));
+        let path = if !self.playing {
+            track.map(|t| {
+                let mut q = url::form_urlencoded::Serializer::new(String::new());
+                q.append_pair("at", &format!("{:.2}", self.time)).append_pair("subtitles", &t.id);
+                if let Some(room) = self.room() {
+                    q.append_pair("room", room);
+                }
+                format!("api/clips/still/{}?{}", self.id, q.finish())
+            })
+        } else {
+            None
+        };
+        let Some(editor) = &mut self.clipping else { return };
+        let Some(path) = path else {
+            editor.still = None;
+            return;
+        };
+        if editor.still.as_ref().is_none_or(|s| s.0 != path) {
+            editor.still = Some((path, std::time::Instant::now(), false));
+            return;
+        }
+        let still = editor.still.as_mut().unwrap();
+        if !still.2 && still.1.elapsed() >= std::time::Duration::from_millis(250) {
+            still.2 = true;
+            let path = still.0.clone();
+            self.pictures.retain(|p, _| !p.starts_with("api/clips/still/"));
+            self.picture(path, effects);
+        }
     }
 
     pub fn tick_clip(&mut self) {
@@ -728,6 +786,17 @@ fn editing<'a>(player: &'a Player, editor: &'a Editor, look: &Look) -> Element<'
     let mut stage: Vec<Element<'a, super::Message>> = Vec::new();
     if let Some(screen) = &player.screen {
         stage.push(iced_widget::mouse_area(video(screen, player.aspect)).on_press(msg(Message::Play)).boxed());
+    }
+    if let Some((path, _, _)) = &editor.still
+        && let Some(handle) = player.pictures.get(path)
+    {
+        stage.push(
+            iced_widget::image(handle.clone())
+                .width(Fill)
+                .height(Fill)
+                .content_fit(iced_core::ContentFit::Contain)
+                .boxed(),
+        );
     }
     let failure = player.failure();
     if player.waiting && failure.is_none() {
@@ -1166,6 +1235,38 @@ mod tests {
     use crate::app::Message as AppMessage;
     use crate::player::Message as PlayerMessage;
     use crate::player::tests::player;
+
+    #[test]
+    fn image_subtitle_stills_follow_only_the_current_paused_frame() {
+        let mut player = player();
+        player.can_clip = true;
+        player.start_clip(&mut Vec::new());
+        let path = "api/clips/still/1?at=12.00&subtitles=s3";
+        player.clipping.as_mut().unwrap().still = Some((path.into(), std::time::Instant::now(), true));
+        assert!(player.accepts_still(path));
+        assert!(!player.accepts_still("api/clips/still/1?at=11.00&subtitles=s3"));
+        player.clipping = None;
+        assert!(!player.accepts_still(path));
+    }
+
+    #[test]
+    fn room_editor_playback_is_local_and_close_rejoins_the_room() {
+        let mut player = player();
+        let client = super::super::sync::SyncClient::new("test".into(), None);
+        player.room =
+            Some(super::super::room::Room::new(client, "test".into(), String::new(), true, false, false, false));
+        player.can_clip = true;
+        player.previews_failed = true;
+        player.start_clip(&mut Vec::new());
+        assert!(player.clipping.is_some());
+        player.seek(12.0);
+        assert_eq!(player.time, 12.0);
+        assert!(player.set_playing(Some(true)));
+        player.close_clip(&mut Vec::new());
+        assert!(player.clipping.is_none());
+        assert!(player.room.is_some());
+        assert_eq!(player.time, player.room.as_ref().unwrap().client.target());
+    }
 
     async fn settle(player: &mut Player, effects: &mut Vec<Effect>) -> Vec<Out> {
         let mut outs = Vec::new();

@@ -40,12 +40,14 @@ pub enum Message {
     VolumeHover(bool),
     Poke,
     Fullscreen,
+    PictureInPicture,
 }
 
 /// What the clip player asks of whatever holds it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Out {
     Fullscreen,
+    PictureInPicture,
 }
 
 pub struct ClipPlayer {
@@ -53,6 +55,7 @@ pub struct ClipPlayer {
     screen: Option<Arc<Screen>>,
     /// Where the volume is remembered; a preview that starts muted leaves it alone.
     prefs: Option<Prefs>,
+    pub pip: bool,
     pub playing: bool,
     pub time: f64,
     pub duration: f64,
@@ -91,6 +94,7 @@ impl ClipPlayer {
             error: engine.is_none().then(|| "the video player couldn't start".to_owned()),
             engine,
             prefs: (!muted).then_some(prefs),
+            pip: false,
             playing: true,
             time: 0.0,
             duration: 0.0,
@@ -195,6 +199,10 @@ impl ClipPlayer {
             Message::VolumeHover(open) => self.volume_open = open,
             Message::Poke => self.poke(),
             Message::Fullscreen => return Some(Out::Fullscreen),
+            Message::PictureInPicture => {
+                self.pip = !self.pip;
+                return Some(Out::PictureInPicture);
+            },
         }
         None
     }
@@ -260,6 +268,7 @@ impl ClipPlayer {
                 Message::Mute
             },
             Key::Character("f" | "F") => Message::Fullscreen,
+            Key::Character("p" | "P") if self.prefs.is_some() => Message::PictureInPicture,
             _ => return None,
         };
         self.poke();
@@ -272,7 +281,7 @@ impl ClipPlayer {
         let l = *look;
         let mut layers: Vec<Element<'a, Message>> = Vec::new();
         if let Some(screen) = &self.screen {
-            layers.push(video(screen, self.aspect).boxed());
+            layers.push(video(screen, self.aspect).radius(12.0).boxed());
         }
         if !self.started
             && let Some(poster) = poster
@@ -358,6 +367,14 @@ impl ClipPlayer {
             .padding(Padding { left: 8.0, ..Padding::ZERO }),
             space().width(Fill),
             chrome_button(
+                (Icon::Minimize, 20.0, false),
+                "Picture in picture (p)",
+                self.prefs.as_ref().map(|_| Message::PictureInPicture),
+                false,
+                1.0,
+                look
+            ),
+            chrome_button(
                 (if fullscreen { Icon::Minimize } else { Icon::Maximize }, 20.0, false),
                 if fullscreen { "Exit full screen (f)" } else { "Full screen (f)" },
                 Some(Message::Fullscreen),
@@ -404,6 +421,18 @@ mod tests {
         );
         player.error = None;
         player
+    }
+
+    #[test]
+    fn picture_in_picture_keeps_playback_position_and_returns() {
+        let mut player = clip_player();
+        player.time = 4.25;
+        assert_eq!(player.update(Message::PictureInPicture), Some(Out::PictureInPicture));
+        assert!(player.pip);
+        assert_eq!(player.time, 4.25);
+        assert_eq!(player.update(Message::PictureInPicture), Some(Out::PictureInPicture));
+        assert!(!player.pip);
+        assert!(player.playing);
     }
 
     #[test]

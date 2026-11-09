@@ -696,14 +696,16 @@ impl Player {
                 }
             },
             Message::Rebuild(at) => {
-                if self.room.is_some() {
+                if self.room.is_some() && self.clipping.is_none() {
                     self.play_from(at, !self.playing);
                 }
             },
             Message::Mpv(update) => return self.mpv(update, effects),
             Message::Tick => return self.tick(effects),
             Message::Picture(path, handle) => {
-                if let Some(handle) = handle {
+                if let Some(handle) = handle
+                    && self.accepts_still(&path)
+                {
                     self.pictures.insert(path, handle);
                 }
             },
@@ -940,6 +942,7 @@ impl Player {
 
     fn tick(&mut self, effects: &mut Vec<Effect>) -> Option<Out> {
         self.tick_clip();
+        self.clip_still(effects);
         if let Some(room) = &mut self.room {
             room.tick();
         }
@@ -1091,6 +1094,9 @@ impl Player {
     pub fn room_changed(&mut self, snap: sync::Snapshot, effects: &mut Vec<Effect>) {
         let Some(room) = &mut self.room else { return };
         room.changed(snap);
+        if self.clipping.is_some() {
+            return;
+        }
         let Some(state) = &room.snap.room else { return };
         self.rate = state.clock.rate;
         let (own_audio, own_subtitle) = (room.own_audio, room.own_subtitle);
@@ -1219,7 +1225,9 @@ impl Player {
 
     /// Plays or pauses (toggles with `None`); returns whether it's now playing.
     fn set_playing(&mut self, play: Option<bool>) -> bool {
-        if let Some(room) = &self.room {
+        if let Some(room) = &self.room
+            && self.clipping.is_none()
+        {
             let Some(paused) = room.snap.room.as_ref().map(|state| state.clock.paused) else { return self.playing };
             let client = room.client.clone();
             if self.held() {
@@ -1248,7 +1256,9 @@ impl Player {
         let duration = self.duration();
         let to = to.max(0.0).min(if duration > 0.0 { duration } else { f64::INFINITY });
         self.poke();
-        if let Some(room) = &self.room {
+        if let Some(room) = &self.room
+            && self.clipping.is_none()
+        {
             let client = room.client.clone();
             if !self.held() {
                 self.time = to;
@@ -1532,7 +1542,7 @@ impl Player {
             (_, Key::Character(">")) => Message::Rate(self.rate + 0.25),
             (_, Key::Character("<")) => Message::Rate(self.rate - 0.25),
             (_, Key::Character("S")) if self.can_clip => Message::Screenshot,
-            (Key::Character("x" | "X"), _) if self.can_clip && self.room.is_none() => Message::MakeClip,
+            (Key::Character("x" | "X"), _) if self.can_clip => Message::MakeClip,
             (Key::Character("p" | "P"), _) if self.room.is_none() => Message::PictureInPicture,
             (Key::Character("f" | "F"), _) => Message::Fullscreen,
             (Key::Character("n" | "N"), _) if pb.is_some_and(|pb| pb.next.is_some()) => {

@@ -196,6 +196,8 @@ pub enum Message {
     Downloaded(Result<Option<PathBuf>, String>),
     Player(i64, clip_player::Message),
     Retry,
+    PipWindow(crate::chrome::Action),
+    Rendering(Result<Arc<List>, api::Error>),
     Open(i64),
     Close,
 }
@@ -211,6 +213,8 @@ pub enum Out {
     /// Put this on the clipboard, saying so with a toast.
     Copy(String, String, Option<String>),
     Fullscreen,
+    PictureInPicture(bool),
+    PipWindow(crate::chrome::Action),
     Navigate(Route),
 }
 
@@ -230,9 +234,16 @@ pub struct Clips {
     /// Where public links point: the server's public address, or the one we reach it at.
     origin: String,
     serial: u64,
+    pub rendering: Vec<Clip>,
+    rendering_pending: bool,
+    rendering_at: Option<std::time::Instant>,
 }
 
 impl Clips {
+    pub fn pip(&self) -> bool {
+        self.open.as_ref().and_then(|o| o.player.as_ref()).is_some_and(|p| p.pip)
+    }
+
     pub fn filter(&self) -> Filter {
         (self.scope, self.kind, self.book)
     }
@@ -281,6 +292,23 @@ impl Clips {
     pub fn follow(&mut self, generation: u64, route: &Route, context: Context<'_>, effects: &mut Vec<Effect>) {
         if generation != self.generation {
             *self = Self { generation, ..Self::default() };
+        }
+        if !self.rendering_pending
+            && self.rendering_at.is_none_or(|at| at.elapsed() >= std::time::Duration::from_secs(10))
+        {
+            self.rendering_pending = true;
+            self.rendering_at = Some(std::time::Instant::now());
+            let api = context.api.clone();
+            effects.push(Effect::Request(Box::pin(async move {
+                AppMessage::Clips(
+                    generation,
+                    Message::Rendering(
+                        call::<api::ClipsList, List>(&api, json!({"scope":"RENDERING","kind":null,"book":null}))
+                            .await
+                            .map(Arc::new),
+                    ),
+                )
+            })));
         }
         let id = match route {
             Route::Clip(id) => Some(*id as i64),
@@ -361,11 +389,23 @@ impl Clips {
         match live {
             api::Live::Connected => {
                 self.invalidate();
+                self.rendering_at = None;
                 self.people.dirty = true;
             },
             api::Live::Event(event) => match &event.events {
                 E::ClipChanged(change) => {
                     let rendering = matches!(change.state, Some(api::events::ClipState::RENDERING));
+                    if rendering {
+                        if let Some(clip) = self.rendering.iter_mut().find(|c| c.id == change.clip_id) {
+                            clip.state = "RENDERING".into();
+                            clip.progress = change.progress;
+                        } else {
+                            self.rendering_at = None;
+                        }
+                    } else {
+                        self.rendering.retain(|c| c.id != change.clip_id);
+                        self.rendering_at = None;
+                    }
                     self.changed(change.clip_id, change.progress.filter(|_| rendering));
                 },
                 E::ConfigChanged(_) => self.invalidate(),
@@ -425,6 +465,14 @@ impl Clips {
 
     pub fn update(&mut self, message: Message, api: &Api, effects: &mut Vec<Effect>) -> Option<Out> {
         match message {
+            Message::PipWindow(action) => return Some(Out::PipWindow(action)),
+            Message::Rendering(result) => {
+                self.rendering_pending = false;
+                if let Ok(list) = result {
+                    self.rendering =
+                        list.clips.iter().filter(|c| c.state == "RENDERING" || c.state == "QUEUED").cloned().collect();
+                }
+            },
             Message::Scope(scope) => self.scope = scope,
             Message::Kind(kind) => self.kind = kind,
             Message::AllQuotes => {
@@ -545,8 +593,10 @@ impl Clips {
             Message::Downloaded(result) => return downloaded(result),
             Message::Player(id, message) => {
                 let player = self.open.as_mut().filter(|open| open.id == id)?.player.as_mut()?;
-                if player.update(message) == Some(clip_player::Out::Fullscreen) {
-                    return Some(Out::Fullscreen);
+                match player.update(message) {
+                    Some(clip_player::Out::Fullscreen) => return Some(Out::Fullscreen),
+                    Some(clip_player::Out::PictureInPicture) => return Some(Out::PictureInPicture(player.pip)),
+                    None => {},
                 }
             },
         }
@@ -805,6 +855,20 @@ mod render_tests {
             self.lists.insert(filter, Entry { data: Some(Arc::new(list)), ..Entry::default() });
             self.shown = Some(filter);
         }
+    }
+
+    #[test]
+    fn rendering_inbox_refreshes_and_keeps_only_pending_clips() {
+        let mut clips = Clips::default();
+        let api = Api::new("http://127.0.0.1/".parse().unwrap(), None).unwrap();
+        let list: List = serde_json::from_value(
+            json!({"clips":[{"id":1,"state":"RENDERING"},{"id":2,"state":"QUEUED"},{"id":3,"state":"READY"}]}),
+        )
+        .unwrap();
+        clips.update(Message::Rendering(Ok(Arc::new(list))), &api, &mut Vec::new());
+        assert_eq!(clips.rendering.iter().map(|c| c.id).collect::<Vec<_>>(), vec![1, 2]);
+        clips.update(Message::Rendering(Ok(Arc::new(List::default()))), &api, &mut Vec::new());
+        assert!(clips.rendering.is_empty());
     }
 
     fn clip(id: i64, extra: Value) -> Value {

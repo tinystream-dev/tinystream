@@ -221,6 +221,20 @@ pub fn notifications<'a>(app: &'a App, look: &Look) -> View<'a> {
     let inbox = b.data(&Key::Inbox).and_then(|d| d.notifications.as_ref());
     let unread = inbox.map_or(0, |i| i.unread);
     let mut items = Column::<View<'a>>::new().spacing(2);
+    for clip in &app.clips.rendering {
+        let title = if clip.name.is_empty() { &clip.source.name } else { &clip.name };
+        let label = if clip.state == "RENDERING" {
+            format!("{} · Rendering {:.0}%", title, clip.progress.unwrap_or(0.0) * 100.0)
+        } else {
+            format!("{} · Queued", title)
+        };
+        items = items.push(
+            button(label, look)
+                .plain()
+                .on_press(crate::app::Message::Clips(app.session.generation, crate::clips::Message::Open(clip.id)))
+                .boxed(),
+        );
+    }
     if let Some(i) = inbox {
         for fresh in [true, false] {
             if i.items.iter().any(|n| n.read_at.is_none()) && i.items.iter().any(|n| n.read_at.is_some()) {
@@ -256,7 +270,7 @@ pub fn notifications<'a>(app: &'a App, look: &Look) -> View<'a> {
                 );
             }
         }
-        if i.items.is_empty() {
+        if i.items.is_empty() && app.clips.rendering.is_empty() {
             items = items.push((layout::empty("Nothing yet", None, look)).boxed());
         }
     } else {

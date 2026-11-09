@@ -264,7 +264,7 @@ impl App {
                 if generation != self.session.generation {
                     return;
                 }
-                let unauthorized = matches!(&message, crate::clips::Message::Listed(_, _, Err(e)) | crate::clips::Message::Fetched(_, _, Err(e)) | crate::clips::Message::Changed(_, _, Err(e)) if e.unauthorized);
+                let unauthorized = matches!(&message, crate::clips::Message::Rendering(Err(e)) | crate::clips::Message::Listed(_, _, Err(e)) | crate::clips::Message::Fetched(_, _, Err(e)) | crate::clips::Message::Changed(_, _, Err(e)) if e.unauthorized);
                 if unauthorized {
                     self.handle(
                         Message::Session(crate::session::Message::Live(generation, crate::api::Live::Unauthorized)),
@@ -839,9 +839,18 @@ impl App {
                 effects.push(Effect::Copy(text));
                 self.toast(title, body, crate::ui::overlay::Tone::Ok, effects);
             },
+            Out::PipWindow(action) => effects.push(Effect::PipWindow(action)),
+            Out::Fullscreen if self.clips.pip() => {
+                self.clips.expanded = !self.clips.expanded;
+                effects.push(Effect::PipWindow(chrome::Action::Fullscreen(self.clips.expanded)));
+            },
             Out::Fullscreen => {
                 self.clips.expanded = !self.chrome.fullscreen;
                 effects.push(Effect::Window(chrome::Action::Fullscreen(!self.chrome.fullscreen)));
+            },
+            Out::PictureInPicture(on) => {
+                self.clips.expanded = false;
+                effects.push(Effect::PictureInPicture(on));
             },
             Out::Navigate(route) => self.navigate(route, effects),
         }
@@ -919,6 +928,16 @@ impl App {
     }
 
     pub fn listen_in(&mut self, event: &Event, status: event::Status, watching: bool) -> Option<Message> {
+        if self.clips.pip()
+            && let Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. }) = event
+        {
+            let open = self.clips.open.as_mut()?;
+            return open
+                .player
+                .as_mut()?
+                .key(key, *modifiers)
+                .map(|m| Message::Clips(self.session.generation, crate::clips::Message::Player(open.id, m)));
+        }
         if let Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. }) = event
             && modifiers.control()
             && matches!(key.as_ref(), keyboard::Key::Character("q" | "Q"))

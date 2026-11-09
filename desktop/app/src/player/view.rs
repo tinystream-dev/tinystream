@@ -482,7 +482,7 @@ fn controls<'a>(player: &'a Player, alpha: f32, look: &Look) -> Element<'a, Mess
             look,
         ));
     }
-    if player.can_clip && pb.is_some() && player.room.is_none() {
+    if player.can_clip && pb.is_some() {
         buttons = buttons.push(chrome_button(
             (Icon::Scissors, 20.0, false),
             "Clip (x)",

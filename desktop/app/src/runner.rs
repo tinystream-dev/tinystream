@@ -386,7 +386,20 @@ impl Runner {
                                 self.pip = Some(window);
                             },
                             Err(error) => {
-                                if let Some(player) = &self.app.player {
+                                if self.app.clips.pip() {
+                                    let id = self.app.clips.open.as_ref().unwrap().id;
+                                    self.update(
+                                        event_loop,
+                                        Message::Clips(
+                                            self.app.session.generation,
+                                            crate::clips::Message::Player(
+                                                id,
+                                                crate::player::clip_player::Message::PictureInPicture,
+                                            ),
+                                        ),
+                                    );
+                                    tracing::error!("can't open clip picture in picture: {error}");
+                                } else if let Some(player) = &self.app.player {
                                     let serial = player.serial;
                                     self.update(
                                         event_loop,
@@ -474,7 +487,7 @@ impl Runner {
             }
         }
 
-        if !self.app.player.as_ref().is_some_and(|player| player.pip) {
+        if !self.app.player.as_ref().is_some_and(|player| player.pip) && !self.app.clips.pip() {
             self.pip = None;
         }
         let target = self.pip.as_ref().or(self.window.as_ref()).map(|window| window.raw.clone());
@@ -487,8 +500,11 @@ impl Runner {
             }
         }
         if let Some(inhibit) = &mut self.inhibit {
-            inhibit
-                .set(!self.app.hidden && self.app.player.as_ref().is_some_and(crate::player::Player::playback_active));
+            inhibit.set(
+                !self.app.hidden
+                    && (self.app.player.as_ref().is_some_and(crate::player::Player::playback_active)
+                        || self.app.clips.open.as_ref().and_then(|o| o.player.as_ref()).is_some_and(|p| p.playing)),
+            );
         }
         if let Some(integration) = &self.integration {
             let mut media = self.app.player.as_ref().map(|player| player.desktop_media()).unwrap_or_default();
@@ -1011,7 +1027,19 @@ impl ApplicationHandler<UserEvent> for Runner {
             },
             WindowEvent::CloseRequested => {
                 if pip {
-                    if let Some(player) = &self.app.player {
+                    if self.app.clips.pip() {
+                        let id = self.app.clips.open.as_ref().unwrap().id;
+                        self.update(
+                            event_loop,
+                            Message::Clips(
+                                self.app.session.generation,
+                                crate::clips::Message::Player(
+                                    id,
+                                    crate::player::clip_player::Message::PictureInPicture,
+                                ),
+                            ),
+                        );
+                    } else if let Some(player) = &self.app.player {
                         self.update(
                             event_loop,
                             Message::Player(player.serial, crate::player::Message::PictureInPicture),
@@ -1106,6 +1134,42 @@ fn operate(
 }
 
 fn window_view(app: &App, pip: bool) -> iced_widget::Element<'_, Message> {
+    if pip && app.clips.pip() {
+        let open = app.clips.open.as_ref().unwrap();
+        let id = open.id;
+        let generation = app.session.generation;
+        let picture = open
+            .player
+            .as_ref()
+            .unwrap()
+            .view(None, app.clips.expanded, &app.session.look())
+            .map(move |m| Message::Clips(generation, crate::clips::Message::Player(id, m)))
+            .boxed();
+        let drag = iced_widget::mouse_area(
+            iced_widget::container(iced_widget::space()).width(iced_core::Length::Fill).height(20),
+        )
+        .on_press(Message::Clips(generation, crate::clips::Message::PipWindow(crate::chrome::Action::Drag)));
+        let edges = crate::chrome::Chrome::default()
+            .edges()
+            .map(move |m| {
+                Message::Clips(
+                    generation,
+                    match m {
+                        crate::chrome::Message::Resize(d) => {
+                            crate::clips::Message::PipWindow(crate::chrome::Action::Resize(d))
+                        },
+                        _ => crate::clips::Message::Player(id, crate::player::clip_player::Message::Poke),
+                    },
+                )
+            })
+            .boxed();
+        return iced_widget::Stack::with_children(vec![
+            picture,
+            iced_widget::container(drag).align_top(iced_core::Length::Fill).boxed(),
+            edges,
+        ])
+        .boxed();
+    }
     if pip && let Some(player) = &app.player {
         let serial = player.serial;
         return crate::player::pip_view(player, &app.session.look())
