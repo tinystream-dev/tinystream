@@ -428,7 +428,10 @@ export function Player({ mediaId, room, editClip, startAt }: { mediaId: number; 
     clearTimeout(idleTimer.current)
     idleTimer.current = setTimeout(() => setIdle(true), 2600)
   }, [])
-  useEffect(() => () => clearTimeout(idleTimer.current), [])
+  useEffect(() => {
+    poke()
+    return () => clearTimeout(idleTimer.current)
+  }, [poke])
 
   /** Plays or pauses (toggles without `play`); returns whether it's now playing. */
   const setPlayback = useCallback(
