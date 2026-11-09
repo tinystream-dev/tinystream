@@ -364,7 +364,7 @@ export function Player({ mediaId, room, editClip, startAt }: { mediaId: number; 
     engine.current = e
     void e.start(start).then(() => {
       if (!wasPaused) video.play().catch(() => setPlaying(false))
-    })
+    }).catch((error) => setError((error as Error).message || 'Could not set up playback'))
     return () => {
       // Until the stream has loaded, the video's own time and paused state
       // don't reflect where we meant to be, so carry the intent over instead.

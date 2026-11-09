@@ -101,15 +101,26 @@ export class StreamEngine {
 
   /** Attaches to the video and starts streaming from `start` seconds. */
   async start(start: number) {
-    const opened = new Promise<void>((resolve) => this.ms.addEventListener('sourceopen', () => resolve(), { once: true }))
-    this.video.src = this.objectUrl
-    await opened
-    if (this.destroyed) return
-    if (this.duration) this.ms.duration = this.duration
-    this.sb = this.ms.addSourceBuffer(this.streamPlan.mime)
-    this.video.addEventListener('seeking', this.onSeeking)
-    this.video.currentTime = start
-    void this.load(start)
+    try {
+      const opened = new Promise<void>((resolve) => this.ms.addEventListener('sourceopen', () => resolve(), { once: true }))
+      this.video.src = this.objectUrl
+      await opened
+      if (this.destroyed) return
+      if (this.duration) this.ms.duration = this.duration
+      this.sb = this.ms.addSourceBuffer(this.streamPlan.mime)
+      this.video.addEventListener('seeking', this.onSeeking)
+      this.video.currentTime = start
+      void this.load(start)
+    } catch (error) {
+      if (!this.destroyed) {
+        this.ctrl?.abort()
+        this.video.removeEventListener('seeking', this.onSeeking)
+        this.video.removeAttribute('src')
+        this.video.load()
+        this.listener({ loading: false, error: (error as Error).message || 'Could not set up playback' })
+      }
+      throw error
+    }
   }
 
   destroy() {
