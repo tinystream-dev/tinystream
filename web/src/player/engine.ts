@@ -261,8 +261,33 @@ export class StreamEngine {
     return `${this.base}/stream?${q}`
   }
 
+  private async read(reader: ReadableStreamDefaultReader<Uint8Array>, signal: AbortSignal) {
+    let timer: ReturnType<typeof setTimeout> | undefined
+    let abort = () => {}
+    const deadline = new Promise<never>((_, reject) => {
+      abort = () => reject(new DOMException('Stream cancelled', 'AbortError'))
+      signal.addEventListener('abort', abort, { once: true })
+      const check = () => {
+        if (this.video.paused || this.bufferedAhead() > 1) {
+          timer = setTimeout(check, READ_TIMEOUT)
+        } else {
+          const error = new Error('The stream stopped sending data. Try again or choose another quality.')
+          error.name = 'TimeoutError'
+          reject(error)
+        }
+      }
+      timer = setTimeout(check, READ_TIMEOUT)
+    })
+    try {
+      return await Promise.race([reader.read(), deadline])
+    } finally {
+      clearTimeout(timer)
+      signal.removeEventListener('abort', abort)
+    }
+  }
+
   /** (Re)starts the stream at `start`, abandoning any stream in flight. */
-  private async load(start: number) {
+  private async load(start: number, retries = 0) {
     const gen = ++this.generation
     this.activeFrom = start
     this.front = null
@@ -287,7 +312,7 @@ export class StreamEngine {
       const reader = res.body.getReader()
       // Backpressure lives in append(): while it waits, we don't read.
       while (gen === this.generation) {
-        const { done, value } = await reader.read()
+        const { done, value } = await this.read(reader, ctrl.signal)
         if (done) break
         await this.append(value, gen)
       }
@@ -302,8 +327,14 @@ export class StreamEngine {
       }
     } catch (e) {
       if (gen !== this.generation || (e as Error).name === 'AbortError') return
+      ctrl.abort()
       this.activeFrom = null
-      this.listener({ error: (e as Error).message || 'playback failed' })
+      if ((e as Error).name === 'TimeoutError' && retries < 3) {
+        await sleep(1000 * 2 ** retries)
+        if (gen === this.generation && !this.destroyed) await this.load(this.video.currentTime, retries + 1)
+        return
+      }
+      this.listener({ loading: false, error: (e as Error).message || 'playback failed' })
     }
   }
 

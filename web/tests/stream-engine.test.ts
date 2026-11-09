@@ -60,4 +60,33 @@ test('early clean EOF reports an error instead of finishing the episode', async 
   engine.destroy()
 })
 
+test('an open stream that stops sending data retries and then reports a bounded failure', async () => {
+  const timeout = globalThis.setTimeout
+  globalThis.setTimeout = ((callback: () => void, delay: number) => timeout(callback, delay >= 1000 ? 1 : delay)) as never
+  let requests = 0
+  let cancelled = 0
+  bufferEnd = 0
+  globalThis.fetch = (async (_url: unknown, init: RequestInit) => {
+    requests++
+    return new Response(new ReadableStream({
+      start(controller) { init.signal!.addEventListener('abort', () => { cancelled++; controller.error(new DOMException('cancelled', 'AbortError')) }) },
+    }))
+  }) as never
+  const errors: string[] = []
+  const engine = new StreamEngine(video(), '/media/1', 1800, plan, event => { if (event.error) errors.push(event.error) })
+  try {
+    const started = engine.start(0)
+    source.dispatchEvent(new Event('sourceopen'))
+    await started
+    for (let i = 0; i < 100 && !errors.length; i++) await new Promise(resolve => timeout(resolve, 2))
+    expect(requests).toBe(4)
+    expect(cancelled).toBe(4)
+    expect(errors[0]).toContain('stopped sending data')
+    expect(engine.exhausted()).toBe(false)
+  } finally {
+    engine.destroy()
+    globalThis.setTimeout = timeout
+  }
+})
+
 afterAll(() => { Object.assign(globalThis, original); URL.createObjectURL = originalCreate; URL.revokeObjectURL = originalRevoke })
