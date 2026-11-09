@@ -129,6 +129,26 @@ mod tests {
         }
     }
     #[test]
+    fn opus_and_seek_use_the_shared_decoder() {
+        let decoder = Sequencer::new(48000);
+        let item = Item {
+            key: "opus".into(),
+            source: Arc::new(Memory(include_bytes!("../../../../decoder/core/tests/fixtures/a.opus").to_vec())),
+            ext: "opus".into(),
+            gain: 1.0,
+            crossfade: 0.0,
+        };
+        decoder.play(vec![item], 0.1);
+        let output = decoder.read(1000);
+        assert!(!output.samples.is_empty());
+        assert!(
+            output.events.iter().any(
+                |e| matches!(e, Event::Mark { key, offset, .. } if key == "opus" && (*offset - 0.1).abs() < 0.001)
+            )
+        );
+        assert!(!output.events.iter().any(|e| matches!(e, Event::Error { .. })));
+    }
+    #[test]
     fn replacing_and_stopping_discard_old_audio_and_events() {
         let decoder = Sequencer::new(48000);
         decoder.play(vec![input("old")], 0.0);
