@@ -16,6 +16,7 @@ use crate::app::{Effect, Message as AppMessage};
 use crate::ui::video::Screen;
 
 mod clip;
+pub mod clip_player;
 mod engine;
 pub mod local;
 pub mod room;
@@ -869,6 +870,7 @@ impl Player {
             Update::Eof(false) => {},
             Update::Cached(at) => self.cached = at,
             Update::Size(width, height) => self.aspect = Some(width as f32 / height as f32),
+            Update::Duration(_) => {},
             Update::Loaded(tracks) => {
                 self.tracks = tracks;
                 self.apply_subtitle();

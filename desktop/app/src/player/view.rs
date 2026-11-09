@@ -280,7 +280,7 @@ pub fn pip_view<'a>(player: &'a Player, look: &Look) -> Element<'a, Message> {
     mouse_area(Stack::with_children(layers).width(Fill).height(Fill)).on_double_click(Message::PictureInPicture).boxed()
 }
 
-fn media_spinner<'a>(look: &Look) -> Element<'a, Message> {
+pub(super) fn media_spinner<'a, M: 'a>(look: &Look) -> Element<'a, M> {
     let mut l = *look;
     l.ink = look.media_ink.scale_alpha(0.8);
     l.line = look.media_ink.scale_alpha(0.15);
@@ -288,7 +288,7 @@ fn media_spinner<'a>(look: &Look) -> Element<'a, Message> {
 }
 
 /// A gradient from `from` at the top to `to` at the bottom (`bg-linear-to-b`).
-fn downwards(stops: &[(f32, Color)]) -> Background {
+pub(super) fn downwards(stops: &[(f32, Color)]) -> Background {
     let mut linear = Linear::new(Radians(std::f32::consts::PI));
     for &(at, color) in stops {
         linear = linear.add_stop(at, color);
@@ -297,14 +297,14 @@ fn downwards(stops: &[(f32, Color)]) -> Background {
 }
 
 /// `ChromeButton`: a 40 px square of an icon on the picture, with its label as a tip.
-fn chrome_button<'a>(
+pub(super) fn chrome_button<'a, M: Clone + 'a>(
     (glyph, size, filled): (Icon, f32, bool),
     label: &'a str,
-    message: Option<Message>,
+    message: Option<M>,
     active: bool,
     alpha: f32,
     look: &Look,
-) -> Element<'a, Message> {
+) -> Element<'a, M> {
     let ink = look.media_ink;
     let mut glyph = icon(glyph, size);
     if filled {
@@ -815,11 +815,11 @@ fn resting<'a>(
 }
 
 /// `HudView`: a quiet confirmation of what just happened.
-fn hud_view<'a>(kind: &HudKind, at: Instant, look: &Look) -> Element<'a, Message> {
+pub(super) fn hud_view<'a, M: 'a>(kind: &HudKind, at: Instant, look: &Look) -> Element<'a, M> {
     let l = *look;
     let ink = l.media_ink;
     let shade = l.media_shade;
-    let round = |content: Element<'a, Message>, size: f32, alpha: f32| -> Element<'a, Message> {
+    let round = |content: Element<'a, M>, size: f32, alpha: f32| -> Element<'a, M> {
         squircle(container(content).center(size), size / 2.0, look).round().fill(shade.scale_alpha(alpha)).boxed()
     };
     match kind {
@@ -891,7 +891,7 @@ fn hud_view<'a>(kind: &HudKind, at: Instant, look: &Look) -> Element<'a, Message
 }
 
 /// Something near the top, centred (`top-[12%]`).
-fn top_center<'a>(content: Element<'a, Message>) -> Element<'a, Message> {
+fn top_center<'a, M: 'a>(content: Element<'a, M>) -> Element<'a, M> {
     column![
         space().height(iced_core::Length::FillPortion(12)),
         container(content).center_x(Fill),

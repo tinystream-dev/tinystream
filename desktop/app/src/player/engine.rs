@@ -95,6 +95,8 @@ pub enum Update {
     Cached(f64),
     /// The picture's display size changed (`dwidth`/`dheight`).
     Size(i64, i64),
+    /// How long the file is, once it's known.
+    Duration(f64),
     /// A file is ready, with mpv's audio tracks as (mpv id, FFmpeg stream index).
     Loaded(Vec<(i64, i64)>),
     /// The first frame after loading or seeking is up.
@@ -112,6 +114,7 @@ const EOF: u64 = 5;
 const CACHED: u64 = 6;
 const WIDTH: u64 = 7;
 const HEIGHT: u64 = 8;
+const DURATION: u64 = 9;
 
 pub struct Engine {
     pub mpv: Mpv,
@@ -167,6 +170,7 @@ impl Engine {
             (CACHED, "demuxer-cache-time", Format::Double),
             (WIDTH, "dwidth", Format::Int64),
             (HEIGHT, "dheight", Format::Int64),
+            (DURATION, "duration", Format::Double),
         ] {
             mpv.observe_property(id, name, format).map_err(|error| error.to_string())?;
         }
@@ -281,6 +285,9 @@ fn listen(
                 },
                 Event::PropertyChange { id: EOF, value, .. } => send(Update::Eof(value == Value::Flag(true))),
                 Event::PropertyChange { id: CACHED, value: Value::Double(at), .. } => send(Update::Cached(at)),
+                Event::PropertyChange { id: DURATION, value: Value::Double(length), .. } => {
+                    send(Update::Duration(length))
+                },
                 Event::PropertyChange { id: WIDTH | HEIGHT, name, value, .. } => {
                     let value = if let Value::Int64(value) = value { value } else { 0 };
                     if name == "dwidth" {
