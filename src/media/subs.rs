@@ -12,12 +12,11 @@ const SIDECAR_EXTENSIONS: &[&str] = &["ass", "ssa", "srt", "vtt"];
 pub fn sidecars(video: &Path) -> Vec<SubtitleTrack> {
     sidecar_files(video)
         .into_iter()
-        .enumerate()
-        .map(|(n, (path, label))| {
+        .map(|(path, label)| {
             let ext = path.extension().and_then(|e| e.to_str()).unwrap_or_default().to_lowercase();
 
             SubtitleTrack {
-                id: format!("x{n}"),
+                id: sidecar_id(&path),
                 codec: ext,
                 language: label.split('.').find(|p| p.len() == 2 || p.len() == 3).map(str::to_string),
                 title: Some(if label.is_empty() { "External".into() } else { label.clone() }),
@@ -27,6 +26,11 @@ pub fn sidecars(video: &Path) -> Vec<SubtitleTrack> {
             }
         })
         .collect()
+}
+
+fn sidecar_id(path: &Path) -> String {
+    use sha2::{Digest, Sha256};
+    format!("x{}", hex::encode(Sha256::digest(path.file_name().unwrap_or_default().as_encoded_bytes())))
 }
 
 fn sidecar_files(video: &Path) -> Vec<(PathBuf, String)> {
@@ -46,7 +50,11 @@ fn sidecar_files(video: &Path) -> Vec<(PathBuf, String)> {
         })
         .filter_map(|p| {
             let s = p.file_stem()?.to_str()?;
-            let label = s.strip_prefix(stem)?.trim_start_matches(['.', ' ', '_', '-']).to_string();
+            let suffix = s.strip_prefix(stem)?;
+            if !suffix.is_empty() && !suffix.starts_with(['.', ' ', '_', '-']) {
+                return None;
+            }
+            let label = suffix.trim_start_matches(['.', ' ', '_', '-']).to_string();
             Some((p.clone(), label))
         })
         .collect();
@@ -56,11 +64,11 @@ fn sidecar_files(video: &Path) -> Vec<(PathBuf, String)> {
 }
 
 pub fn load(video: &Path, track: &str, cache_dir: &Path) -> anyhow::Result<String> {
-    if let Some(n) = track.strip_prefix('x') {
-        let n: usize = n.parse()?;
-
-        let (path, _) =
-            sidecar_files(video).into_iter().nth(n).ok_or_else(|| anyhow::anyhow!("no such subtitle file"))?;
+    if track.starts_with('x') {
+        let (path, _) = sidecar_files(video)
+            .into_iter()
+            .find(|(path, _)| sidecar_id(path) == track)
+            .ok_or_else(|| anyhow::anyhow!("no such subtitle file"))?;
 
         let bytes = std::fs::read(&path)?;
         let text = String::from_utf8_lossy(bytes.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(&bytes)).into_owned();
@@ -302,6 +310,24 @@ fn cues_to_ass(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sidecars_match_boundaries_and_keep_their_identity() {
+        let dir = std::env::temp_dir().join(format!("tinystream-sidecars-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let video = dir.join("Episode1.mkv");
+        std::fs::write(dir.join("Episode10.en.srt"), "wrong").unwrap();
+        std::fs::write(dir.join("Episode1Extra.srt"), "wrong").unwrap();
+        std::fs::write(dir.join("Episode1.en.srt"), "1\n00:00:01,000 --> 00:00:02,000\nEnglish\n").unwrap();
+        let tracks = sidecars(&video);
+        assert_eq!(tracks.len(), 1);
+        let id = tracks[0].id.clone();
+        std::fs::write(dir.join("Episode1.de.srt"), "German").unwrap();
+        assert!(load(&video, &id, &dir).unwrap().contains("English"));
+        std::fs::remove_file(dir.join("Episode1.en.srt")).unwrap();
+        assert!(load(&video, &id, &dir).is_err());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 
     #[test]
     fn srt() {
