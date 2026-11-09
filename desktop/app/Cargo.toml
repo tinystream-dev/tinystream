@@ -13,6 +13,8 @@ name = "tinystream-desktop"
 path = "src/main.rs"
 
 [dependencies]
+cpal = { version = "=0.17.3", default-features = false }
+tinystream-decoder-core = { path = "../../decoder/core" }
 anyhow = "1"
 dirs = "6"
 futures = "0.3"

@@ -19,4 +19,4 @@ All ten versions are not yanked and older than 30 days. Each publisher matches i
 
 The CPAL build script only reads CPAL_ASIO_DIR and emits configuration. alsa-sys probes ALSA through pkg-config; its optional bindgen feature is disabled. num-derive generates numeric trait implementations; no I/O, network access, subprocesses or obfuscation was found in the reviewed implementation. No other new crate has build-time code. Existing desktop pins remain unchanged. CPAL 0.17.3 is pinned rather than moving to the newer 0.18 line.
 
-Approval pending.
+David approved these ten versions in the implementation conversation on 2026-11-09.
