@@ -1157,3 +1157,176 @@ fn rendering<'a>(player: &'a Player, made: &'a Made, look: &Look) -> Element<'a,
     body = body.push(container(actions.wrap()).padding(Padding { top: 24.0, ..Padding::ZERO }).boxed());
     container(container(body.width(Fill)).width(Fill.max(448))).center(Fill).padding(24).boxed()
 }
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+    use crate::app::Message as AppMessage;
+    use crate::player::Message as PlayerMessage;
+    use crate::player::tests::player;
+
+    async fn settle(player: &mut Player, effects: &mut Vec<Effect>) -> Vec<Out> {
+        let mut outs = Vec::new();
+        while !effects.is_empty() {
+            for effect in std::mem::take(effects) {
+                if let Effect::Request(request) = effect
+                    && let AppMessage::Player(_, message) = request.await
+                    && let Some(super::super::Out::Clips(out)) = player.update(message, effects)
+                {
+                    outs.push(out);
+                }
+            }
+        }
+        outs
+    }
+
+    fn clip(id: i64) -> serde_json::Value {
+        json!({"id":id,"state":"QUEUED","name":"","start":49.0,"end":77.0,"quality":{"height":720,"halfRate":false},"file":format!("/api/clips/{id}/video")})
+    }
+
+    #[test]
+    fn handoff_saves_a_recipe_without_overwriting_watch_progress() {
+        crate::test_support::run(async {
+            let (origin, requests) = crate::test_support::http(4, |request| match request["operationName"].as_str().unwrap() {
+                "SaveProgress" => json!({"data":{"saveProgress":{"id":1}}}),
+                "ClipsAllowance" => json!({"data":{"clipAllowance":{"canClip":true,"canLink":true,"maxLength":60,"customDefaultFont":false}}}),
+                "ClipsPeople" => json!({"data":{"users":[{"id":3,"username":"Cranky","avatar":null}]}}),
+                "ClipsCreate" => json!({"data":{"createClip":clip(42)}}),
+                op => panic!("unexpected {op}"),
+            })
+            .await;
+            let mut player = player();
+            player.api = api::Api::new(origin, None).unwrap();
+            player.can_clip = true;
+            // The filmstrip's frames come from elsewhere.
+            player.previews_failed = true;
+            player.time = 76.25;
+            player.audio = Some(2);
+            player.subtitle = Some("s3".into());
+            player.quality = Quality::Height(720);
+            let mut effects = Vec::new();
+            player.update(PlayerMessage::MakeClip, &mut effects);
+            assert!(!player.playing);
+            assert_eq!(player.clipping.as_ref().unwrap().at, 76.25);
+            settle(&mut player, &mut effects).await;
+            let editor = player.clipping.as_ref().unwrap();
+            assert!(editor.ready());
+            // The last half minute before where it was, on frame boundaries.
+            assert_eq!(editor.range, (46.25, 76.25));
+            assert_eq!(editor.people.len(), 1);
+            player.update(PlayerMessage::Editor(Message::Strip(Strip::Move(Edge::Start, 49.0))), &mut effects);
+            player.update(PlayerMessage::Editor(Message::Strip(Strip::Move(Edge::End, 77.0))), &mut effects);
+            player.update(
+                PlayerMessage::Editor(Message::Pick(Person { id: 3, ..Default::default() }, true)),
+                &mut effects,
+            );
+            player.update(PlayerMessage::Editor(Message::Save), &mut effects);
+            settle(&mut player, &mut effects).await;
+            assert_eq!(player.clipping.as_ref().unwrap().made.as_ref().unwrap().id, 42);
+            player.time = 300.0;
+            player.save(&mut effects);
+            assert!(effects.is_empty(), "preview position must not become watch progress");
+            player.update(PlayerMessage::Editor(Message::Close), &mut effects);
+            assert_eq!(player.time, 76.25);
+            assert_eq!(player.quality, Quality::Height(720));
+            assert_eq!(player.audio, Some(2));
+            assert_eq!(player.subtitle.as_deref(), Some("s3"));
+            assert!(!player.playing);
+            let requests = requests.await.unwrap();
+            assert_eq!(requests[0].1["variables"]["position"], 76.25);
+            let created = requests.iter().find(|(_, body)| body["operationName"] == "ClipsCreate").unwrap();
+            assert_eq!(
+                created.1["variables"]["input"]["recipe"],
+                json!({"start":49.0,"end":77.0,"audio":2,"subtitles":null,"height":1080,"halfRate":false})
+            );
+            assert_eq!(created.1["variables"]["input"]["recipients"], json!([3]));
+        });
+    }
+
+    #[test]
+    fn changing_a_clip_starts_from_its_recipe_and_saves_it_in_place() {
+        crate::test_support::run(async {
+            let (origin, requests) = crate::test_support::http(4, |request| match request["operationName"].as_str().unwrap() {
+                "ClipsAllowance" => json!({"data":{"clipAllowance":{"canClip":true,"canLink":false,"maxLength":0,"customDefaultFont":false}}}),
+                "ClipsPeople" => json!({"data":{"users":[]}}),
+                "ClipsClip" => json!({"data":{"clip":{"id":7,"name":"Best bit","public":true,"start":100.0,"end":110.0,"audio":2,"quality":{"height":720,"halfRate":false},"state":"READY","file":"/api/clips/7/video"}}}),
+                "ClipsUpdate" => json!({"data":{"updateClip":clip(7)}}),
+                op => panic!("unexpected {op}"),
+            })
+            .await;
+            let mut player = player();
+            player.api = api::Api::new(origin, None).unwrap();
+            player.can_clip = true;
+            // The filmstrip's frames come from elsewhere.
+            player.previews_failed = true;
+            let mut effects = Vec::new();
+            player.edit_existing(7, &mut effects);
+            assert!(!player.clipping.as_ref().unwrap().ready());
+            settle(&mut player, &mut effects).await;
+            let editor = player.clipping.as_ref().unwrap();
+            assert_eq!(editor.range, (100.0, 110.0));
+            assert_eq!(editor.title, "Best bit");
+            assert!(editor.public);
+            assert_eq!(player.audio, Some(2));
+            player.update(PlayerMessage::Editor(Message::Save), &mut effects);
+            settle(&mut player, &mut effects).await;
+            let requests = requests.await.unwrap();
+            let update = requests.iter().find(|(_, body)| body["operationName"] == "ClipsUpdate").unwrap();
+            assert_eq!(update.1["variables"]["id"], 7);
+            assert_eq!(update.1["variables"]["input"]["name"], "Best bit");
+            assert_eq!(update.1["variables"]["input"]["recipe"]["start"], 100.0);
+            assert_eq!(update.1["variables"]["input"]["public"], true);
+        });
+    }
+
+    #[test]
+    fn ranges_stay_within_the_video_the_limit_and_half_a_second() {
+        let mut player = player();
+        player.can_clip = true;
+        let mut effects = Vec::new();
+        player.start_clip(&mut effects);
+        let key = player.clipping.as_ref().unwrap().key;
+        let you = Allowance { can_clip: true, max_length: 20, ..Default::default() };
+        player.update(PlayerMessage::Editor(Message::Allowance(key, Ok(you))), &mut effects);
+        let editor = |player: &Player| player.clipping.as_ref().unwrap().range;
+        assert_eq!(editor(&player), (0.0, 20.0));
+        player.update(PlayerMessage::Editor(Message::Strip(Strip::Move(Edge::End, 100.0))), &mut effects);
+        assert_eq!(editor(&player), (0.0, 20.0));
+        player.update(PlayerMessage::Editor(Message::Strip(Strip::Move(Edge::Start, 19.9))), &mut effects);
+        assert_eq!(editor(&player).0, 19.5);
+        player.update(PlayerMessage::Editor(Message::Strip(Strip::Move(Edge::Both, 5000.0))), &mut effects);
+        assert_eq!(editor(&player), (1799.5, 1800.0));
+        player.update(PlayerMessage::Editor(Message::Strip(Strip::Center(0.0))), &mut effects);
+        assert_eq!(editor(&player), (0.0, 0.5));
+        // A frame at a time from the edge last touched, a second with Shift.
+        player.update(PlayerMessage::Editor(Message::Nudge(1.0, true)), &mut effects);
+        assert_eq!(editor(&player), (0.0, 1.5));
+        player.update(PlayerMessage::Editor(Message::Strip(Strip::Grab(Edge::Start))), &mut effects);
+        player.update(PlayerMessage::Editor(Message::Nudge(1.0, false)), &mut effects);
+        assert_eq!(editor(&player), (1.0 / 24.0, 1.5));
+        player.update(PlayerMessage::Editor(Message::Saved(key + 1, Err("stale".into()))), &mut effects);
+        assert!(player.clipping.as_ref().unwrap().made.is_none());
+    }
+
+    #[test]
+    fn render_progress_from_events_is_patched_in() {
+        let mut player = player();
+        player.can_clip = true;
+        let mut effects = Vec::new();
+        player.start_clip(&mut effects);
+        let editor = player.clipping.as_mut().unwrap();
+        let mut made: Clip = serde_json::from_value(clip(9)).unwrap();
+        made.state = "RENDERING".into();
+        editor.made = Some(Made { id: 9, clip: Some(Arc::new(made)), player: None, played: None, copied: false });
+        effects.clear();
+        player.clip_changed(9, Some(0.5), &mut effects);
+        assert!(effects.is_empty());
+        assert_eq!(player.clipping.as_ref().unwrap().made.as_ref().unwrap().clip.as_ref().unwrap().progress, Some(0.5));
+        player.clip_changed(9, None, &mut effects);
+        assert_eq!(effects.len(), 1);
+        player.clip_changed(10, None, &mut effects);
+        assert_eq!(effects.len(), 1);
+    }
+}

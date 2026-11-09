@@ -739,3 +739,154 @@ fn filename(disposition: &str) -> Option<String> {
     }
     parts.iter().find_map(|p| p.strip_prefix("filename=")).map(|name| name.trim_matches('"').to_owned())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn clip(id: i64, state: &str) -> Clip {
+        Clip { id, state: state.into(), ..Clip::default() }
+    }
+
+    #[test]
+    fn render_progress_is_patched_in_and_anything_else_asked_for_again() {
+        let mut clips = Clips::default();
+        let list = List { clips: vec![clip(1, "RENDERING"), clip(2, "READY")], you: Allowance::default() };
+        let filter = clips.filter();
+        clips.lists.insert(filter, Entry { data: Some(Arc::new(list)), ..Entry::default() });
+        clips.changed(1, Some(0.6));
+        assert_eq!(clips.list().unwrap().0.clips[0].progress, Some(0.6));
+        assert!(!clips.lists[&filter].dirty);
+        // A clip the page doesn't have rendering means the list is behind.
+        clips.changed(3, Some(0.1));
+        assert!(clips.lists[&filter].dirty);
+    }
+
+    #[test]
+    fn the_dialog_opens_and_closes_in_place() {
+        let mut app = crate::app::App::new(Route::Home, crate::window_state::WindowState::default());
+        app.session.screen = crate::session::Screen::Ready;
+        app.session.api = Some(Api::new(url::Url::parse("http://127.0.0.1:9/").unwrap(), None).unwrap());
+        let generation = app.session.generation;
+        app.update(AppMessage::Navigate(Route::Clips), &mut Vec::new());
+        app.history.set_scroll(320.0);
+        app.update(AppMessage::Clips(generation, Message::Open(7)), &mut Vec::new());
+        assert_eq!(app.history.current().route, Route::Clip(7));
+        assert_eq!(app.clips.open.as_ref().map(|open| open.id), Some(7));
+        app.update(AppMessage::Clips(generation, Message::Close), &mut Vec::new());
+        assert_eq!(app.history.current().route, Route::Clips);
+        assert_eq!(app.history.current().scroll, 320.0);
+        assert!(app.clips.open.is_none());
+        app.update(AppMessage::Navigate(Route::Home), &mut Vec::new());
+        app.update(AppMessage::Navigate(Route::Clips), &mut Vec::new());
+        assert!(app.history.back().is_some_and(|entry| entry.route == Route::Home));
+    }
+
+    #[test]
+    fn download_names_prefer_the_utf8_form() {
+        assert_eq!(
+            filename("attachment; filename=\"Show - Clip.mp4\"; filename*=UTF-8''Sh%C5%8Dw%20-%20Clip.mp4").as_deref(),
+            Some("Shōw - Clip.mp4")
+        );
+        assert_eq!(filename("attachment; filename=\"Show.png\"").as_deref(), Some("Show.png"));
+        assert_eq!(filename("attachment; filename*=UTF-8''..%2F..%2Fx").as_deref(), None);
+    }
+}
+
+#[cfg(all(test, debug_assertions))]
+mod render_tests {
+    use serde_json::json;
+
+    use super::*;
+
+    impl Clips {
+        fn put(&mut self, filter: Filter, list: Value) {
+            let list = serde_json::from_value(list).expect("a clip list");
+            self.lists.insert(filter, Entry { data: Some(Arc::new(list)), ..Entry::default() });
+            self.shown = Some(filter);
+        }
+    }
+
+    fn clip(id: i64, extra: Value) -> Value {
+        let mut clip = json!({
+            "id": id, "kind": "CLIP", "name": "", "mine": true, "canManage": true,
+            "owner": {"id": 1, "username": "David"},
+            "source": {"video": {"id": 10}, "title": {"id": 1}, "name": "The quiet orbit", "kind": "SHOW", "label": "S01E04", "status": "OK"},
+            "start": 312.4, "end": 341.9, "quality": {"height": 1080, "halfRate": false}, "state": "READY",
+            "bytes": 18_400_000, "width": 1920, "height": 1080, "fps": 23.976, "renderedAt": 5, "createdAt": now() - 7200,
+            "public": false, "linkLive": true, "recipients": [], "file": format!("/api/clips/{id}/video"), "poster": "poster",
+        });
+        for (key, value) in extra.as_object().unwrap() {
+            clip[key] = value.clone();
+        }
+        clip
+    }
+
+    fn now() -> i64 {
+        crate::browsing::now()
+    }
+
+    #[test]
+    #[ignore = "requires Vulkan; renders the Clips page, a clip's dialog and the editor"]
+    fn clips_render() {
+        let output = std::env::var_os("TINYSTREAM_TEST_ARTIFACT_DIR")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| std::env::temp_dir().join("tinystream-clips-qa"));
+        std::fs::create_dir_all(&output).unwrap();
+        let mut app = crate::app::App::new(Route::Clips, crate::window_state::WindowState::default());
+        tokio::runtime::Runtime::new().unwrap().block_on(app.session.preview("home")).unwrap();
+        crate::browsing::preview::prepare(&mut app, "home", crate::ui::Style::Layered, false, Some(true));
+        app.history = crate::route::History::new(Route::Clips);
+        let clips = vec![
+            clip(1, json!({"name": "The signal", "public": true, "link": "/c/abc"})),
+            clip(2, json!({"state": "RENDERING", "progress": 0.42, "poster": null})),
+            clip(3, json!({"kind": "SCREENSHOT", "screenshot": true, "end": 312.4, "file": "/api/clips/3/image"})),
+            clip(
+                4,
+                json!({"kind": "QUOTE", "quote": {"text": "The road north was longer than any of them remembered, and quieter.", "author": "Mira Vale"}, "source": {"name": "Northbound", "kind": "MOVIE", "status": "OK", "book": {"id": 21, "title": "Northbound", "coverTint": "120 140 200"}}}),
+            ),
+            clip(5, json!({"state": "FAILED", "poster": null})),
+            clip(6, json!({"state": "EVICTED", "poster": null, "name": "Old one"})),
+        ];
+        let you = json!({"canClip": true, "canLink": true, "maxLength": 60, "bytes": 1_200_000_000i64, "rendered": 4, "storage": 2048, "limit": 10});
+        app.clips.put((Scope::Mine, Kind::All, None), json!({"clips": clips, "clipAllowance": you}));
+        let draw = |app: &mut crate::app::App, name: &str| {
+            crate::snapshot::snapshot(app, iced_core::Size::new(1360, 900), 1.0, None, &output.join(name), &[]).unwrap()
+        };
+        draw(&mut app, "page.png");
+
+        app.history.replace(Route::Clip(1));
+        let mut open = Open::new(1);
+        let mut first: Clip = serde_json::from_value(clips[0].clone()).unwrap();
+        first.recipients = vec![Recipient {
+            user: Person { id: 2, username: "Mira".into(), avatar: None },
+            shared_at: now(),
+            hidden: true,
+        }];
+        open.title = first.name.clone();
+        open.clip.data = Some(Some(Arc::new(first)));
+        open.picking = true;
+        open.send_to = vec![Person { id: 3, username: "Cranky".into(), avatar: None }];
+        app.clips.people.data = Some(Arc::new(vec![
+            Person { id: 2, username: "Mira".into(), avatar: None },
+            Person { id: 3, username: "Cranky".into(), avatar: None },
+        ]));
+        app.clips.open = Some(open);
+        draw(&mut app, "dialog.png");
+
+        let mut rendering = Open::new(2);
+        rendering.clip.data = Some(Some(Arc::new(serde_json::from_value(clips[1].clone()).unwrap())));
+        app.clips.open = Some(rendering);
+        app.history.replace(Route::Clip(2));
+        draw(&mut app, "rendering.png");
+
+        app.history.replace(Route::Clips);
+        app.clips.open = None;
+        app.clips.kind = Kind::Quotes;
+        app.clips.put(
+            (Scope::Mine, Kind::Quotes, None),
+            json!({"clips": [clips[3].clone(), clips[3].clone()], "clipAllowance": you}),
+        );
+        draw(&mut app, "quotes.png");
+    }
+}

@@ -1743,8 +1743,38 @@ pub(crate) mod tests {
         player.rested = None;
         player.pb.as_mut().unwrap().next = None;
         draw(&mut app, "finale.png", None, &[]);
-        app.player.as_mut().unwrap().start_clip(&mut Vec::new());
+        let player = app.player.as_mut().unwrap();
+        player.start_clip(&mut Vec::new());
+        player.previews.insert(
+            420,
+            Handle::from_rgba(
+                640,
+                360,
+                image::RgbaImage::from_pixel(640, 360, image::Rgba([90, 120, 160, 255])).into_raw(),
+            ),
+        );
+        let key = player.clipping.as_ref().unwrap().key;
+        let you = crate::clips::Allowance {
+            can_clip: true,
+            can_link: true,
+            max_length: 60,
+            storage: 2048,
+            bytes: 300_000_000,
+            ..Default::default()
+        };
+        player.update(Message::Editor(clip::Message::Allowance(key, Ok(you))), &mut Vec::new());
+        let people = vec![crate::clips::Person { id: 2, username: "Mira".into(), avatar: None }];
+        player.update(Message::Editor(clip::Message::People(key, people.clone())), &mut Vec::new());
+        player.update(Message::Editor(clip::Message::Pick(people[0].clone(), true)), &mut Vec::new());
+        player.update(Message::Editor(clip::Message::Picker(true)), &mut Vec::new());
         draw(&mut app, "editor.png", None, &[]);
+        let player = app.player.as_mut().unwrap();
+        let made: crate::clips::Clip = serde_json::from_value(
+            serde_json::json!({"id":9,"state":"RENDERING","progress":0.3,"file":"/api/clips/9/video"}),
+        )
+        .unwrap();
+        player.update(Message::Editor(clip::Message::Saved(key, Ok(Arc::new(made)))), &mut Vec::new());
+        draw(&mut app, "editor-rendering.png", None, &[]);
     }
 
     #[test]

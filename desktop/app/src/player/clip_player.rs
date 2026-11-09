@@ -386,3 +386,46 @@ impl ClipPlayer {
         .boxed()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn clip_player() -> ClipPlayer {
+        let api = Api::new("http://127.0.0.1/".parse().unwrap(), None).unwrap();
+        let mut player = ClipPlayer::new(
+            api,
+            None,
+            "/api/clips/1/video",
+            true,
+            (0, 0),
+            Arc::new(|_| AppMessage::Quit),
+            &mut Vec::new(),
+        );
+        player.error = None;
+        player
+    }
+
+    #[test]
+    fn a_finished_clip_plays_again_from_the_start() {
+        let mut player = clip_player();
+        player.update(Message::Mpv(Update::Duration(12.0)));
+        player.update(Message::Mpv(Update::Time(12.0)));
+        player.update(Message::Mpv(Update::Eof(true)));
+        assert!(!player.playing);
+        player.update(Message::Toggle);
+        assert!(player.playing);
+        assert_eq!(player.time, 0.0);
+    }
+
+    #[test]
+    fn a_muted_preview_never_changes_the_remembered_volume() {
+        let mut player = clip_player();
+        assert!(player.prefs.is_none());
+        player.update(Message::Volume(0.3));
+        assert!(!player.muted);
+        assert_eq!(player.volume, 0.3);
+        assert!(matches!(player.key(&Key::Character("f".into()), Modifiers::empty()), Some(Message::Fullscreen)));
+        assert!(player.key(&Key::Character("f".into()), Modifiers::CTRL).is_none());
+    }
+}

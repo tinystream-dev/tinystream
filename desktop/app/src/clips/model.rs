@@ -289,3 +289,60 @@ pub fn absolute(path: &str, origin: &str) -> String {
 
 /// Languages whose text the built-in clip font doesn't have.
 pub const CJK: [&str; 7] = ["jpn", "ja", "chi", "zho", "zh", "kor", "ko"];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn presets_match_the_server_for_wide_tall_and_fast_sources() {
+        let labels = |p: Vec<Preset>| p.iter().map(Preset::label).collect::<Vec<_>>();
+        assert_eq!(labels(presets(Some(1920), Some(1080), Some(23.976))), ["1080p24", "720p24", "480p24"]);
+        assert_eq!(
+            labels(presets(Some(1920), Some(800), Some(59.94))),
+            ["800p60", "800p30 · half rate", "534p60", "534p30 · half rate", "356p60", "356p30 · half rate"]
+        );
+        assert_eq!(
+            labels(presets(Some(1280), Some(720), Some(120.0))),
+            ["720p60", "720p30 · half rate", "480p60", "480p30 · half rate"]
+        );
+        let p = presets(Some(1920), Some(1080), Some(24.0))[1];
+        assert_eq!((p.width, p.out_height), (1280, 720));
+        assert_eq!(worst_size(&p, 30.0), (3_500_000.0 + 160_000.0) * 30.0 / 8.0);
+    }
+
+    #[test]
+    fn times_and_sizes_read_like_the_web() {
+        assert_eq!(stamp(42.34), "0:42.3");
+        assert_eq!(stamp(65.0), "1:05.0");
+        assert_eq!(stamp(-1.0), "0:00.0");
+        assert_eq!(length(42.4), "42 s");
+        assert_eq!(length(65.0), "1:05");
+        assert_eq!(space(2048), "2 GB");
+        assert_eq!(space(1536), "1.5 GB");
+        assert_eq!(bytes(1536), "1.5 KB");
+        assert_eq!(bytes(250_000_000), "250 MB");
+        assert_eq!(bytes(999), "999 B");
+        assert_eq!(absolute("/c/abc", "https://example.com/"), "https://example.com/c/abc");
+    }
+
+    #[test]
+    fn names_fall_back_to_where_a_clip_is_from() {
+        let mut c = Clip {
+            source: Source {
+                name: "Show".into(),
+                kind: "SHOW".into(),
+                label: Some("S01E02".into()),
+                year: Some(2020),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        assert_eq!(c.display_name(), "Show S01E02");
+        assert_eq!(c.source_line(), "Show · S01E02");
+        c.source.kind = "MOVIE".into();
+        assert_eq!(c.source_line(), "Show (2020)");
+        c.name = "Mine".into();
+        assert_eq!(c.display_name(), "Mine");
+    }
+}
