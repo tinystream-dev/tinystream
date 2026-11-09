@@ -5,6 +5,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "test": "bun test tests",
     "dev": "bun run wasm && vite dev --port 5173",
     "build": "bun run wasm && vite build",
     "wasm": "bun scripts/wasm.ts",

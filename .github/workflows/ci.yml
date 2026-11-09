@@ -111,6 +111,7 @@ jobs:
       - run: cargo test -p tinystream-subtitle-renderer -p tinystream-subtitles --locked
         working-directory: .
       - run: bun run typecheck
+      - run: bun run test
       - run: bun run build
       - uses: actions/upload-artifact@v4
         with:
