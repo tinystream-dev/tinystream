@@ -176,7 +176,11 @@ fn walk_title_folder(dir: &Path, walk: &mut Walk) {
 
         let path = entry.path();
 
-        if path.is_dir() {
+        let Ok(metadata) = std::fs::metadata(&path) else {
+            walk.unreadable(&path);
+            continue;
+        };
+        if metadata.is_dir() {
             let dir_name = entry.file_name().to_string_lossy().to_string();
 
             match parse::season_number(&dir_name) {
@@ -280,7 +284,11 @@ fn walk_season_folder(
 
         let path = entry.path();
 
-        if path.is_dir() {
+        let Ok(metadata) = std::fs::metadata(&path) else {
+            walk.unreadable(&path);
+            continue;
+        };
+        if metadata.is_dir() {
             if !entry.file_type().is_ok_and(|ft| ft.is_symlink()) {
                 walk_extras(&path, folder_season, media, walk);
             }
@@ -358,7 +366,11 @@ fn walk_extras(dir: &Path, season: u32, media: &mut Vec<FoundMedia>, walk: &mut 
 
         let path = entry.path();
 
-        if path.is_dir() {
+        let Ok(metadata) = std::fs::metadata(&path) else {
+            walk.unreadable(&path);
+            continue;
+        };
+        if metadata.is_dir() {
             if !entry.file_type().is_ok_and(|ft| ft.is_symlink()) {
                 walk_extras(&path, season, media, walk);
             }

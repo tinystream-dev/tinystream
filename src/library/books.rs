@@ -14,13 +14,8 @@ struct Found {
     mtime: i64,
 }
 
-fn walk(root: &Path, download_dirs: &[PathBuf], out: &mut Vec<Found>) {
-    let Ok(entries) = std::fs::read_dir(root) else {
-        tracing::warn!("can't read {} (permissions?)", root.display());
-        return;
-    };
-
-    let mut entries: Vec<_> = entries.filter_map(Result::ok).collect();
+fn walk(root: &Path, download_dirs: &[PathBuf], out: &mut Vec<Found>) -> std::io::Result<()> {
+    let mut entries = std::fs::read_dir(root)?.collect::<std::io::Result<Vec<_>>>()?;
     entries.sort_by_key(|e| e.file_name());
 
     for entry in entries {
@@ -29,19 +24,23 @@ fn walk(root: &Path, download_dirs: &[PathBuf], out: &mut Vec<Found>) {
         }
 
         let path = entry.path();
-        let Ok(ft) = entry.file_type() else { continue };
+        let ft = entry.file_type()?;
+        if ft.is_symlink() {
+            std::fs::metadata(&path)?;
+        }
 
         if ft.is_dir() || (ft.is_symlink() && path.is_dir()) {
             let canonical = path.canonicalize().unwrap_or_else(|_| path.clone());
 
             if !download_dirs.iter().any(|d| d == &canonical) {
-                walk(&path, download_dirs, out);
+                walk(&path, download_dirs, out)?;
             }
         } else if Format::of(&path).is_some() {
             let (size, mtime) = super::scanner::file_info(&path);
             out.push(Found { path, size, mtime });
         }
     }
+    Ok(())
 }
 
 fn read_all(files: Vec<Found>) -> Vec<(Found, anyhow::Result<Book>)> {
@@ -87,10 +86,10 @@ pub async fn scan(state: &AppState, name: &str, root: &Path, download_dirs: Vec<
 
         tokio::task::spawn_blocking(move || {
             let mut out = Vec::new();
-            walk(&root, &download_dirs, &mut out);
-            out
+            walk(&root, &download_dirs, &mut out)?;
+            Ok::<_, std::io::Error>(out)
         })
-        .await?
+        .await??
     };
 
     let db = &state.db;
