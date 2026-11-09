@@ -77,25 +77,54 @@ export class Engine {
       } catch {
         ctx = new AudioContext({ latencyHint: 'playback' })
       }
-      await ctx.audioWorklet.addModule(workletUrl)
-      const sab = makeRing(ctx.sampleRate)
-      const node = new AudioWorkletNode(ctx, 'tinystream-music', { numberOfInputs: 0, outputChannelCount: [2] })
-      node.connect(ctx.destination)
-      node.port.onmessage = (e: MessageEvent<FromWorklet>) => this.played(e.data)
-      node.port.postMessage({ sab } satisfies ToWorklet)
-      const worker = new Worker(new URL('./decoder.worker.ts', import.meta.url), { type: 'module' })
-      const ready = new Promise<void>((resolve) => {
-        worker.onmessage = (e: MessageEvent<FromWorker>) => {
-          if (e.data.type === 'ready') resolve()
-          else this.heard(e.data)
-        }
-      })
-      worker.postMessage({ type: 'init', sab, rate: ctx.sampleRate } satisfies ToWorker)
-      await ready
-      this.ctx = ctx
-      this.node = node
-      this.worker = worker
-    })()
+      let node: AudioWorkletNode | null = null
+      let worker: Worker | null = null
+      try {
+        await ctx.audioWorklet.addModule(workletUrl)
+        const sab = makeRing(ctx.sampleRate)
+        node = new AudioWorkletNode(ctx, 'tinystream-music', { numberOfInputs: 0, outputChannelCount: [2] })
+        node.connect(ctx.destination)
+        node.port.onmessage = (e: MessageEvent<FromWorklet>) => this.played(e.data)
+        node.port.postMessage({ sab } satisfies ToWorklet)
+        worker = new Worker(new URL('./decoder.worker.ts', import.meta.url), { type: 'module' })
+        const decoder = worker
+        await new Promise<void>((resolve, reject) => {
+          const finish = (error?: Error) => {
+            clearTimeout(timer)
+            decoder.onerror = null
+            decoder.onmessageerror = null
+            if (error) reject(error)
+            else resolve()
+          }
+          const timer = setTimeout(() => finish(new Error('Music decoder did not start. Try playing again.')), 15_000)
+          decoder.onerror = (event) => {
+            event.preventDefault()
+            finish(new Error(event.message || 'Music decoder failed to start'))
+          }
+          decoder.onmessageerror = () => finish(new Error('Music decoder sent an unreadable message'))
+          decoder.onmessage = (e: MessageEvent<FromWorker>) => {
+            if (e.data.type === 'ready') finish()
+            else this.heard(e.data)
+          }
+          try {
+            decoder.postMessage({ type: 'init', sab, rate: ctx.sampleRate } satisfies ToWorker)
+          } catch (error) {
+            finish(error instanceof Error ? error : new Error(String(error)))
+          }
+        })
+        this.ctx = ctx
+        this.node = node
+        this.worker = worker
+      } catch (error) {
+        worker?.terminate()
+        node?.disconnect()
+        await ctx.close().catch(() => {})
+        throw error
+      }
+    })().catch((error) => {
+      this.starting = null
+      throw error
+    })
     return this.starting
   }
 
