@@ -55,6 +55,18 @@ impl fmt::Display for Error {
 
 impl std::error::Error for Error {}
 
+/// Decodes dynamic variables, including generated unit structs for operations without variables.
+pub(crate) fn variables<V: serde::de::DeserializeOwned>(value: Value) -> Result<V, Error> {
+    let empty = value.as_object().is_some_and(serde_json::Map::is_empty);
+    match serde_json::from_value(value) {
+        Ok(variables) => Ok(variables),
+        Err(_) if empty => {
+            serde_json::from_value(Value::Null).map_err(|e| Error::message(format!("Invalid request: {e}")))
+        },
+        Err(error) => Err(Error::message(format!("Invalid request: {error}"))),
+    }
+}
+
 #[derive(Clone)]
 pub struct Api {
     pub origin: Url,
@@ -444,6 +456,18 @@ pub async fn probe(input: &str) -> Result<(Api, connection::ResponseData), Error
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn dynamic_variables_accept_unit_and_optional_structs_without_hiding_invalid_inputs() {
+        let _: settings_settings::Variables = variables(json!({})).unwrap();
+        let _: settings_settings_engine::Variables = variables(json!({})).unwrap();
+        let folders: settings_folders::Variables = variables(json!({})).unwrap();
+        assert!(folders.path.is_none());
+        let folders: settings_folders::Variables = variables(json!({"path":"/media"})).unwrap();
+        assert_eq!(folders.path.as_deref(), Some("/media"));
+        assert!(variables::<settings_change_password::Variables>(json!({})).is_err());
+        assert!(variables::<settings_folders::Variables>(json!({"path":42})).is_err());
+    }
 
     #[test]
     fn normalizes_addresses_and_rejects_credentials_and_paths() {

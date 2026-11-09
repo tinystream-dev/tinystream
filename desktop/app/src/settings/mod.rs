@@ -679,6 +679,20 @@ mod tests {
         assert!(!state.busy);
     }
     #[test]
+    fn settings_queries_without_variables_accept_the_empty_object_from_the_screen() {
+        run(async {
+            let (origin, server) = test_support::http(2, |_| json!({"data":{"settings":{"raw":"ok"}}})).await;
+            let api = Api::new(origin, None).unwrap();
+            for query in ["Settings", "SettingsEngine"] {
+                let result = requests::request(&api, query, json!({})).await;
+                assert!(result.is_ok(), "{query}: {}", result.unwrap_err());
+            }
+            let received = server.await.unwrap();
+            assert_eq!(received[0].1["operationName"], "SettingsSettings");
+            assert_eq!(received[1].1["operationName"], "SettingsSettingsEngine");
+        });
+    }
+    #[test]
     fn typed_settings_requests_use_shared_server_mutations_and_report_validation() {
         run(async {
             let (origin, server) = test_support::http(2, |request| {

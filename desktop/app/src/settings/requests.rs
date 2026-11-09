@@ -7,10 +7,7 @@ use crate::api::{self, Api};
 pub async fn request(api: &Api, operation: &str, variables: Value) -> Result<Value, api::Error> {
     macro_rules! send {
         ($query:ident) => {
-            api.request_data::<api::$query, Value>(
-                serde_json::from_value(variables).map_err(|e| api::Error::message(e.to_string()))?,
-            )
-            .await
+            api.request_data::<api::$query, Value>(api::variables(variables)?).await
         };
     }
     match operation {

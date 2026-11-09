@@ -1003,12 +1003,7 @@ impl Browsing {
     }
 }
 
-/// `value` as an operation's generated variables. Operations without any get a unit struct, which
-/// only `null` reads as.
-pub(crate) fn variables<V: DeserializeOwned>(value: Value) -> Result<V, api::Error> {
-    let value = if value.as_object().is_some_and(serde_json::Map::is_empty) { Value::Null } else { value };
-    serde_json::from_value(value).map_err(|e| api::Error::message(format!("Invalid request: {e}")))
-}
+pub(crate) use crate::api::variables;
 
 async fn query<Q: GraphQLQuery>(api: &Api, value: Value) -> Result<Document, api::Error>
 where
