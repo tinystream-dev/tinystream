@@ -10,6 +10,7 @@ let closed = 0
 let terminated = 0
 let failModule = false
 let workerFailure = false
+let silentWorker = false
 
 class Context {
   sampleRate = 48000
@@ -22,6 +23,7 @@ class WorkerStub {
   onerror: ((event: unknown) => void) | null = null
   onmessageerror: ((event: unknown) => void) | null = null
   postMessage() {
+    if (silentWorker) return
     queueMicrotask(() => workerFailure
       ? this.onerror?.({ message: 'decoder failed', preventDefault() {} })
       : this.onmessage?.({ data: { type: 'ready' } }))
@@ -32,7 +34,7 @@ globalThis.AudioContext = Context as never
 globalThis.AudioWorkletNode = class { port = { postMessage() {} }; connect() {}; disconnect() {} } as never
 globalThis.Worker = WorkerStub as never
 
-afterEach(() => { failModule = false; workerFailure = false; attempts = 0; closed = 0; terminated = 0 })
+afterEach(() => { failModule = false; workerFailure = false; silentWorker = false; attempts = 0; closed = 0; terminated = 0 })
 
 test('a failed worklet setup releases resources and can retry', async () => {
   const engine = new Engine()
@@ -52,6 +54,22 @@ test('worker startup errors reject and allow a fresh worker', async () => {
   expect(closed).toBe(1)
   workerFailure = false
   await engine.start()
+})
+
+test('a worker that never becomes ready reaches its startup deadline and can retry', async () => {
+  const timeout = globalThis.setTimeout
+  globalThis.setTimeout = ((callback: () => void, delay: number) => timeout(callback, delay === 15_000 ? 1 : delay)) as never
+  const engine = new Engine()
+  silentWorker = true
+  try {
+    await expect(engine.start()).rejects.toThrow('did not start')
+    expect(terminated).toBe(1)
+    expect(closed).toBe(1)
+    silentWorker = false
+    await engine.start()
+  } finally {
+    globalThis.setTimeout = timeout
+  }
 })
 
 afterAll(() => Object.assign(globalThis, original))

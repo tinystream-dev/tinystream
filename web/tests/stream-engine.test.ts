@@ -89,4 +89,40 @@ test('an open stream that stops sending data retries and then reports a bounded 
   }
 })
 
+test('a complete response finishes normally', async () => {
+  bufferEnd = 0
+  ended = false
+  globalThis.fetch = (async () => new Response(new Uint8Array([1]))) as never
+  const errors: string[] = []
+  const engine = new StreamEngine(video(), '/media/1', 1, plan, event => { if (event.error) errors.push(event.error) })
+  try {
+    const started = engine.start(0)
+    source.dispatchEvent(new Event('sourceopen'))
+    await started
+    await settle()
+    expect(ended).toBe(true)
+    expect(errors).toEqual([])
+  } finally { engine.destroy() }
+})
+
+test('paused playback does not restart a quiet response', async () => {
+  const timeout = globalThis.setTimeout
+  globalThis.setTimeout = ((callback: () => void, delay: number) => timeout(callback, delay >= 1000 ? 1 : delay)) as never
+  bufferEnd = 0
+  let requests = 0
+  globalThis.fetch = (async () => { requests++; return new Response(new ReadableStream()) }) as never
+  const paused = video()
+  Object.assign(paused, { paused: true })
+  const errors: string[] = []
+  const engine = new StreamEngine(paused, '/media/1', 1800, plan, event => { if (event.error) errors.push(event.error) })
+  try {
+    const started = engine.start(0)
+    source.dispatchEvent(new Event('sourceopen'))
+    await started
+    await new Promise(resolve => timeout(resolve, 15))
+    expect(requests).toBe(1)
+    expect(errors).toEqual([])
+  } finally { engine.destroy(); globalThis.setTimeout = timeout }
+})
+
 afterAll(() => { Object.assign(globalThis, original); URL.createObjectURL = originalCreate; URL.revokeObjectURL = originalRevoke })

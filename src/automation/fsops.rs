@@ -413,6 +413,13 @@ mod tests {
                     .unwrap();
             }
         }
+        sqlx::query("INSERT INTO items (id, library, kind, path, folder_title, title, sort_title, added_at, updated_at) VALUES (1, 'test', 'show', ?, 'Show', 'Show', 'Show', 0, 0)")
+            .bind(old.to_string_lossy().as_ref()).execute(&db).await.unwrap();
+        sqlx::query("INSERT INTO media (id, item_id, path, size, mtime, added_at) VALUES (1, 1, ?, 1, 0, 0)")
+            .bind(old.join("ep.mkv").to_string_lossy().as_ref())
+            .execute(&db)
+            .await
+            .unwrap();
         let batch = Batch::new(&db, "history", "test");
         batch.rename(&old, &new).await.unwrap();
         for path in [new.join("ep.mkv"), dir.join("Show_100%Extra/ep.mkv")] {
@@ -425,7 +432,11 @@ mod tests {
             .unwrap();
             assert_eq!(rows, vec![(1, 42.0, false), (2, 42.0, true)]);
         }
+        let media: String = sqlx::query_scalar("SELECT path FROM media WHERE id = 1").fetch_one(&db).await.unwrap();
+        assert_eq!(Path::new(&media), new.join("ep.mkv"));
         assert!(undo(&db, "history").await.unwrap().problems.is_empty());
+        let item: String = sqlx::query_scalar("SELECT path FROM items WHERE id = 1").fetch_one(&db).await.unwrap();
+        assert_eq!(Path::new(&item), old);
         let count: i64 = sqlx::query_scalar("SELECT count(*) FROM progress WHERE media_path = ?")
             .bind(old.join("ep.mkv").to_string_lossy().as_ref())
             .fetch_one(&db)
