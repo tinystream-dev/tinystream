@@ -24,7 +24,7 @@ page, for example `cargo run --locked -- '/watch/12?t=90'` to play from 90 secon
 The browsing routes in `app/src/browsing/` follow the desktop web routes: Home, the search
 palette, Discover, video and book libraries and book series, titles and their seasons,
 Calendar, Requests, Wanted and server Downloads. Music shelves on Home lead into #91's
-routes; clips and book readers remain #93 and #94. Account switching and the shortcuts sheet
+routes; Clips are below, and book readers remain #94. Account switching and the shortcuts sheet
 are part of the shell. The current web title route and shared schema have no cast selection;
 the desktop uses the same available title metadata.
 
@@ -113,9 +113,26 @@ the app. Text subtitles use the shared `subtitles/` rustyass renderer with the s
 web, timed to the rendered video frame. Bitmap subtitles use mpv during direct play and are
 disabled on transcodes. Track choices are remembered; switching never reloads the video.
 P opens a native picture-in-picture window using the same decoder and
-GPU device; closing it returns to the player. X opens a clip draft on that player, with frame
-stepping, range selection, server rendering and return to the original watch position.
-Screenshot links preserve `/clips?clip=<id>` for #93's full Clips screen. Active video inhibits screen blanking through the platform idle-inhibition guard, including PiP.
+GPU device; closing it returns to the player. X opens the clip editor on that player (see
+Clips). Active video inhibits screen blanking through the platform idle-inhibition guard, including PiP.
+
+## Clips
+
+`/clips` (#93) is the web's Clips page: yours, shared with you and shared by you, filtered by
+kind or by a book's quotes, with your clip space. `/clips?clip=<id>` opens a clip's dialog over it,
+in place as on web, with its public link, who it was sent to, sending, renaming, deleting and
+downloading (saved where the FileChooser portal says, named as the server names it). Rendered
+clips play through their own mpv and the same stream callback as the player
+(`player/clip_player.rs`), with the web clip player's controls; F fills the window with one.
+
+The editor (`player/clip.rs`, `player/strip.rs`) works in the player's own mpv, on direct play:
+the range on a filmstrip of the server's preview frames, frame stepping (`,` `.`), I and O, the
+arrow keys nudging the edge last touched by a frame (a second with Shift), and the range looping
+exactly through mpv's A-B loop while it plays. Text subtitles show through the same rustyass
+overlay as the player, so the preview has what the server burns in. Its presets, size estimate
+and every other option are the web's, sent with the same mutations; changing a clip (the dialog's
+pencil) opens the editor on its recipe. Render progress, in the editor and on the page, comes
+through the `events` subscription.
 
 ## Watch Together
 
