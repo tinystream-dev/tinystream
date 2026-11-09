@@ -819,6 +819,39 @@ mod tests {
     }
 
     #[test]
+    fn replacement_players_start_when_the_room_releases_them() {
+        let video = concat!(env!("CARGO_MANIFEST_DIR"), "/../mpv/tests/data/testsrc.mp4");
+        let client = SyncClient::new("test".into(), None);
+        client.lock().receive(r#"{"type":"welcome","you":1}"#, &client);
+        for id in [1, 2, 1] {
+            let state = |running: bool| {
+                serde_json::json!({
+                "type": "state", "mediaId": id, "host": {"id": 1, "name": "host"}, "public": false,
+                "settings": {"control": "everyone", "waitForAll": true}, "tracks": {},
+                "clock": {"paused": false, "running": running, "position": 0.0, "at": local_now(), "rate": 1.0},
+                "members": [{"id": 1, "name": "host", "userId": 1, "avatar": null, "status": "loading"}], "action": null,
+            }).to_string()
+            };
+            client.lock().receive(&state(false), &client);
+            let mpv = Mpv::new(&[("vo", "null"), ("ao", "null"), ("idle", "yes"), ("keep-open", "yes")]).unwrap();
+            mpv.command(&["loadfile", video, "replace", "-1", "pause=yes"]).unwrap();
+            client.attach(mpv.clone(), id, 1.0, true, Arc::new(|_| {}));
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while !client.lock().sent_status.is_some_and(|(status, _)| status == Status::Ready) {
+                assert!(Instant::now() < deadline, "episode {id} never became ready");
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            client.lock().receive(&state(true), &client);
+            while mpv.get_property::<bool>("pause").unwrap_or(true) {
+                assert!(Instant::now() < deadline, "episode {id} stayed paused");
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            client.detach();
+        }
+        client.close();
+    }
+
+    #[test]
     fn positions_move_at_the_room_rate_only_once_started() {
         let c = clock(true, 10.0, 1000.0, 1.5);
         assert_eq!(position_at(&c, 500.0), 10.0);
