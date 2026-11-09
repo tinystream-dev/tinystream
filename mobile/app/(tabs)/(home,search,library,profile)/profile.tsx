@@ -62,7 +62,7 @@ export default function Profile() {
     enabled: !!features && !!can?.manageRequests,
   })
   const pending = requests.data?.filter((r) => r.state === 'PENDING').length ?? 0
-  const failing = transfers.data?.downloads.filter((d) => d.state === 'FAILED' || d.importState === 'FAILED').length ?? 0
+  const failing = transfers.data?.downloads.filter((d) => d.state === 'FAILED' || (d.importState === 'FAILED' || d.importState === 'PARTIAL')).length ?? 0
   const engine = transfers.data?.downloadEngine
   const icon = (Icon: typeof Bell) => <Icon size={20} color={tokens['ink-2']} />
 

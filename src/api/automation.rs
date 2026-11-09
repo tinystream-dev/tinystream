@@ -54,6 +54,7 @@ impl DownloadState {
 
 #[derive(Enum, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ImportState {
+    Partial,
     Pending,
     Done,
     Failed,
@@ -63,6 +64,7 @@ pub enum ImportState {
 impl ImportState {
     fn parse(s: &str) -> Self {
         match s {
+            "partial" => Self::Partial,
             "done" => Self::Done,
             "failed" => Self::Failed,
             "skipped" => Self::Skipped,

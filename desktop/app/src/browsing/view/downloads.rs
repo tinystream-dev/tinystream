@@ -319,6 +319,9 @@ fn download_row<'a>(b: &'a Browsing, dl: &'a Download, nested: bool, look: &Look
     ]
     .spacing(8)
     .align_y(Alignment::Center);
+    if dl.import_state == "PARTIAL" {
+        heading = heading.push(badge("Partially imported", Tone::Danger, look));
+    }
     if dl.import_state == "DONE" {
         heading = heading.push(badge("In library", Tone::Ok, look));
     }

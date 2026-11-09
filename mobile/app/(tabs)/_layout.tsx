@@ -45,7 +45,7 @@ function useAttention() {
     refetchInterval: 30_000,
   })
   const pending = data?.requests?.filter((r) => r.state === 'PENDING').length ?? 0
-  const failing = data?.downloads?.filter((d) => d.state === 'FAILED' || d.importState === 'FAILED').length ?? 0
+  const failing = data?.downloads?.filter((d) => d.state === 'FAILED' || (d.importState === 'FAILED' || d.importState === 'PARTIAL')).length ?? 0
   return (inbox?.unread ?? 0) + pending + failing
 }
 

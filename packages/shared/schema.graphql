@@ -782,6 +782,7 @@ enum ImportMode {
 }
 
 enum ImportState {
+	PARTIAL
 	PENDING
 	DONE
 	FAILED

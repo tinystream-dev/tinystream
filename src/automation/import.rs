@@ -82,7 +82,7 @@ pub async fn run(state: &Arc<AppState>, id: i64) -> anyhow::Result<()> {
 
     let grabbed_for: Vec<(u32, u32)> = serde_json::from_str(&episodes).unwrap_or_default();
 
-    let plan = match plan(state, &show, &name, Path::new(&save_path), &files, &grabbed_for).await {
+    let plan = match plan(state, id, &show, &name, Path::new(&save_path), &files, &grabbed_for).await {
         Ok(p) => p,
         Err(e) => return fail(state, id, &format!("{e:#}")).await,
     };
@@ -107,33 +107,19 @@ pub async fn run(state: &Arc<AppState>, id: i64) -> anyhow::Result<()> {
     };
 
     let batch = Batch::new(&state.db, format!("import-{id}"), format!("Imported {name}"));
-    let mut used = None;
-    let mut imported = 0;
-    let mut problems = Vec::new();
-
-    for p in &plan {
-        match batch.transfer(&p.from, &p.to, &how).await {
-            Ok(t) => {
-                used = Some(t);
-                imported += 1;
-
-                for (from, to) in &p.extras {
-                    if let Err(e) = batch.transfer(from, to, &how).await {
-                        tracing::debug!("extra file {}: {e:#}", from.display());
-                    }
-                }
-
-                sqlx::query("UPDATE episodes SET state = 'done', next_search = NULL WHERE series_id = ? AND season = ? AND episode = ?")
-                    .bind(series_id)
-                    .bind(p.season)
-                    .bind(p.episode)
-                    .execute(&state.db)
-                    .await?;
-
-                tracing::info!("imported {}", p.to.display());
-            },
-            Err(e) => problems.push(format!("{e:#}")),
-        }
+    let placed = place_files(&state.db, &batch, &plan, &how).await?;
+    let imported = placed.completed;
+    let problems = placed.problems;
+    let used = placed.used;
+    for &(season, episode) in &placed.episodes {
+        sqlx::query(
+            "UPDATE episodes SET state = 'done', next_search = NULL WHERE series_id = ? AND season = ? AND episode = ?",
+        )
+        .bind(series_id)
+        .bind(season)
+        .bind(episode)
+        .execute(&state.db)
+        .await?;
     }
 
     if imported == 0 {
@@ -143,8 +129,9 @@ pub async fn run(state: &Arc<AppState>, id: i64) -> anyhow::Result<()> {
     let used = used.unwrap();
 
     sqlx::query(
-        "UPDATE downloads SET import_state = 'done', import_mode = ?, imported_at = ?, import_error = ? WHERE id = ?",
+        "UPDATE downloads SET import_state = ?, import_mode = ?, imported_at = ?, import_error = ? WHERE id = ?",
     )
+    .bind(if problems.is_empty() { "done" } else { "partial" })
     .bind(used.as_str())
     .bind(now())
     .bind((!problems.is_empty()).then(|| problems.join("; ")))
@@ -152,7 +139,7 @@ pub async fn run(state: &Arc<AppState>, id: i64) -> anyhow::Result<()> {
     .execute(&state.db)
     .await?;
 
-    if used == Transfer::Move {
+    if used == Transfer::Move && problems.is_empty() {
         state.automation.engine.remove(&hash, false);
 
         sqlx::query("UPDATE downloads SET state = 'done', removed_at = ? WHERE id = ?")
@@ -166,8 +153,11 @@ pub async fn run(state: &Arc<AppState>, id: i64) -> anyhow::Result<()> {
     state.events.send(Event::DownloadsChanged);
     state.events.send(Event::SeriesChanged { series_id });
     let item_id = series::item_id(state, &show.path).await.ok().flatten();
-    let episodes: Vec<(u32, u32)> = plan.iter().map(|p| (p.season, p.episode)).collect();
+    let episodes = placed.episodes;
 
+    if episodes.is_empty() {
+        return Ok(());
+    }
     state.events.send(Event::Imported {
         library: show.library.clone(),
         show: show.title.clone(),
@@ -177,6 +167,67 @@ pub async fn run(state: &Arc<AppState>, id: i64) -> anyhow::Result<()> {
 
     announce_ready(state, &show, series_id, item_id, &episodes).await;
     Ok(())
+}
+
+#[derive(Default)]
+struct Placed {
+    completed: usize,
+    used: Option<Transfer>,
+    episodes: Vec<(u32, u32)>,
+    problems: Vec<String>,
+}
+
+async fn recorded(
+    db: &sqlx::SqlitePool,
+    batch: &Batch<'_>,
+    from: &Path,
+    to: &Path,
+) -> anyhow::Result<Option<Transfer>> {
+    if !to.is_file() {
+        return Ok(None);
+    }
+    let kind: Option<String> = sqlx::query_scalar("SELECT kind FROM file_ops WHERE batch = ? AND src = ? AND dst = ? AND undone_at IS NULL ORDER BY id DESC LIMIT 1")
+        .bind(&batch.id).bind(from.to_string_lossy().as_ref()).bind(to.to_string_lossy().as_ref()).fetch_optional(db).await?;
+    Ok(match kind.as_deref() {
+        Some("hardlink") => Some(Transfer::Hardlink),
+        Some("copy") => Some(Transfer::Copy),
+        Some("move") => Some(Transfer::Move),
+        _ => None,
+    })
+}
+
+async fn place_files(
+    db: &sqlx::SqlitePool,
+    batch: &Batch<'_>,
+    plan: &[Planned],
+    how: &[Transfer],
+) -> anyhow::Result<Placed> {
+    let mut out = Placed::default();
+    for p in plan {
+        let previous = recorded(db, batch, &p.from, &p.to).await?;
+        let transfer = match previous {
+            Some(mode) => Ok(mode),
+            None => batch.transfer(&p.from, &p.to, how).await,
+        };
+        match transfer {
+            Ok(mode) => {
+                out.completed += 1;
+                out.used = Some(mode);
+                if previous.is_none() {
+                    out.episodes.push((p.season, p.episode));
+                }
+                for (from, to) in &p.extras {
+                    if recorded(db, batch, from, to).await?.is_none() {
+                        if let Err(error) = batch.transfer(from, to, how).await {
+                            out.problems.push(format!("{}: {error:#}", from.display()));
+                        }
+                    }
+                }
+            },
+            Err(error) => out.problems.push(format!("{}: {error:#}", p.from.display())),
+        }
+    }
+    Ok(out)
 }
 
 async fn announce_ready(
@@ -224,8 +275,9 @@ async fn announce_ready(
     .await;
 }
 
-pub async fn plan(
+async fn plan(
     state: &AppState,
+    download: i64,
     show: &series::Row,
     release_name: &str,
     save_path: &Path,
@@ -261,7 +313,10 @@ pub async fn plan(
             continue;
         };
 
-        if already_have(state, &show.path, season, episode).await? {
+        let previously_placed: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM file_ops WHERE batch = ? AND src = ? AND kind IN ('hardlink', 'copy', 'move') AND undone_at IS NULL)")
+            .bind(format!("import-{download}"))
+            .bind(save_path.join(&f.path).to_string_lossy().as_ref()).fetch_one(&state.db).await?;
+        if !previously_placed && already_have(state, &show.path, season, episode).await? {
             tracing::info!("{file_name}: the library already has S{season:02}E{episode:02}; skipping");
             continue;
         }
@@ -354,6 +409,33 @@ async fn already_have(state: &AppState, show_path: &str, season: u32, episode: u
 mod tests {
     use super::super::matching::Numbering;
     use super::*;
+
+    #[tokio::test]
+    async fn partial_imports_keep_failures_retryable_and_only_announce_new_successes() {
+        let dir = std::env::temp_dir().join(format!("ts-import-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = crate::db::open(&dir.join("test.db")).await.unwrap();
+        let mut plan = Vec::new();
+        for episode in [1, 2] {
+            let from = dir.join(format!("source-{episode}"));
+            std::fs::write(&from, "video").unwrap();
+            plan.push(Planned { from, to: dir.join(format!("dest-{episode}")), season: 1, episode, extras: vec![] });
+        }
+        std::fs::write(&plan[1].to, "occupied").unwrap();
+        let batch = Batch::new(&db, "partial", "test");
+        let first = place_files(&db, &batch, &plan, &[Transfer::Move]).await.unwrap();
+        assert_eq!(first.completed, 1);
+        assert_eq!(first.episodes, [(1, 1)]);
+        assert_eq!(first.problems.len(), 1);
+        assert!(plan[1].from.exists());
+        std::fs::remove_file(&plan[1].to).unwrap();
+        let retry = place_files(&db, &batch, &plan, &[Transfer::Move]).await.unwrap();
+        assert_eq!(retry.completed, 2);
+        assert_eq!(retry.episodes, [(1, 2)]);
+        assert!(retry.problems.is_empty());
+        db.close().await;
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 
     #[test]
     fn selected_episode_takes_precedence_for_a_single_video() {

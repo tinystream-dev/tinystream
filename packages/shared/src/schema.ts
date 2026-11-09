@@ -720,6 +720,7 @@ export type ImportMode =
 export type ImportState =
   | 'DONE'
   | 'FAILED'
+  | 'PARTIAL'
   | 'PENDING'
   | 'SKIPPED';
 

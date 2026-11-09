@@ -112,9 +112,11 @@ function DownloadsPage() {
   useTitle('Downloads')
   const [category, setCategory] = useState('')
   const qc = useQueryClient()
-  const { data, dataUpdatedAt } = useQuery({ queryKey: ['downloads'], queryFn: async () => (await request(DownloadsQuery)).downloads, refetchInterval: POLL })
+  const { data, dataUpdatedAt } = useQuery({ queryKey: ['downloads'], staleTime: 0, refetchOnMount: 'always', queryFn: async () => (await request(DownloadsQuery)).downloads, refetchInterval: POLL })
   const { data: engine, dataUpdatedAt: engineAt, isPending: enginePending } = useQuery({
     queryKey: ['engine'],
+    staleTime: 0,
+    refetchOnMount: 'always',
     queryFn: async () => (await request(EngineQuery)).downloadEngine,
     refetchInterval: POLL,
   })
@@ -462,6 +464,7 @@ function useDeletion(d: Download, season: number | null) {
 function status(d: Download): { text: string; tone: 'quiet' | 'ok' | 'live' | 'warn' | 'danger' } {
   if (d.state === 'FAILED') return { text: 'Failed', tone: 'danger' }
   if (d.state === 'REMOVED') return { text: 'Removed', tone: 'quiet' }
+  if (d.importState === 'PARTIAL') return { text: 'Partially imported', tone: 'danger' }
   if (d.importState === 'FAILED') return { text: 'Not imported', tone: 'danger' }
   const l = d.live
   if (d.state === 'PAUSED') return { text: 'Paused', tone: 'quiet' }
@@ -513,7 +516,7 @@ function Row({ d, where, stamp, nested }: { d: Download; where: Where; stamp: nu
   const eps = d.episodes
   const label =
     eps.length === 0 ? null : eps.length === 1 ? episodeCode(eps[0].season, eps[0].episode) : `${eps.length} episodes`
-  const error = d.error ?? (d.importState === 'FAILED' ? d.importError : null)
+  const error = d.error ?? ((d.importState === 'FAILED' || d.importState === 'PARTIAL') ? d.importError : null)
   const paused = d.state === 'PAUSED'
   const live = downloading || d.state === 'SEEDING' || paused
   const seeded = (d.state === 'SEEDING' || (paused && d.finishedAt)) && l
