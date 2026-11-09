@@ -110,7 +110,7 @@ pub fn presented() {
 
 /// `screen`'s video, filling what it's given; `aspect` is the picture's width over its height.
 pub fn video(screen: &Arc<Screen>, aspect: Option<f32>) -> Video {
-    Video { screen: screen.clone(), aspect, recede: 0.0, ambient: false, paused: false }
+    Video { screen: screen.clone(), aspect, recede: 0.0, ambient: false, paused: false, radius: 0.0 }
 }
 
 pub struct Video {
@@ -119,9 +119,15 @@ pub struct Video {
     recede: f32,
     ambient: bool,
     paused: bool,
+    radius: f32,
 }
 
 impl Video {
+    pub fn radius(mut self, radius: f32) -> Self {
+        self.radius = radius.max(0.0);
+        self
+    }
+
     /// How far the frame has receded behind what's playing, from 0 to 1.
     pub fn recede(mut self, amount: f32) -> Self {
         self.recede = amount.clamp(0.0, 1.0);
@@ -166,6 +172,7 @@ impl<Message> Widget<Message, Theme, Renderer> for Video {
                 recede: self.recede,
                 ambient: self.ambient,
                 paused: self.paused,
+                radius: self.radius,
             },
         );
     }
@@ -178,6 +185,7 @@ struct Picture {
     recede: f32,
     ambient: bool,
     paused: bool,
+    radius: f32,
 }
 
 /// The largest `aspect` rectangle in `stage`, centred, on whole pixels (`object-fit: contain`).
@@ -263,7 +271,7 @@ impl Primitive for Picture {
                 opacity,
                 linear,
                 blend,
-                0.0,
+                self.radius * scale,
             ])
         };
         let size = (target.width as f32, target.height as f32);
@@ -632,8 +640,14 @@ mod tests {
         mpv.set_property("speed", 2.0).unwrap();
         assert!(mpv.get_property::<bool>("pause").unwrap());
 
-        let picture =
-            Picture { screen: screen.clone(), aspect: Some(16.0 / 9.0), recede: 0.0, ambient: false, paused: true };
+        let picture = Picture {
+            screen: screen.clone(),
+            aspect: Some(16.0 / 9.0),
+            recede: 0.0,
+            ambient: false,
+            paused: true,
+            radius: 0.0,
+        };
         let viewport =
             Viewport::with_physical_size(Size::new(800, 600), renderer::Scale { window: 1.25, application: 1.0 });
         let bounds = Rectangle { x: 0.0, y: 0.0, width: 640.0, height: 480.0 };

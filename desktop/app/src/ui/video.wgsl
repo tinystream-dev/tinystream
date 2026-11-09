@@ -13,7 +13,7 @@ struct Params {
     linear: f32,
     // The constant blend of a new sample over the last, for the ambient light.
     blend: f32,
-    pad: f32,
+    radius: f32,
 }
 
 @group(0) @binding(0) var<uniform> params: Params;
@@ -50,6 +50,11 @@ fn decode(color: vec3<f32>) -> vec3<f32> {
 
 @fragment
 fn video(in: Out) -> @location(0) vec4<f32> {
+    let r = min(params.radius, min(params.rect.z, params.rect.w) * 0.5);
+    let q = abs((in.uv - 0.5) * params.rect.zw) - params.rect.zw * 0.5 + r;
+    if length(max(q, vec2<f32>(0.0))) + min(max(q.x, q.y), 0.0) > r {
+        discard;
+    }
     var color = textureSampleLevel(picture, filtering, in.uv, 0.0).rgb;
     if params.recede > 0.0 {
         // blur(6px), as a disc of samples around the pixel.
