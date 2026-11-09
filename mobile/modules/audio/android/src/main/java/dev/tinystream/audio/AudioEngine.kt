@@ -42,7 +42,7 @@ internal class AudioEngine(val rate: Int, private val emit: (String, Map<String,
       try { pump() } catch (error: Exception) {
         playing = false
         output?.pause()
-        emit("error", mapOf("key" to position?.key, "message" to "Audio playback failed"))
+        emit("error", mapOf("key" to (position?.key ?: inputs.firstOrNull()?.key ?: ""), "message" to "Audio playback failed"))
       }
     }, 0, 10, TimeUnit.MILLISECONDS)
   }

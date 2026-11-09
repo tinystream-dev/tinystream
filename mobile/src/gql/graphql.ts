@@ -917,8 +917,8 @@ export type EventsSubscription = { events:
     | { __typename: 'ListChanged', list: ChangedList }
     | { __typename: 'MetadataChanged', titleId: number, status: MetadataStatus }
     | { __typename: 'NotificationReceived', notification: { id: number, kind: NotificationKind, priority: boolean, title: string, body: string | null, image: string | null, link: string | null, createdAt: number, expiresAt: number | null, readAt: number | null, actor: { id: number, username: string, avatar: string | null } | null } }
-    | { __typename: 'PlaybackChanged' }
-    | { __typename: 'QueueChanged' }
+    | { __typename: 'PlaybackChanged', client: string, trackId: number | null, position: number, paused: boolean }
+    | { __typename: 'QueueChanged', by: string | null }
     | { __typename: 'ScanFinished', library: string }
     | { __typename: 'ScanStarted' }
     | { __typename: 'SeriesChanged', seriesId: number }
@@ -3537,6 +3537,15 @@ export const EventsDocument = new TypedDocumentString(`
       notification {
         ...NotificationFields
       }
+    }
+    ... on QueueChanged {
+      by
+    }
+    ... on PlaybackChanged {
+      client
+      trackId
+      position
+      paused
     }
     ... on ClipChanged {
       clipId
