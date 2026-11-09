@@ -39,7 +39,27 @@ pub fn select<'a, Message: Clone + 'a, T: Clone + PartialEq + 'a>(
     .center_y(36)
     .padding([0, 12])
     .boxed();
-    Select { options, labels, chosen, on_change: Box::new(on_change), content, look: *look }.boxed()
+    Select { options, labels, chosen, on_change: Box::new(on_change), content, look: *look, menu_width: None }.boxed()
+}
+
+pub fn icon_menu<'a, Message: Clone + 'a, T: Clone + PartialEq + 'a>(
+    glyph: Icon,
+    options: &'a [T],
+    selected: Option<T>,
+    label: impl Fn(&T) -> String,
+    on_change: impl Fn(T) -> Message + 'a,
+    look: &Look,
+) -> Element<'a, Message> {
+    Select {
+        options,
+        labels: options.iter().map(label).collect(),
+        chosen: selected.as_ref().and_then(|value| options.iter().position(|o| o == value)),
+        on_change: Box::new(on_change),
+        content: container(icon(glyph, 16.0)).center(36).boxed(),
+        look: *look,
+        menu_width: Some(224.0),
+    }
+    .boxed()
 }
 
 struct Select<'a, T, Message> {
@@ -49,6 +69,7 @@ struct Select<'a, T, Message> {
     on_change: Box<dyn Fn(T) -> Message + 'a>,
     content: Element<'a, Message>,
     look: Look,
+    menu_width: Option<f32>,
 }
 
 #[derive(Default)]
@@ -139,11 +160,11 @@ impl<T: Clone, Message: Clone> Widget<Message, Theme, Renderer> for Select<'_, T
     }
 
     fn size(&self) -> Size<Length> {
-        Size::new(Length::Fill, Length::Fixed(36.0))
+        Size::new(if self.menu_width.is_some() { Length::Fixed(36.0) } else { Length::Fill }, Length::Fixed(36.0))
     }
 
     fn layout(&mut self, tree: &mut Tree, renderer: &Renderer, limits: &layout::Limits) {
-        layout::padded(tree, limits, Length::Fill, Length::Fixed(36.0), 0, |tree, limits| {
+        layout::padded(tree, limits, self.size().width, Length::Fixed(36.0), 0, |tree, limits| {
             self.content.layout(tree, renderer, limits);
             tree.size
         });
@@ -210,8 +231,14 @@ impl<T: Clone, Message: Clone> Widget<Message, Theme, Renderer> for Select<'_, T
         let shape =
             Outline { bounds: layout.bounds(), radius: self.look.radius(9.0), smoothing: self.look.corners().1 };
         let paint = Paint {
-            fill: Some(self.look.raised),
-            edge: true,
+            fill: if self.menu_width.is_none() {
+                Some(self.look.raised)
+            } else if cursor.is_over(layout.bounds()) {
+                Some(self.look.hover)
+            } else {
+                None
+            },
+            edge: self.menu_width.is_none(),
             ring: state.focused.then_some(self.look.focus),
             ..Paint::NONE
         };
@@ -239,7 +266,11 @@ impl<T: Clone, Message: Clone> Widget<Message, Theme, Renderer> for Select<'_, T
         _: &Rectangle,
         _: &Renderer,
     ) -> mouse::Interaction {
-        if cursor.is_over(layout.bounds()) { mouse::Interaction::Idle } else { mouse::Interaction::None }
+        if cursor.is_over(layout.bounds()) {
+            if self.menu_width.is_some() { mouse::Interaction::Pointer } else { mouse::Interaction::Idle }
+        } else {
+            mouse::Interaction::None
+        }
     }
 
     fn overlay<'b>(
@@ -285,6 +316,7 @@ impl<T: Clone, Message: Clone> Widget<Message, Theme, Renderer> for Select<'_, T
         });
         let anchor = layout.bounds();
         let position = anchor.position() + translation;
+        let menu_width = self.menu_width.unwrap_or(anchor.width).min(window.width);
         let below = (window.height - position.y - anchor.height - 8.0).max(0.0);
         let above = (position.y - 8.0).max(0.0);
         let height = (self.options.len() as f32 * 36.0 + 12.0).min(320.0).min(below.max(above));
@@ -294,14 +326,14 @@ impl<T: Clone, Message: Clone> Widget<Message, Theme, Renderer> for Select<'_, T
             &l,
         )
         .padding(6)
-        .width(anchor.width)
+        .width(menu_width)
         .boxed();
         let popup = &mut tree.children[1];
         popup.diff::<Message, Theme, Renderer>(&mut content);
-        content.layout(popup, renderer, &layout::Limits::new(Size::ZERO, Size::new(anchor.width, height)));
+        content.layout(popup, renderer, &layout::Limits::new(Size::ZERO, Size::new(menu_width, height)));
         let y = if below >= height { position.y + anchor.height + 8.0 } else { (position.y - height - 8.0).max(0.0) };
         let placed = Layout::new(popup.size)
-            .move_to(iced_core::Point::new(position.x.min(window.width - anchor.width).max(0.0), y));
+            .move_to(iced_core::Point::new(position.x.min(window.width - menu_width).max(0.0), y));
         vec![overlay::Element::new(Box::new(Menu {
             content,
             tree: popup,

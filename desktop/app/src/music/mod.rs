@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
+mod dismiss;
 mod engine;
 mod listen;
 pub mod model;
@@ -12,7 +13,7 @@ use graphql_client::GraphQLQuery;
 use model::{Entry, Repeat, Settings, Track};
 use serde::Deserialize;
 use serde_json::{Value, json};
-pub use view::{page, pill};
+pub use view::{now_playing, page, pill};
 
 use crate::api::{self, Api};
 use crate::app::{Effect, Message as AppMessage};
@@ -82,6 +83,8 @@ pub enum Message {
     Fade(f64),
     Dismiss,
     Expand,
+    Collapse,
+    Mute,
     Fullscreen,
     Panel(u8),
     Star(i64, bool),
@@ -261,6 +264,10 @@ impl Music {
             self.pause(effects);
         }
         self.suspended = suspended;
+        if suspended {
+            self.expanded = false;
+            self.fullscreen = false;
+        }
         if self.route.as_ref() != Some(route) {
             self.route = Some(route.clone());
             self.offset = 0;
@@ -836,6 +843,7 @@ impl Music {
             },
             Message::Volume(volume) => {
                 self.settings.volume = volume;
+                self.settings.muted = false;
                 self.settings_changed();
             },
             Message::Gain(gain) => {
@@ -849,21 +857,41 @@ impl Music {
                 self.changed_queue(effects);
             },
             Message::Dismiss => {
-                if !self.playing {
-                    self.dismissed = true;
-                    self.fullscreen = false;
+                if self.playing {
+                    self.pause(effects);
                 }
+                self.dismissed = true;
+                self.expanded = false;
+                self.fullscreen = false;
+            },
+            Message::Collapse => {
+                self.expanded = false;
+                self.fullscreen = false;
+            },
+            Message::Mute => {
+                self.settings.muted = !self.settings.muted;
+                self.settings_changed();
             },
             Message::Expand => {
                 self.expanded = !self.expanded;
                 self.fullscreen = false;
             },
             Message::Fullscreen => {
-                self.expanded = true;
-                self.fullscreen = !self.fullscreen;
+                let open = !self.fullscreen;
+                self.fullscreen = open;
+                self.expanded = open;
             },
-            Message::Panel(panel) => self.panel = panel,
+            Message::Panel(panel) => {
+                self.panel = panel;
+                self.fullscreen = true;
+                self.expanded = true;
+            },
             Message::Star(id, starred) => {
+                for t in &mut self.songs {
+                    if t.id == id {
+                        t.starred = starred;
+                    }
+                }
                 for e in &mut self.queue {
                     if e.track.id == id {
                         e.track.starred = starred;
@@ -875,11 +903,23 @@ impl Music {
                     effects,
                 );
             },
-            Message::Rating(id, rating) => self.request::<api::MusicRate>(
-                api::music_rate::Variables { kind: api::music_rate::MusicKind::TRACK, id, rating },
-                Message::Done,
-                effects,
-            ),
+            Message::Rating(id, rating) => {
+                for t in &mut self.songs {
+                    if t.id == id {
+                        t.rating = Some(rating);
+                    }
+                }
+                for e in &mut self.queue {
+                    if e.track.id == id {
+                        e.track.rating = Some(rating);
+                    }
+                }
+                self.request::<api::MusicRate>(
+                    api::music_rate::Variables { kind: api::music_rate::MusicKind::TRACK, id, rating },
+                    Message::Done,
+                    effects,
+                );
+            },
             Message::Name(name) => {
                 self.name = name.clone();
                 self.guest_name = name;
@@ -928,6 +968,10 @@ impl Music {
                     effects,
                 );
             },
+        }
+        if self.current().is_none() || self.dismissed || self.suspended {
+            self.expanded = false;
+            self.fullscreen = false;
         }
         self.fetch_art(effects);
         None
@@ -1171,6 +1215,29 @@ mod tests {
         (1..=3).map(|id| Track { id, title: format!("Track {id}"), ..Track::default() }).collect()
     }
     #[test]
+    fn closing_a_playing_player_pauses_and_dismisses_without_opening_fullscreen() {
+        let mut music = Music::default();
+        let mut effects = vec![];
+        music.update(Message::Play(tracks(), 0), &mut effects);
+        music.expanded = true;
+        music.update(Message::Dismiss, &mut effects);
+        assert!(music.dismissed, "Close must dismiss while playing");
+        assert!(!music.playing);
+        assert!(!music.expanded);
+        assert!(!music.fullscreen);
+    }
+    #[test]
+    fn leaving_now_playing_returns_to_the_pill() {
+        let mut music = Music::default();
+        music.queue = music.entries(tracks());
+        let mut effects = vec![];
+        music.update(Message::Fullscreen, &mut effects);
+        assert!(music.fullscreen);
+        music.update(Message::Fullscreen, &mut effects);
+        assert!(!music.fullscreen);
+        assert!(!music.expanded, "Closing Now Playing must return to the pill");
+    }
+    #[test]
     fn queue_edits_and_shuffle_preserve_the_audible_track() {
         let mut music = Music::default();
         let mut effects = vec![];
@@ -1202,9 +1269,10 @@ mod tests {
         assert_eq!(music.repeat, Repeat::All);
     }
     #[test]
-    #[ignore = "requires Vulkan; renders native music pages and queue controls"]
+    #[ignore = "requires Vulkan; clicks native player controls and verifies close/collapse behavior"]
     fn native_music_render() {
-        let dir = std::path::Path::new("/tmp/tinystream-music-qa");
+        use iced_core::{Event, Point, Size, mouse};
+        let dir = std::path::Path::new("/tmp/tinystream-music-ui-qa");
         std::fs::create_dir_all(dir).unwrap();
         let mut app = crate::app::App::new(Route::Album(1), crate::window_state::WindowState::default());
         app.session.screen = crate::session::Screen::Ready;
@@ -1213,30 +1281,63 @@ mod tests {
             id: 1,
             name: "A quiet afternoon".into(),
             artist: "The River Quartet".into(),
-            ..Card::default()
+            ..Default::default()
         });
-        app.music.songs = tracks();
-        app.music.queue = app.music.entries(tracks());
+        let mut songs = tracks();
+        for t in &mut songs {
+            t.artist = "The River Quartet".into();
+            t.album = "A quiet afternoon".into();
+            t.duration = 245.0;
+            t.codec = "flac".into();
+            t.sample_rate = Some(48000);
+            t.bit_depth = Some(24);
+        }
+        app.music.songs = songs.clone();
+        app.music.queue = app.music.entries(songs);
+        app.music.position = 63.0;
+        app.music.playing = true;
+        let draw = |app: &mut crate::app::App, name: &str, cursor: Option<Point>, events: &[Event]| {
+            crate::snapshot::snapshot(app, Size::new(1280, 800), 1.0, cursor, &dir.join(name), events).unwrap()
+        };
+        let click = [
+            Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)),
+            Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)),
+        ];
+        draw(&mut app, "pill.png", None, &[]);
+        draw(&mut app, "pause.png", Some(Point::new(721.0, 754.0)), &click);
+        assert!(!app.music.playing, "Pill play button should pause");
+        assert!(!app.music.expanded, "Transport click must not expand the pill");
+        assert!(!app.music.fullscreen);
+        app.music.playing = true;
+        let messages = draw(&mut app, "closed.png", Some(Point::new(811.0, 754.0)), &click);
+        assert!(
+            messages.iter().any(|m| matches!(m, crate::app::Message::Music(_, Message::Dismiss))),
+            "Click must reach close"
+        );
+        assert!(app.music.dismissed);
+        assert!(!app.music.playing);
+        assert!(!app.music.fullscreen);
+        assert_eq!(app.music.queue.len(), 3);
+        app.music.dismissed = false;
+        app.music.playing = true;
+        app.music.expanded = true;
+        draw(&mut app, "card.png", None, &[]);
+        draw(&mut app, "collapsed.png", Some(Point::new(300.0, 100.0)), &click);
+        assert!(!app.music.expanded, "Clicking outside should collapse the card");
+        assert!(app.music.playing);
+        app.music.fullscreen = true;
         app.music.expanded = true;
         app.music.panel = 1;
-        crate::snapshot::snapshot(
-            &mut app,
-            iced_core::Size::new(1280, 800),
-            1.0,
-            None,
-            &dir.join("album-queue.png"),
-            &[],
-        )
-        .unwrap();
+        draw(&mut app, "now-playing-queue.png", None, &[]);
+        draw(&mut app, "now-playing-closed.png", Some(Point::new(52.0, 68.0)), &click);
+        assert!(!app.music.fullscreen);
+        assert!(!app.music.expanded);
+        assert!(app.music.playing);
+        app.music.fullscreen = true;
+        app.music.expanded = true;
         app.music.panel = 2;
-        crate::snapshot::snapshot(
-            &mut app,
-            iced_core::Size::new(1280, 800),
-            1.0,
-            None,
-            &dir.join("player-info.png"),
-            &[],
-        )
-        .unwrap();
+        draw(&mut app, "now-playing-details.png", None, &[]);
+        crate::snapshot::snapshot(&mut app, Size::new(768, 600), 1.0, None, &dir.join("small-now-playing.png"), &[])
+            .unwrap();
     }
 }

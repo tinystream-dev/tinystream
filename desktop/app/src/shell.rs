@@ -74,10 +74,7 @@ fn screen(app: &App) -> Element<'_, Message> {
     if app.music.fullscreen && !app.music.suspended && !app.music.dismissed {
         let look = app.session.look();
         let generation = app.session.generation;
-        let content = container(crate::music::pill(&app.music, &look).map(move |m| Message::Music(generation, m)))
-            .center(Fill)
-            .padding(32)
-            .boxed();
+        let content = crate::music::now_playing(&app.music, &look).map(move |m| Message::Music(generation, m)).boxed();
         return chrome(app, content, true, &look);
     }
     if let Some(viewer) = &app.local_video {

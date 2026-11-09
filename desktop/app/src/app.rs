@@ -1007,17 +1007,29 @@ impl App {
 
     /// Handles shell shortcuts, including search and Escape while a text field has focus.
     pub fn listen(&mut self, event: &Event, status: event::Status) -> Option<Message> {
-        if self.music.fullscreen
+        if (self.music.fullscreen || self.music.expanded)
             && status != event::Status::Captured
-            && matches!(
-                event,
-                Event::Keyboard(keyboard::Event::KeyPressed {
-                    key: keyboard::Key::Named(keyboard::key::Named::Escape),
-                    ..
-                })
-            )
+            && let Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. }) = event
         {
-            return Some(Message::Music(self.session.generation, crate::music::Message::Fullscreen));
+            use keyboard::key::Named;
+            let message = match key {
+                keyboard::Key::Named(Named::Escape) => Some(crate::music::Message::Collapse),
+                keyboard::Key::Named(Named::Space)
+                    if self.music.fullscreen && !modifiers.control() && !modifiers.alt() && !modifiers.logo() =>
+                {
+                    Some(crate::music::Message::Toggle)
+                },
+                keyboard::Key::Named(Named::ArrowRight) if self.music.fullscreen && modifiers.shift() => {
+                    Some(crate::music::Message::Next)
+                },
+                keyboard::Key::Named(Named::ArrowLeft) if self.music.fullscreen && modifiers.shift() => {
+                    Some(crate::music::Message::Previous)
+                },
+                _ => None,
+            };
+            if let Some(message) = message {
+                return Some(Message::Music(self.session.generation, message));
+            }
         }
         if status != event::Status::Captured
             && matches!(self.history.current().route, Route::Read(_))
