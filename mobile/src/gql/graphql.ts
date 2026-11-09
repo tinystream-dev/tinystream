@@ -4,6 +4,17 @@ type Exact<T extends { [key: string]: unknown }> = { [K in keyof T]: T[K] };
 /** Internal type. DO NOT USE DIRECTLY. */
 export type Incremental<T> = T | { [P in keyof T]?: P extends ' $fragmentName' | '__typename' ? T[P] : never };
 import type { DocumentTypeDecoration } from '@graphql-typed-document-node/core';
+export type AlbumSort =
+  | 'ARTIST'
+  | 'FREQUENT'
+  | 'NAME'
+  | 'NEWEST'
+  | 'RANDOM'
+  | 'RATED'
+  | 'RECENT'
+  | 'STARRED'
+  | 'YEAR';
+
 /** What someone picked for themselves; anything left out follows the server. */
 export type AppearanceSettingsInput = {
   colors?: SchemeChoiceInput | null | undefined;
@@ -171,6 +182,11 @@ export type LogConfigInput = {
   level: string;
 };
 
+export type LyricsSource =
+  | 'EMBEDDED'
+  | 'FILE'
+  | 'ONLINE';
+
 export type MatchState =
   | 'MANUAL'
   | 'MATCHED'
@@ -203,6 +219,11 @@ export type MusicConfigInput = {
   lyricsUrl: string;
   onlineLyrics: boolean;
 };
+
+export type MusicKind =
+  | 'ALBUM'
+  | 'ARTIST'
+  | 'TRACK';
 
 export type NetworkConfigInput = {
   cors: Array<string>;
@@ -313,6 +334,14 @@ export type PermissionsInput = {
   watchTogether: boolean;
 };
 
+export type PlaylistInput = {
+  comment?: string | null | undefined;
+  name?: string | null | undefined;
+  public?: boolean | null | undefined;
+  /** Replaces what's in it. */
+  tracks?: Array<number> | null | undefined;
+};
+
 export type ProfileInput = {
   batches: boolean;
   codecs: Array<string>;
@@ -330,6 +359,14 @@ export type ProfileInput = {
 export type Provider =
   | 'ANILIST'
   | 'TMDB';
+
+export type QueueInput = {
+  current: number;
+  position: number;
+  repeat?: Repeat;
+  shuffled?: boolean;
+  tracks: Array<number>;
+};
 
 export type RecipeInput = {
   audio?: number | null | undefined;
@@ -351,6 +388,11 @@ export type ReleaseInput = {
   source: string;
   title: string;
 };
+
+export type Repeat =
+  | 'ALL'
+  | 'OFF'
+  | 'ONE';
 
 export type RequestState =
   | 'APPROVED'
@@ -969,6 +1011,161 @@ export type LookForAgainMutationVariables = Exact<{
 
 export type LookForAgainMutation = { lookForAgain: boolean };
 
+export type MusicTrackFragment = { id: number, title: string, artist: string, album: string, albumId: number | null, albumArtist: string | null, library: string, disc: number | null, number: number | null, year: number | null, duration: number, codec: string, suffix: string, lossless: boolean, bitrate: number | null, sampleRate: number | null, bitDepth: number | null, channels: number | null, size: number, file: string, flac: string, cover: string | null, coverTint: string | null, starred: boolean, rating: number | null, playCount: number, artists: Array<{ id: number, name: string }>, gains: { trackGain: number | null, trackPeak: number | null, albumGain: number | null, albumPeak: number | null, pending: boolean } };
+
+export type AlbumCardFragment = { id: number, name: string, artist: string, year: number | null, cover: string | null, trackCount: number, duration: number, compilation: boolean, starred: boolean, playCount: number, addedAt: number, artists: Array<{ id: number, name: string }> };
+
+export type ArtistCardFragment = { id: number, name: string, albumCount: number, trackCount: number, cover: string | null, starred: boolean };
+
+export type PlaylistCardFragment = { id: number, name: string, comment: string | null, public: boolean, mine: boolean, trackCount: number, duration: number, covers: Array<string>, owner: { id: number, username: string } };
+
+export type PlayQueueQueryVariables = Exact<{ [key: string]: never; }>;
+
+
+export type PlayQueueQuery = { playQueue: { current: number, position: number, shuffled: boolean, repeat: Repeat, changedBy: string | null, updatedAt: number, tracks: Array<{ id: number, title: string, artist: string, album: string, albumId: number | null, albumArtist: string | null, library: string, disc: number | null, number: number | null, year: number | null, duration: number, codec: string, suffix: string, lossless: boolean, bitrate: number | null, sampleRate: number | null, bitDepth: number | null, channels: number | null, size: number, file: string, flac: string, cover: string | null, coverTint: string | null, starred: boolean, rating: number | null, playCount: number, artists: Array<{ id: number, name: string }>, gains: { trackGain: number | null, trackPeak: number | null, albumGain: number | null, albumPeak: number | null, pending: boolean } }> } };
+
+export type TrackQueryVariables = Exact<{
+  id: number;
+}>;
+
+
+export type TrackQuery = { track: { id: number, title: string, artist: string, album: string, albumId: number | null, albumArtist: string | null, library: string, disc: number | null, number: number | null, year: number | null, duration: number, codec: string, suffix: string, lossless: boolean, bitrate: number | null, sampleRate: number | null, bitDepth: number | null, channels: number | null, size: number, file: string, flac: string, cover: string | null, coverTint: string | null, starred: boolean, rating: number | null, playCount: number, artists: Array<{ id: number, name: string }>, gains: { trackGain: number | null, trackPeak: number | null, albumGain: number | null, albumPeak: number | null, pending: boolean } } | null };
+
+export type SavePlayQueueMutationVariables = Exact<{
+  input: QueueInput;
+}>;
+
+
+export type SavePlayQueueMutation = { savePlayQueue: { updatedAt: number } };
+
+export type MeasureLoudnessMutationVariables = Exact<{
+  trackId: number;
+}>;
+
+
+export type MeasureLoudnessMutation = { measureLoudness: { id: number, title: string, artist: string, album: string, albumId: number | null, albumArtist: string | null, library: string, disc: number | null, number: number | null, year: number | null, duration: number, codec: string, suffix: string, lossless: boolean, bitrate: number | null, sampleRate: number | null, bitDepth: number | null, channels: number | null, size: number, file: string, flac: string, cover: string | null, coverTint: string | null, starred: boolean, rating: number | null, playCount: number, artists: Array<{ id: number, name: string }>, gains: { trackGain: number | null, trackPeak: number | null, albumGain: number | null, albumPeak: number | null, pending: boolean } } };
+
+export type PlayedMutationVariables = Exact<{
+  trackId: number;
+}>;
+
+
+export type PlayedMutation = { played: boolean };
+
+export type NowPlayingMutationVariables = Exact<{
+  trackId?: number | null | undefined;
+  position: number;
+  paused: boolean;
+}>;
+
+
+export type NowPlayingMutation = { nowPlaying: boolean };
+
+export type StarMutationVariables = Exact<{
+  kind: MusicKind;
+  id: number;
+  starred: boolean;
+}>;
+
+
+export type StarMutation = { star: boolean };
+
+export type LyricsQueryVariables = Exact<{
+  trackId: number;
+}>;
+
+
+export type LyricsQuery = { lyrics: { synced: boolean, source: LyricsSource, lines: Array<{ start: number | null, text: string }> } | null };
+
+export type SimilarTracksQueryVariables = Exact<{
+  trackId: number;
+  exclude: Array<number> | number;
+}>;
+
+
+export type SimilarTracksQuery = { similarTracks: Array<{ id: number, title: string, artist: string, album: string, albumId: number | null, albumArtist: string | null, library: string, disc: number | null, number: number | null, year: number | null, duration: number, codec: string, suffix: string, lossless: boolean, bitrate: number | null, sampleRate: number | null, bitDepth: number | null, channels: number | null, size: number, file: string, flac: string, cover: string | null, coverTint: string | null, starred: boolean, rating: number | null, playCount: number, artists: Array<{ id: number, name: string }>, gains: { trackGain: number | null, trackPeak: number | null, albumGain: number | null, albumPeak: number | null, pending: boolean } }> };
+
+export type AlbumTracksQueryVariables = Exact<{
+  id: number;
+}>;
+
+
+export type AlbumTracksQuery = { album: { tracks: Array<{ id: number, title: string, artist: string, album: string, albumId: number | null, albumArtist: string | null, library: string, disc: number | null, number: number | null, year: number | null, duration: number, codec: string, suffix: string, lossless: boolean, bitrate: number | null, sampleRate: number | null, bitDepth: number | null, channels: number | null, size: number, file: string, flac: string, cover: string | null, coverTint: string | null, starred: boolean, rating: number | null, playCount: number, artists: Array<{ id: number, name: string }>, gains: { trackGain: number | null, trackPeak: number | null, albumGain: number | null, albumPeak: number | null, pending: boolean } }> } | null };
+
+export type MusicAlbumsQueryVariables = Exact<{
+  library?: string | null | undefined;
+  sort: AlbumSort;
+  offset: number;
+}>;
+
+
+export type MusicAlbumsQuery = { albums: Array<{ id: number, name: string, artist: string, year: number | null, cover: string | null, trackCount: number, duration: number, compilation: boolean, starred: boolean, playCount: number, addedAt: number, artists: Array<{ id: number, name: string }> }> };
+
+export type MusicArtistsQueryVariables = Exact<{
+  library?: string | null | undefined;
+}>;
+
+
+export type MusicArtistsQuery = { artists: Array<{ id: number, name: string, albumCount: number, trackCount: number, cover: string | null, starred: boolean }> };
+
+export type MusicSongsQueryVariables = Exact<{
+  library?: string | null | undefined;
+  query: string;
+  offset: number;
+}>;
+
+
+export type MusicSongsQuery = { songs: Array<{ id: number, title: string, artist: string, album: string, albumId: number | null, albumArtist: string | null, library: string, disc: number | null, number: number | null, year: number | null, duration: number, codec: string, suffix: string, lossless: boolean, bitrate: number | null, sampleRate: number | null, bitDepth: number | null, channels: number | null, size: number, file: string, flac: string, cover: string | null, coverTint: string | null, starred: boolean, rating: number | null, playCount: number, artists: Array<{ id: number, name: string }>, gains: { trackGain: number | null, trackPeak: number | null, albumGain: number | null, albumPeak: number | null, pending: boolean } }> };
+
+export type MusicPlaylistsQueryVariables = Exact<{ [key: string]: never; }>;
+
+
+export type MusicPlaylistsQuery = { playlists: Array<{ id: number, name: string, comment: string | null, public: boolean, mine: boolean, trackCount: number, duration: number, covers: Array<string>, owner: { id: number, username: string } }> };
+
+export type MusicAlbumQueryVariables = Exact<{
+  id: number;
+}>;
+
+
+export type MusicAlbumQuery = { album: { coverTint: string | null, genres: Array<string>, id: number, name: string, artist: string, year: number | null, cover: string | null, trackCount: number, duration: number, compilation: boolean, starred: boolean, playCount: number, addedAt: number, tracks: Array<{ id: number, title: string, artist: string, album: string, albumId: number | null, albumArtist: string | null, library: string, disc: number | null, number: number | null, year: number | null, duration: number, codec: string, suffix: string, lossless: boolean, bitrate: number | null, sampleRate: number | null, bitDepth: number | null, channels: number | null, size: number, file: string, flac: string, cover: string | null, coverTint: string | null, starred: boolean, rating: number | null, playCount: number, artists: Array<{ id: number, name: string }>, gains: { trackGain: number | null, trackPeak: number | null, albumGain: number | null, albumPeak: number | null, pending: boolean } }>, artists: Array<{ id: number, name: string }> } | null };
+
+export type MusicArtistQueryVariables = Exact<{
+  id: number;
+}>;
+
+
+export type MusicArtistQuery = { artist: { coverTint: string | null, id: number, name: string, albumCount: number, trackCount: number, cover: string | null, starred: boolean, albums: Array<{ id: number, name: string, artist: string, year: number | null, cover: string | null, trackCount: number, duration: number, compilation: boolean, starred: boolean, playCount: number, addedAt: number, artists: Array<{ id: number, name: string }> }>, appearsOn: Array<{ id: number, name: string, artist: string, year: number | null, cover: string | null, trackCount: number, duration: number, compilation: boolean, starred: boolean, playCount: number, addedAt: number, artists: Array<{ id: number, name: string }> }>, topTracks: Array<{ id: number, title: string, artist: string, album: string, albumId: number | null, albumArtist: string | null, library: string, disc: number | null, number: number | null, year: number | null, duration: number, codec: string, suffix: string, lossless: boolean, bitrate: number | null, sampleRate: number | null, bitDepth: number | null, channels: number | null, size: number, file: string, flac: string, cover: string | null, coverTint: string | null, starred: boolean, rating: number | null, playCount: number, artists: Array<{ id: number, name: string }>, gains: { trackGain: number | null, trackPeak: number | null, albumGain: number | null, albumPeak: number | null, pending: boolean } }> } | null };
+
+export type MusicPlaylistQueryVariables = Exact<{
+  id: number;
+}>;
+
+
+export type MusicPlaylistQuery = { playlist: { id: number, name: string, comment: string | null, public: boolean, mine: boolean, trackCount: number, duration: number, covers: Array<string>, tracks: Array<{ id: number, title: string, artist: string, album: string, albumId: number | null, albumArtist: string | null, library: string, disc: number | null, number: number | null, year: number | null, duration: number, codec: string, suffix: string, lossless: boolean, bitrate: number | null, sampleRate: number | null, bitDepth: number | null, channels: number | null, size: number, file: string, flac: string, cover: string | null, coverTint: string | null, starred: boolean, rating: number | null, playCount: number, artists: Array<{ id: number, name: string }>, gains: { trackGain: number | null, trackPeak: number | null, albumGain: number | null, albumPeak: number | null, pending: boolean } }>, owner: { id: number, username: string } } | null };
+
+export type MusicCreatePlaylistMutationVariables = Exact<{
+  name: string;
+  tracks: Array<number> | number;
+}>;
+
+
+export type MusicCreatePlaylistMutation = { createPlaylist: { id: number } };
+
+export type MusicUpdatePlaylistMutationVariables = Exact<{
+  id: number;
+  input: PlaylistInput;
+}>;
+
+
+export type MusicUpdatePlaylistMutation = { updatePlaylist: { id: number } };
+
+export type MusicDeletePlaylistMutationVariables = Exact<{
+  id: number;
+}>;
+
+
+export type MusicDeletePlaylistMutation = { deletePlaylist: boolean };
+
 export type InboxFieldsFragment = { unread: number, items: Array<{ id: number, kind: NotificationKind, priority: boolean, title: string, body: string | null, image: string | null, link: string | null, createdAt: number, expiresAt: number | null, readAt: number | null, actor: { id: number, username: string, avatar: string | null } | null }> };
 
 export type InboxQueryVariables = Exact<{ [key: string]: never; }>;
@@ -1451,14 +1648,6 @@ export type CalendarEntryFieldsFragment = { seriesId: number, library: string, s
 
 export type SettingsFieldsFragment = { publicUrl: string | null, raw: string, error: string | null, network: { host: string, port: number, cors: Array<string>, trustedProxies: Array<string>, publicUrl: string | null }, log: { level: string }, scan: { watch: boolean, interval: string | null }, metadata: { tmdbApiKey: string | null, language: string }, transcode: { hardware: Hardware, vaapiDevice: string, cudaDevice: number }, clips: { enabled: boolean, path: string | null, publicLinks: boolean, concurrency: number, maxStorage: number, fontsDir: string | null, defaultFont: string | null }, music: { onlineLyrics: boolean, lyricsUrl: string, analyzeLoudness: boolean }, downloads: { path: string | null, import: ImportMode, port: number, upnp: boolean, dht: boolean, maxActive: number, downloadLimit: number, uploadLimit: number, slowDownloadLimit: number, slowUploadLimit: number, slowFrom: string | null, slowTo: string | null, bindInterface: string | null, proxy: string | null, seeding: { ratio: number | null, time: string | null, idle: string | null, then: SeedAction } }, automation: { defaultMonitor: Monitor, rssInterval: string, renameSuggestions: boolean, retry: Array<{ every: string, until: string }> }, requests: { monitor: Monitor }, signIn: { style: SignInStyle, publicProfiles: boolean }, smtp: { host: string | null, port: number | null, security: SmtpSecurity, username: string | null, password: string | null, from: string | null }, tailscale: { detect: boolean, socket: string | null, expose: Expose, httpsPort: number }, tailscaleStatus: { state: TailscaleState, dnsName: string | null, ips: Array<string>, https: boolean, funnel: boolean, url: string | null, warning: string | null, serveError: string | null }, sources: Array<{ name: string, kind: SourceKind, url: string, feed: string | null, apiKey: string | null, categories: Array<number>, enabled: boolean, downloadPath: string | null, seeding: { ratio: number | null, time: string | null, idle: string | null, then: SeedAction } | null }>, profiles: Array<{ name: string, resolutions: Array<string>, groups: Array<string>, require: Array<string>, reject: Array<string>, minSize: number | null, maxSize: number | null, codecs: Array<string>, preferDualAudio: boolean, batches: boolean, minSeeders: number }>, libraries: Array<{ name: string, path: string, kind: LibraryKind, metadataProvider: Provider | null, managed: boolean, profile: string | null, downloadPath: string | null, resolvedPath: string | null, exists: boolean, error: string | null, titleCount: number, skippedCount: number }>, paths: { config: string, data: string, log: string } };
 
-export type MusicTrackFragment = { id: number, title: string, artist: string, album: string, albumId: number | null, albumArtist: string | null, library: string, disc: number | null, number: number | null, year: number | null, duration: number, codec: string, suffix: string, lossless: boolean, bitrate: number | null, sampleRate: number | null, bitDepth: number | null, channels: number | null, size: number, file: string, flac: string, cover: string | null, coverTint: string | null, starred: boolean, rating: number | null, playCount: number, artists: Array<{ id: number, name: string }>, gains: { trackGain: number | null, trackPeak: number | null, albumGain: number | null, albumPeak: number | null, pending: boolean } };
-
-export type AlbumCardFragment = { id: number, name: string, artist: string, year: number | null, cover: string | null, trackCount: number, duration: number, compilation: boolean, starred: boolean, playCount: number, addedAt: number, artists: Array<{ id: number, name: string }> };
-
-export type ArtistCardFragment = { id: number, name: string, albumCount: number, trackCount: number, cover: string | null, starred: boolean };
-
-export type PlaylistCardFragment = { id: number, name: string, comment: string | null, public: boolean, mine: boolean, trackCount: number, duration: number, covers: Array<string>, owner: { id: number, username: string } };
-
 export type BookCardFragment = { id: number, library: string, title: string, authors: Array<string>, series: string | null, seriesIndex: number | null, year: number | null, cover: string | null, length: number, addedAt: number, reading: { position: number, progress: number, finished: boolean, updatedAt: number } | null };
 
 export type BookDetailFragment = { description: string | null, publisher: string | null, published: string | null, language: string | null, isbn: string | null, genres: Array<string>, format: BookFormat, chapterCount: number, pages: number | null, rating: number | null, size: number, provider: string | null, providerUrl: string | null, fetched: boolean, coverTint: string | null, content: string, files: string, file: string, id: number, library: string, title: string, authors: Array<string>, series: string | null, seriesIndex: number | null, year: number | null, cover: string | null, length: number, addedAt: number, reading: { position: number, progress: number, finished: boolean, updatedAt: number } | null };
@@ -1483,6 +1672,92 @@ export class TypedDocumentString<TResult, TVariables>
     return this.value;
   }
 }
+export const MusicTrackFragmentDoc = new TypedDocumentString(`
+    fragment MusicTrack on Track {
+  id
+  title
+  artist
+  artists {
+    id
+    name
+  }
+  album
+  albumId
+  albumArtist
+  library
+  disc
+  number
+  year
+  duration
+  codec
+  suffix
+  lossless
+  bitrate
+  sampleRate
+  bitDepth
+  channels
+  size
+  file
+  flac
+  cover
+  coverTint
+  gains {
+    trackGain
+    trackPeak
+    albumGain
+    albumPeak
+    pending
+  }
+  starred
+  rating
+  playCount
+}
+    `, {"fragmentName":"MusicTrack"}) as unknown as TypedDocumentString<MusicTrackFragment, unknown>;
+export const AlbumCardFragmentDoc = new TypedDocumentString(`
+    fragment AlbumCard on Album {
+  id
+  name
+  artist
+  artists {
+    id
+    name
+  }
+  year
+  cover
+  trackCount
+  duration
+  compilation
+  starred
+  playCount
+  addedAt
+}
+    `, {"fragmentName":"AlbumCard"}) as unknown as TypedDocumentString<AlbumCardFragment, unknown>;
+export const ArtistCardFragmentDoc = new TypedDocumentString(`
+    fragment ArtistCard on Artist {
+  id
+  name
+  albumCount
+  trackCount
+  cover
+  starred
+}
+    `, {"fragmentName":"ArtistCard"}) as unknown as TypedDocumentString<ArtistCardFragment, unknown>;
+export const PlaylistCardFragmentDoc = new TypedDocumentString(`
+    fragment PlaylistCard on Playlist {
+  id
+  name
+  comment
+  public
+  mine
+  trackCount
+  duration
+  covers
+  owner {
+    id
+    username
+  }
+}
+    `, {"fragmentName":"PlaylistCard"}) as unknown as TypedDocumentString<PlaylistCardFragment, unknown>;
 export const PersonFragmentDoc = new TypedDocumentString(`
     fragment Person on User {
   id
@@ -2277,92 +2552,6 @@ export const SettingsFieldsFragmentDoc = new TypedDocumentString(`
   idle
   then
 }`, {"fragmentName":"SettingsFields"}) as unknown as TypedDocumentString<SettingsFieldsFragment, unknown>;
-export const MusicTrackFragmentDoc = new TypedDocumentString(`
-    fragment MusicTrack on Track {
-  id
-  title
-  artist
-  artists {
-    id
-    name
-  }
-  album
-  albumId
-  albumArtist
-  library
-  disc
-  number
-  year
-  duration
-  codec
-  suffix
-  lossless
-  bitrate
-  sampleRate
-  bitDepth
-  channels
-  size
-  file
-  flac
-  cover
-  coverTint
-  gains {
-    trackGain
-    trackPeak
-    albumGain
-    albumPeak
-    pending
-  }
-  starred
-  rating
-  playCount
-}
-    `, {"fragmentName":"MusicTrack"}) as unknown as TypedDocumentString<MusicTrackFragment, unknown>;
-export const AlbumCardFragmentDoc = new TypedDocumentString(`
-    fragment AlbumCard on Album {
-  id
-  name
-  artist
-  artists {
-    id
-    name
-  }
-  year
-  cover
-  trackCount
-  duration
-  compilation
-  starred
-  playCount
-  addedAt
-}
-    `, {"fragmentName":"AlbumCard"}) as unknown as TypedDocumentString<AlbumCardFragment, unknown>;
-export const ArtistCardFragmentDoc = new TypedDocumentString(`
-    fragment ArtistCard on Artist {
-  id
-  name
-  albumCount
-  trackCount
-  cover
-  starred
-}
-    `, {"fragmentName":"ArtistCard"}) as unknown as TypedDocumentString<ArtistCardFragment, unknown>;
-export const PlaylistCardFragmentDoc = new TypedDocumentString(`
-    fragment PlaylistCard on Playlist {
-  id
-  name
-  comment
-  public
-  mine
-  trackCount
-  duration
-  covers
-  owner {
-    id
-    username
-  }
-}
-    `, {"fragmentName":"PlaylistCard"}) as unknown as TypedDocumentString<PlaylistCardFragment, unknown>;
 export const BookCardFragmentDoc = new TypedDocumentString(`
     fragment BookCard on Book {
   id
@@ -3655,6 +3844,610 @@ export const LookForAgainDocument = new TypedDocumentString(`
   lookForAgain(seriesId: $seriesId, season: $season, episode: $episode)
 }
     `) as unknown as TypedDocumentString<LookForAgainMutation, LookForAgainMutationVariables>;
+export const PlayQueueDocument = new TypedDocumentString(`
+    query PlayQueue {
+  playQueue {
+    tracks {
+      ...MusicTrack
+    }
+    current
+    position
+    shuffled
+    repeat
+    changedBy
+    updatedAt
+  }
+}
+    fragment MusicTrack on Track {
+  id
+  title
+  artist
+  artists {
+    id
+    name
+  }
+  album
+  albumId
+  albumArtist
+  library
+  disc
+  number
+  year
+  duration
+  codec
+  suffix
+  lossless
+  bitrate
+  sampleRate
+  bitDepth
+  channels
+  size
+  file
+  flac
+  cover
+  coverTint
+  gains {
+    trackGain
+    trackPeak
+    albumGain
+    albumPeak
+    pending
+  }
+  starred
+  rating
+  playCount
+}`) as unknown as TypedDocumentString<PlayQueueQuery, PlayQueueQueryVariables>;
+export const TrackDocument = new TypedDocumentString(`
+    query Track($id: Int!) {
+  track(id: $id) {
+    ...MusicTrack
+  }
+}
+    fragment MusicTrack on Track {
+  id
+  title
+  artist
+  artists {
+    id
+    name
+  }
+  album
+  albumId
+  albumArtist
+  library
+  disc
+  number
+  year
+  duration
+  codec
+  suffix
+  lossless
+  bitrate
+  sampleRate
+  bitDepth
+  channels
+  size
+  file
+  flac
+  cover
+  coverTint
+  gains {
+    trackGain
+    trackPeak
+    albumGain
+    albumPeak
+    pending
+  }
+  starred
+  rating
+  playCount
+}`) as unknown as TypedDocumentString<TrackQuery, TrackQueryVariables>;
+export const SavePlayQueueDocument = new TypedDocumentString(`
+    mutation SavePlayQueue($input: QueueInput!) {
+  savePlayQueue(input: $input, client: "Android") {
+    updatedAt
+  }
+}
+    `) as unknown as TypedDocumentString<SavePlayQueueMutation, SavePlayQueueMutationVariables>;
+export const MeasureLoudnessDocument = new TypedDocumentString(`
+    mutation MeasureLoudness($trackId: Int!) {
+  measureLoudness(trackId: $trackId) {
+    ...MusicTrack
+  }
+}
+    fragment MusicTrack on Track {
+  id
+  title
+  artist
+  artists {
+    id
+    name
+  }
+  album
+  albumId
+  albumArtist
+  library
+  disc
+  number
+  year
+  duration
+  codec
+  suffix
+  lossless
+  bitrate
+  sampleRate
+  bitDepth
+  channels
+  size
+  file
+  flac
+  cover
+  coverTint
+  gains {
+    trackGain
+    trackPeak
+    albumGain
+    albumPeak
+    pending
+  }
+  starred
+  rating
+  playCount
+}`) as unknown as TypedDocumentString<MeasureLoudnessMutation, MeasureLoudnessMutationVariables>;
+export const PlayedDocument = new TypedDocumentString(`
+    mutation Played($trackId: Int!) {
+  played(trackId: $trackId)
+}
+    `) as unknown as TypedDocumentString<PlayedMutation, PlayedMutationVariables>;
+export const NowPlayingDocument = new TypedDocumentString(`
+    mutation NowPlaying($trackId: Int, $position: Float!, $paused: Boolean!) {
+  nowPlaying(
+    trackId: $trackId
+    position: $position
+    paused: $paused
+    client: "Android"
+  )
+}
+    `) as unknown as TypedDocumentString<NowPlayingMutation, NowPlayingMutationVariables>;
+export const StarDocument = new TypedDocumentString(`
+    mutation Star($kind: MusicKind!, $id: Int!, $starred: Boolean!) {
+  star(kind: $kind, id: $id, starred: $starred)
+}
+    `) as unknown as TypedDocumentString<StarMutation, StarMutationVariables>;
+export const LyricsDocument = new TypedDocumentString(`
+    query Lyrics($trackId: Int!) {
+  lyrics(trackId: $trackId) {
+    synced
+    source
+    lines {
+      start
+      text
+    }
+  }
+}
+    `) as unknown as TypedDocumentString<LyricsQuery, LyricsQueryVariables>;
+export const SimilarTracksDocument = new TypedDocumentString(`
+    query SimilarTracks($trackId: Int!, $exclude: [Int!]!) {
+  similarTracks(trackId: $trackId, count: 25, exclude: $exclude) {
+    ...MusicTrack
+  }
+}
+    fragment MusicTrack on Track {
+  id
+  title
+  artist
+  artists {
+    id
+    name
+  }
+  album
+  albumId
+  albumArtist
+  library
+  disc
+  number
+  year
+  duration
+  codec
+  suffix
+  lossless
+  bitrate
+  sampleRate
+  bitDepth
+  channels
+  size
+  file
+  flac
+  cover
+  coverTint
+  gains {
+    trackGain
+    trackPeak
+    albumGain
+    albumPeak
+    pending
+  }
+  starred
+  rating
+  playCount
+}`) as unknown as TypedDocumentString<SimilarTracksQuery, SimilarTracksQueryVariables>;
+export const AlbumTracksDocument = new TypedDocumentString(`
+    query AlbumTracks($id: Int!) {
+  album(id: $id) {
+    tracks {
+      ...MusicTrack
+    }
+  }
+}
+    fragment MusicTrack on Track {
+  id
+  title
+  artist
+  artists {
+    id
+    name
+  }
+  album
+  albumId
+  albumArtist
+  library
+  disc
+  number
+  year
+  duration
+  codec
+  suffix
+  lossless
+  bitrate
+  sampleRate
+  bitDepth
+  channels
+  size
+  file
+  flac
+  cover
+  coverTint
+  gains {
+    trackGain
+    trackPeak
+    albumGain
+    albumPeak
+    pending
+  }
+  starred
+  rating
+  playCount
+}`) as unknown as TypedDocumentString<AlbumTracksQuery, AlbumTracksQueryVariables>;
+export const MusicAlbumsDocument = new TypedDocumentString(`
+    query MusicAlbums($library: String, $sort: AlbumSort!, $offset: Int!) {
+  albums(library: $library, sort: $sort, offset: $offset, limit: 60) {
+    ...AlbumCard
+  }
+}
+    fragment AlbumCard on Album {
+  id
+  name
+  artist
+  artists {
+    id
+    name
+  }
+  year
+  cover
+  trackCount
+  duration
+  compilation
+  starred
+  playCount
+  addedAt
+}`) as unknown as TypedDocumentString<MusicAlbumsQuery, MusicAlbumsQueryVariables>;
+export const MusicArtistsDocument = new TypedDocumentString(`
+    query MusicArtists($library: String) {
+  artists(library: $library) {
+    ...ArtistCard
+  }
+}
+    fragment ArtistCard on Artist {
+  id
+  name
+  albumCount
+  trackCount
+  cover
+  starred
+}`) as unknown as TypedDocumentString<MusicArtistsQuery, MusicArtistsQueryVariables>;
+export const MusicSongsDocument = new TypedDocumentString(`
+    query MusicSongs($library: String, $query: String!, $offset: Int!) {
+  songs(library: $library, query: $query, offset: $offset, limit: 60) {
+    ...MusicTrack
+  }
+}
+    fragment MusicTrack on Track {
+  id
+  title
+  artist
+  artists {
+    id
+    name
+  }
+  album
+  albumId
+  albumArtist
+  library
+  disc
+  number
+  year
+  duration
+  codec
+  suffix
+  lossless
+  bitrate
+  sampleRate
+  bitDepth
+  channels
+  size
+  file
+  flac
+  cover
+  coverTint
+  gains {
+    trackGain
+    trackPeak
+    albumGain
+    albumPeak
+    pending
+  }
+  starred
+  rating
+  playCount
+}`) as unknown as TypedDocumentString<MusicSongsQuery, MusicSongsQueryVariables>;
+export const MusicPlaylistsDocument = new TypedDocumentString(`
+    query MusicPlaylists {
+  playlists {
+    ...PlaylistCard
+  }
+}
+    fragment PlaylistCard on Playlist {
+  id
+  name
+  comment
+  public
+  mine
+  trackCount
+  duration
+  covers
+  owner {
+    id
+    username
+  }
+}`) as unknown as TypedDocumentString<MusicPlaylistsQuery, MusicPlaylistsQueryVariables>;
+export const MusicAlbumDocument = new TypedDocumentString(`
+    query MusicAlbum($id: Int!) {
+  album(id: $id) {
+    ...AlbumCard
+    coverTint
+    genres
+    tracks {
+      ...MusicTrack
+    }
+  }
+}
+    fragment MusicTrack on Track {
+  id
+  title
+  artist
+  artists {
+    id
+    name
+  }
+  album
+  albumId
+  albumArtist
+  library
+  disc
+  number
+  year
+  duration
+  codec
+  suffix
+  lossless
+  bitrate
+  sampleRate
+  bitDepth
+  channels
+  size
+  file
+  flac
+  cover
+  coverTint
+  gains {
+    trackGain
+    trackPeak
+    albumGain
+    albumPeak
+    pending
+  }
+  starred
+  rating
+  playCount
+}
+fragment AlbumCard on Album {
+  id
+  name
+  artist
+  artists {
+    id
+    name
+  }
+  year
+  cover
+  trackCount
+  duration
+  compilation
+  starred
+  playCount
+  addedAt
+}`) as unknown as TypedDocumentString<MusicAlbumQuery, MusicAlbumQueryVariables>;
+export const MusicArtistDocument = new TypedDocumentString(`
+    query MusicArtist($id: Int!) {
+  artist(id: $id) {
+    ...ArtistCard
+    coverTint
+    albums {
+      ...AlbumCard
+    }
+    appearsOn {
+      ...AlbumCard
+    }
+    topTracks(count: 200) {
+      ...MusicTrack
+    }
+  }
+}
+    fragment MusicTrack on Track {
+  id
+  title
+  artist
+  artists {
+    id
+    name
+  }
+  album
+  albumId
+  albumArtist
+  library
+  disc
+  number
+  year
+  duration
+  codec
+  suffix
+  lossless
+  bitrate
+  sampleRate
+  bitDepth
+  channels
+  size
+  file
+  flac
+  cover
+  coverTint
+  gains {
+    trackGain
+    trackPeak
+    albumGain
+    albumPeak
+    pending
+  }
+  starred
+  rating
+  playCount
+}
+fragment AlbumCard on Album {
+  id
+  name
+  artist
+  artists {
+    id
+    name
+  }
+  year
+  cover
+  trackCount
+  duration
+  compilation
+  starred
+  playCount
+  addedAt
+}
+fragment ArtistCard on Artist {
+  id
+  name
+  albumCount
+  trackCount
+  cover
+  starred
+}`) as unknown as TypedDocumentString<MusicArtistQuery, MusicArtistQueryVariables>;
+export const MusicPlaylistDocument = new TypedDocumentString(`
+    query MusicPlaylist($id: Int!) {
+  playlist(id: $id) {
+    ...PlaylistCard
+    tracks {
+      ...MusicTrack
+    }
+  }
+}
+    fragment MusicTrack on Track {
+  id
+  title
+  artist
+  artists {
+    id
+    name
+  }
+  album
+  albumId
+  albumArtist
+  library
+  disc
+  number
+  year
+  duration
+  codec
+  suffix
+  lossless
+  bitrate
+  sampleRate
+  bitDepth
+  channels
+  size
+  file
+  flac
+  cover
+  coverTint
+  gains {
+    trackGain
+    trackPeak
+    albumGain
+    albumPeak
+    pending
+  }
+  starred
+  rating
+  playCount
+}
+fragment PlaylistCard on Playlist {
+  id
+  name
+  comment
+  public
+  mine
+  trackCount
+  duration
+  covers
+  owner {
+    id
+    username
+  }
+}`) as unknown as TypedDocumentString<MusicPlaylistQuery, MusicPlaylistQueryVariables>;
+export const MusicCreatePlaylistDocument = new TypedDocumentString(`
+    mutation MusicCreatePlaylist($name: String!, $tracks: [Int!]!) {
+  createPlaylist(name: $name, tracks: $tracks) {
+    id
+  }
+}
+    `) as unknown as TypedDocumentString<MusicCreatePlaylistMutation, MusicCreatePlaylistMutationVariables>;
+export const MusicUpdatePlaylistDocument = new TypedDocumentString(`
+    mutation MusicUpdatePlaylist($id: Int!, $input: PlaylistInput!) {
+  updatePlaylist(id: $id, input: $input) {
+    id
+  }
+}
+    `) as unknown as TypedDocumentString<MusicUpdatePlaylistMutation, MusicUpdatePlaylistMutationVariables>;
+export const MusicDeletePlaylistDocument = new TypedDocumentString(`
+    mutation MusicDeletePlaylist($id: Int!) {
+  deletePlaylist(id: $id)
+}
+    `) as unknown as TypedDocumentString<MusicDeletePlaylistMutation, MusicDeletePlaylistMutationVariables>;
 export const InboxDocument = new TypedDocumentString(`
     query Inbox {
   notifications {

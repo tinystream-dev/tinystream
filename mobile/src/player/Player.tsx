@@ -5,6 +5,7 @@
 // (more taps, more seconds); drag sideways to scrub, up or down on the left
 // for brightness and on the right for volume; pinch to fill the screen.
 
+import { useMusic } from '../music/context'
 import { clock } from '@tinystream/shared/format'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useRouter } from 'expo-router'
@@ -84,6 +85,8 @@ const BRIGHTNESS_DETENT = 0.1
 type Drag = { mode: 'scrub'; from: number } | { mode: 'brightness'; from: number; step: number } | { mode: 'volume'; from: number; max: number }
 
 export function Player({ mediaId, startAt, rotation, onRotation }: { mediaId: number; startAt?: number; rotation: Rotation; onRotation: (r: Rotation) => void }) {
+  const { music } = useMusic()
+  useEffect(() => { music.suspend(); return () => music.unsuspend() }, [music])
   const api = useApi()
   const connection = useConnection()
   const origin = connection?.origin
