@@ -786,7 +786,7 @@ function GhostRow({
 function MatchDialog({ item, onClose }: { item: Item; onClose: () => void }) {
   const qc = useQueryClient()
   const [provider, setProvider] = useState<Provider>(item.libraryProvider ?? item.provider ?? 'ANILIST')
-  const [q, setQ] = useState('')
+  const [q, setQ] = useState<string | null>(null)
   const [query, setQuery] = useState('')
   const { data, isFetching, error } = useQuery({
     queryKey: ['match', item.id, provider, query],
@@ -796,9 +796,6 @@ function MatchDialog({ item, onClose }: { item: Item; onClose: () => void }) {
       return r
     },
   })
-  useEffect(() => {
-    if (data && !q) setQ(data.query)
-  }, [data, q])
   const apply = useMutation({
     mutationFn: (c: { provider: Provider; id: string }) => request(MatchTitle, { id: item.id, provider: c.provider, providerId: c.id }),
     onSuccess: () => {
@@ -820,11 +817,11 @@ function MatchDialog({ item, onClose }: { item: Item; onClose: () => void }) {
             className="mt-4 flex gap-2"
             onSubmit={(e) => {
               e.preventDefault()
-              setQuery(q)
+              setQuery(q ?? data?.query ?? '')
             }}
           >
             <div className="flex-1">
-              <Input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search by title" />
+              <Input autoFocus value={q ?? data?.query ?? ''} onChange={(e) => setQ(e.target.value)} placeholder="Search by title" />
             </div>
             <Button type="button" onClick={() => setProvider(provider === 'ANILIST' ? 'TMDB' : 'ANILIST')}>
               {provider === 'ANILIST' ? 'AniList' : 'TMDB'}
