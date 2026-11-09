@@ -123,7 +123,8 @@ kind or by a book's quotes, with your clip space. `/clips?clip=<id>` opens a cli
 in place as on web, with its public link, who it was sent to, sending, renaming, deleting and
 downloading (saved where the FileChooser portal says, named as the server names it). Rendered
 clips play through their own mpv and the same stream callback as the player
-(`player/clip_player.rs`), with the web clip player's controls; F fills the window with one.
+(`player/clip_player.rs`), with the web clip player's controls; F fills the window with one,
+and P moves it into a native picture-in-picture window. Closing that window returns it to the dialog.
 
 The editor (`player/clip.rs`, `player/strip.rs`) works in the player's own mpv, on direct play:
 the range on a filmstrip of the server's preview frames, frame stepping (`,` `.`), I and O, the
@@ -132,7 +133,8 @@ exactly through mpv's A-B loop while it plays. Text subtitles show through the s
 overlay as the player, so the preview has what the server burns in. Its presets, size estimate
 and every other option are the web's, sent with the same mutations; changing a clip (the dialog's
 pencil) opens the editor on its recipe. Render progress, in the editor and on the page, comes
-through the `events` subscription.
+through the `events` subscription. Notifications also show queued and rendering clips. Paused
+image-subtitle previews use the server’s burned-in stills, as on web.
 
 ## Watch Together
 
@@ -145,7 +147,9 @@ links (`https://<server>/together/<code>` or `tinystream://<host[:port]>/togethe
 on the command line go through `App::join_room`, signed in when they're for the server in use and
 as a guest otherwise. The player's Users button starts a room, and its panel invites people on
 the server. Closing a room hides it to the tray when a tray host is available and the setting is enabled.
-Picture in picture and clips inside rooms aren't there yet.
+Signed-in viewers can open the clip editor inside rooms. Its preview runs locally without
+changing the room clock; closing it returns to the room’s current position and tracks.
+Picture in picture for the room player is not available.
 
 The steering loop can be checked against real mpv, and the protocol against an isolated server
 (with a second user there, it checks invites too):
