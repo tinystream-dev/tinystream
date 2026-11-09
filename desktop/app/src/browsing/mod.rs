@@ -23,7 +23,7 @@ pub mod preview;
 mod view;
 
 use model::*;
-pub use view::{allowed, dialog, notifications, palette, search, view};
+pub use view::{allowed, art, dialog, notifications, palette, search, view, watch_image};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Key {
@@ -1005,7 +1005,7 @@ impl Browsing {
 
 /// `value` as an operation's generated variables. Operations without any get a unit struct, which
 /// only `null` reads as.
-fn variables<V: DeserializeOwned>(value: Value) -> Result<V, api::Error> {
+pub(crate) fn variables<V: DeserializeOwned>(value: Value) -> Result<V, api::Error> {
     let value = if value.as_object().is_some_and(serde_json::Map::is_empty) { Value::Null } else { value };
     serde_json::from_value(value).map_err(|e| api::Error::message(format!("Invalid request: {e}")))
 }

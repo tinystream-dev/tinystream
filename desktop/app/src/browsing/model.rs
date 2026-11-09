@@ -56,12 +56,14 @@ pub struct Permissions {
     pub downloads: bool,
     pub edit_metadata: bool,
     pub watch_together: bool,
+    pub clip: bool,
 }
 #[derive(Debug, Clone, Default, Deserialize)]
-#[serde(default)]
+#[serde(rename_all = "camelCase", default)]
 pub struct Features {
     pub downloads: bool,
     pub clips: bool,
+    pub public_url: Option<String>,
 }
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase", default)]

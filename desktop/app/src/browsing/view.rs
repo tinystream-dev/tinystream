@@ -182,7 +182,7 @@ fn state<'a>(value: &str, look: &Look) -> View<'a> {
     };
     badge(label.to_owned(), tone, look)
 }
-fn watch_image<'a>(b: &'a Browsing, path: Option<&str>, content: View<'a>) -> View<'a> {
+pub fn watch_image<'a>(b: &'a Browsing, path: Option<&str>, content: View<'a>) -> View<'a> {
     if let Some(path) = path {
         crate::ui::visible::visible(
             content,
@@ -193,7 +193,7 @@ fn watch_image<'a>(b: &'a Browsing, path: Option<&str>, content: View<'a>) -> Vi
         content
     }
 }
-fn art<'a>(b: &'a Browsing, path: Option<&str>, radius: f32, look: &Look) -> View<'a> {
+pub fn art<'a>(b: &'a Browsing, path: Option<&str>, radius: f32, look: &Look) -> View<'a> {
     let content = if let Some(path) = path {
         media::img(b.images.picture(path), radius, look)
     } else {

@@ -1,0 +1,46 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+query ClipsList($scope: ClipScope!, $kind: ClipKind, $book: Int) {
+  clips(scope: $scope, kind: $kind, book: $book) { ...ClipFields }
+  clipAllowance { ...ClipAllowanceFields }
+}
+
+query ClipsClip($id: Int!) {
+  clip(id: $id) { ...ClipFields }
+}
+
+query ClipsAllowance {
+  clipAllowance { ...ClipAllowanceFields }
+}
+
+query ClipsPeople {
+  users { ...Person }
+}
+
+mutation ClipsCreate($input: NewClip!) {
+  createClip(input: $input) { ...ClipFields }
+}
+
+mutation ClipsRender($id: Int!) {
+  renderClip(id: $id) { ...ClipFields }
+}
+
+mutation ClipsUpdate($id: Int!, $input: ClipPatch!) {
+  updateClip(id: $id, input: $input) { ...ClipFields }
+}
+
+mutation ClipsShare($id: Int!, $users: [Int!]!) {
+  shareClip(id: $id, users: $users) { ...ClipFields }
+}
+
+mutation ClipsUnshare($id: Int!, $userId: Int!) {
+  unshareClip(id: $id, userId: $userId) { ...ClipFields }
+}
+
+mutation ClipsDelete($id: Int!) {
+  deleteClip(id: $id)
+}
+
+mutation ClipsHide($id: Int!) {
+  hideClip(id: $id)
+}

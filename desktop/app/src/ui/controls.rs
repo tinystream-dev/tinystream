@@ -283,7 +283,7 @@ pub fn input<'a, Message: Clone + 'a>(
     Input {
         id: id.into(),
         value: value.into(),
-        placeholder,
+        placeholder: placeholder.into(),
         on_input: Box::new(on_input),
         on_submit: None,
         secure: false,
@@ -300,7 +300,7 @@ pub fn owned_input<'a, Message: Clone + 'a>(
     Input {
         id: id.into(),
         value: value.into(),
-        placeholder: "",
+        placeholder: "".into(),
         on_input: Box::new(on_input),
         on_submit: None,
         secure: false,
@@ -311,14 +311,19 @@ pub fn owned_input<'a, Message: Clone + 'a>(
 pub struct Input<'a, Message> {
     id: String,
     value: std::borrow::Cow<'a, str>,
-    placeholder: &'a str,
+    placeholder: std::borrow::Cow<'a, str>,
     on_input: Box<dyn Fn(String) -> Message + 'a>,
     on_submit: Option<Message>,
     secure: bool,
     look: Look,
 }
 
-impl<Message> Input<'_, Message> {
+impl<'a, Message> Input<'a, Message> {
+    pub fn placeholder(mut self, placeholder: impl Into<std::borrow::Cow<'a, str>>) -> Self {
+        self.placeholder = placeholder.into();
+        self
+    }
+
     pub fn secure(mut self) -> Self {
         self.secure = true;
         self

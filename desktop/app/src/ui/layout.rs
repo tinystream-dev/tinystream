@@ -199,6 +199,144 @@ pub fn shelf<'a, Message: Clone + 'a>(
     iced_widget::hover(stack![strip, edges], arrows).boxed()
 }
 
+/// `content` at a fixed aspect ratio (`aspect-video` and the like), as wide as it's given.
+pub fn aspect<'a, Message: 'a>(
+    content: impl CoreWidget<Message, Theme, Renderer> + 'a,
+    ratio: f32,
+) -> Element<'a, Message> {
+    Aspect { content: CoreWidget::_boxed(content), rule: Rule::Ratio(ratio) }.boxed()
+}
+
+/// `content` no taller than `height` (`max-h-*`, or text's `line-clamp-*` with an ellipsis), cut
+/// off past it.
+pub fn at_most<'a, Message: 'a>(
+    content: impl CoreWidget<Message, Theme, Renderer> + 'a,
+    height: f32,
+) -> Element<'a, Message> {
+    let content = container(content).clip(true);
+    Aspect { content: CoreWidget::_boxed(content), rule: Rule::Height(height) }.boxed()
+}
+
+enum Rule {
+    Ratio(f32),
+    Height(f32),
+}
+
+struct Aspect<'a, Message> {
+    content: Element<'a, Message>,
+    rule: Rule,
+}
+
+impl<Message> iced_core::widget::Meta for Aspect<'_, Message> {}
+
+impl<Message> CoreWidget<Message, Theme, Renderer> for Aspect<'_, Message> {
+    fn tag(&self) -> widget::tree::Tag {
+        widget::tree::Tag::stateless()
+    }
+
+    fn diff(&mut self, tree: &mut widget::Tree) {
+        tree.diff_children(std::slice::from_mut(&mut self.content));
+    }
+
+    fn size(&self) -> iced_core::Size<Length> {
+        match self.rule {
+            Rule::Ratio(_) => iced_core::Size::new(Length::Fill, Length::Shrink),
+            Rule::Height(_) => iced_core::Size::new(self.content.size().width, Length::Shrink),
+        }
+    }
+
+    fn layout(&mut self, tree: &mut widget::Tree, renderer: &Renderer, limits: &iced_core::layout::Limits) {
+        match self.rule {
+            Rule::Ratio(ratio) => {
+                let width = limits.max.width;
+                let size = iced_core::Size::new(width, width / ratio);
+                let exact = iced_core::layout::Limits::new(size, size);
+                iced_core::layout::padded(tree, &exact, Length::Fill, Length::Fill, 0, |tree, limits| {
+                    self.content.layout(tree, renderer, limits);
+                    tree.size
+                });
+            },
+            Rule::Height(height) => {
+                let limits = iced_core::layout::Limits {
+                    max: iced_core::Size::new(limits.max.width, limits.max.height.min(height)),
+                    infinite: iced_core::Size::new(limits.infinite.width, false),
+                    ..*limits
+                };
+                let width = self.content.size().width;
+                iced_core::layout::padded(tree, &limits, width, Length::Shrink, 0, |tree, limits| {
+                    self.content.layout(tree, renderer, limits);
+                    tree.size
+                });
+            },
+        }
+    }
+
+    fn operate(
+        &mut self,
+        tree: &mut widget::Tree,
+        layout: iced_core::Layout,
+        viewport: &iced_core::Rectangle,
+        renderer: &Renderer,
+        operation: &mut dyn widget::Operation,
+    ) {
+        let (layout, tree) = layout.iter_mut(&mut tree.children).next().expect("content");
+        self.content.operate(tree, layout, viewport, renderer, operation);
+    }
+
+    fn update(
+        &mut self,
+        tree: &mut widget::Tree,
+        event: &iced_core::Event,
+        layout: iced_core::Layout,
+        cursor: iced_core::mouse::Cursor,
+        renderer: &Renderer,
+        shell: &mut iced_core::Shell<'_, Message>,
+        viewport: &iced_core::Rectangle,
+    ) {
+        let (layout, tree) = layout.iter_mut(&mut tree.children).next().expect("content");
+        self.content.update(tree, event, layout, cursor, renderer, shell, viewport);
+    }
+
+    fn draw(
+        &self,
+        tree: &widget::Tree,
+        renderer: &mut Renderer,
+        theme: &Theme,
+        style: &iced_core::renderer::Style,
+        layout: iced_core::Layout,
+        cursor: iced_core::mouse::Cursor,
+        viewport: &iced_core::Rectangle,
+    ) {
+        let (layout, tree) = layout.iter(&tree.children).next().expect("content");
+        self.content.draw(tree, renderer, theme, style, layout, cursor, viewport);
+    }
+
+    fn mouse_interaction(
+        &self,
+        tree: &widget::Tree,
+        layout: iced_core::Layout,
+        cursor: iced_core::mouse::Cursor,
+        viewport: &iced_core::Rectangle,
+        renderer: &Renderer,
+    ) -> iced_core::mouse::Interaction {
+        let (layout, tree) = layout.iter(&tree.children).next().expect("content");
+        self.content.mouse_interaction(tree, layout, cursor, viewport, renderer)
+    }
+
+    fn overlay<'b>(
+        &'b mut self,
+        tree: &'b mut widget::Tree,
+        layout: iced_core::Layout,
+        renderer: &Renderer,
+        viewport: &iced_core::Rectangle,
+        translation: iced_core::Vector,
+        window: iced_core::Size,
+    ) -> Vec<iced_core::overlay::Element<'b, Message, Theme, Renderer>> {
+        let (layout, tree) = layout.iter_mut(&mut tree.children).next().expect("content");
+        self.content.overlay(tree, layout, renderer, viewport, translation, window)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::cell::RefCell;

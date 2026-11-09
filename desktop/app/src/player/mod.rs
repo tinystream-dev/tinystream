@@ -21,6 +21,7 @@ mod engine;
 pub mod local;
 pub mod room;
 pub mod stream;
+mod strip;
 pub mod subtitles;
 pub mod sync;
 mod timeline;
@@ -179,6 +180,8 @@ pub enum Out {
     /// Watch together in this room, which now plays this video.
     Together(String),
     Copy(String),
+    /// What the clip editor asks, as the Clips page would.
+    Clips(crate::clips::Out),
 }
 
 pub struct Player {
@@ -202,6 +205,11 @@ pub struct Player {
     prefs: Prefs,
     start_at: Option<f64>,
     base: String,
+    /// Where public clip links point.
+    pub origin: String,
+    runtime: Option<tokio::runtime::Handle>,
+    /// The saved server and who's signed in to it, for what's remembered.
+    who: (u64, i64),
 
     pub source: Source,
     pub quality: Quality,
@@ -267,7 +275,7 @@ impl Player {
         effects: &mut Vec<Effect>,
     ) -> Self {
         let prefs = Prefs::load(server, user);
-        Self::create(serial, id, start_at, api, runtime, prefs, None, effects)
+        Self::create(serial, id, start_at, api, runtime, prefs, None, (server, user), effects)
     }
 
     /// Opens video `id` in `room`, which decides where it plays and what's heard.
@@ -282,7 +290,7 @@ impl Player {
         effects: &mut Vec<Effect>,
     ) -> Self {
         let prefs = Prefs::load(server, user);
-        Self::create(serial, id, None, api, runtime, prefs, Some(room), effects)
+        Self::create(serial, id, None, api, runtime, prefs, Some(room), (server, user), effects)
     }
 
     pub fn hardware_decoding(&self, enabled: bool) {
@@ -300,9 +308,10 @@ impl Player {
         runtime: Option<tokio::runtime::Handle>,
         prefs: Prefs,
         room: Option<Room>,
+        who: (u64, i64),
         effects: &mut Vec<Effect>,
     ) -> Self {
-        let engine = match runtime {
+        let engine = match runtime.clone() {
             Some(runtime) => {
                 Engine::new(api.clone(), runtime).inspect_err(|error| tracing::error!("can't start mpv: {error}")).ok()
             },
@@ -316,6 +325,9 @@ impl Player {
                 Some(room) => format!("api/together/{}/media/{id}", room.code),
                 None => format!("api/media/{id}"),
             },
+            origin: api.origin.as_str().to_owned(),
+            runtime,
+            who,
             screen: engine.as_ref().map(|engine| Screen::new(engine.mpv.clone())),
             error: engine.is_none().then(|| "the video player couldn't start".to_owned()),
             engine,
@@ -801,7 +813,7 @@ impl Player {
                     return Some(Out::PictureInPicture(false));
                 }
             },
-            Message::Editor(message) => self.edit_clip(message, effects),
+            Message::Editor(message) => return self.edit_clip(message, effects).map(Out::Clips),
             Message::Screenshot => self.screenshot(effects),
             Message::OpenShot => {
                 if let Some(id) = self.shot.take().and_then(|shot| shot.clip).map(|(id, _)| id) {
@@ -850,6 +862,9 @@ impl Player {
             Update::Paused(paused) => {
                 let was = self.playing;
                 self.playing = !paused && !self.ended;
+                if self.clipping.is_some() {
+                    self.apply_loop();
+                }
                 if self.playing {
                     self.ended = false;
                     self.countdown = None;
@@ -859,9 +874,11 @@ impl Player {
                 }
             },
             Update::Waiting(waiting) => self.waiting = waiting,
+            // A range that runs to the very end loops too.
             Update::Eof(true) if self.clipping.is_some() => {
                 if self.playing
-                    && let Some((start, _)) = self.clipping.as_ref().and_then(|editor| editor.range(self.duration()))
+                    && let Some((start, _)) =
+                        self.clipping.as_ref().filter(|editor| editor.ready() && editor.made.is_none()).map(|e| e.range)
                 {
                     self.seek(start);
                 }
@@ -922,7 +939,7 @@ impl Player {
     }
 
     fn tick(&mut self, effects: &mut Vec<Effect>) -> Option<Out> {
-        self.tick_clip(effects);
+        self.tick_clip();
         if let Some(room) = &mut self.room {
             room.tick();
         }
@@ -1003,16 +1020,7 @@ impl Player {
             if self.previews.contains_key(&step) {
                 self.preview_shown = Some(step);
             } else {
-                self.previews_asked.push(step);
-                let (api, path) = (self.api.clone(), format!("{}/preview/{step}", self.base));
-                self.request(effects, async move {
-                    let bytes = crate::images::fetch(&api, &path).await;
-                    let handle = match bytes {
-                        Some(bytes) => crate::images::decode(bytes).await,
-                        None => None,
-                    };
-                    Message::Preview(step, handle)
-                });
+                self.want_preview(step, effects);
             }
         }
 
@@ -1023,6 +1031,23 @@ impl Player {
             return self.go(next, effects);
         }
         None
+    }
+
+    /// Asks for the server's preview frame at `step`, once.
+    fn want_preview(&mut self, step: u32, effects: &mut Vec<Effect>) {
+        if self.previews_failed || self.previews.contains_key(&step) || self.previews_asked.contains(&step) {
+            return;
+        }
+        self.previews_asked.push(step);
+        let (api, path) = (self.api.clone(), format!("{}/preview/{step}", self.base));
+        self.request(effects, async move {
+            let bytes = crate::images::fetch(&api, &path).await;
+            let handle = match bytes {
+                Some(bytes) => crate::images::decode(bytes).await,
+                None => None,
+            };
+            Message::Preview(step, handle)
+        });
     }
 
     /// Plays video `id` next; in a room, everyone moves together and the room puts it on.
@@ -1447,16 +1472,27 @@ impl Player {
         if modifiers.control() || modifiers.alt() || modifiers.logo() {
             return None;
         }
-        if self.clipping.is_some() {
-            return match key.as_ref() {
-                Key::Named(key::Named::Escape) => Some(Message::Editor(clip::Message::Close)),
-                Key::Named(key::Named::Space) | Key::Character("k" | "K") => Some(Message::Toggle),
-                Key::Character("i" | "I") => Some(Message::Editor(clip::Message::In)),
-                Key::Character("o" | "O") => Some(Message::Editor(clip::Message::Out)),
-                Key::Character(",") => Some(Message::Editor(clip::Message::Step(true))),
-                Key::Character(".") => Some(Message::Editor(clip::Message::Step(false))),
-                _ => None,
-            };
+        if let Some(editor) = &mut self.clipping {
+            if let Some(made) = &mut editor.made {
+                let id = made.id;
+                return match (key.as_ref(), &mut made.player) {
+                    (Key::Named(key::Named::Escape), _) => Some(Message::Editor(clip::Message::Close)),
+                    (_, Some(reel)) => reel.key(key, modifiers).map(|m| Message::Editor(clip::Message::Reel(id, m))),
+                    _ => None,
+                };
+            }
+            let shift = modifiers.shift();
+            return Some(Message::Editor(match key.as_ref() {
+                Key::Named(key::Named::Escape) => clip::Message::Close,
+                Key::Named(key::Named::Space) | Key::Character("k" | "K") => clip::Message::Play,
+                Key::Character("i" | "I") => clip::Message::In,
+                Key::Character("o" | "O") => clip::Message::Out,
+                Key::Character(",") => clip::Message::Step(true),
+                Key::Character(".") => clip::Message::Step(false),
+                Key::Named(key::Named::ArrowLeft) => clip::Message::Nudge(-1.0, shift),
+                Key::Named(key::Named::ArrowRight) => clip::Message::Nudge(1.0, shift),
+                _ => return None,
+            }));
         }
         if self.menu.is_some() {
             return matches!(key, Key::Named(key::Named::Escape)).then_some(Message::Menu(None));
@@ -1608,6 +1644,7 @@ pub(crate) mod tests {
             None,
             Prefs::default(),
             None,
+            (0, 0),
             &mut Vec::new(),
         );
         player.error = None;
@@ -1644,7 +1681,7 @@ pub(crate) mod tests {
     pub(crate) fn live_player(api: Api, id: i64, runtime: tokio::runtime::Handle, effects: &mut Vec<Effect>) -> Player {
         let mut prefs = Prefs::default();
         prefs.set("volume", "0");
-        Player::create(1, id, Some(1.0), api, Some(runtime), prefs, None, effects)
+        Player::create(1, id, Some(1.0), api, Some(runtime), prefs, None, (0, 0), effects)
     }
 
     #[test]

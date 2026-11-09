@@ -45,6 +45,18 @@ const PAGES: &[(&str, Route, &str, Icon)] = &[
 ];
 
 pub fn view(app: &App) -> Element<'_, Message> {
+    let screen = screen(app);
+    if app.toasts.is_empty() {
+        return screen;
+    }
+    let look = app.session.look();
+    iced_widget::Stack::with_children([screen, crate::ui::overlay::toasts(&app.toasts, Message::DismissToast, &look)])
+        .width(Fill)
+        .height(Fill)
+        .boxed()
+}
+
+fn screen(app: &App) -> Element<'_, Message> {
     if let Some(viewer) = &app.local_video {
         let look = app.session.look();
         return chrome(app, viewer.view(&look).map(Message::LocalVideo).boxed(), true, &look);
@@ -54,6 +66,9 @@ pub fn view(app: &App) -> Element<'_, Message> {
         return chrome(app, gallery.view(&look).map(Message::Gallery).boxed(), true, &look);
     }
     let look = app.session.look();
+    if let Some(player) = crate::clips::view::expanded(app, &look) {
+        return chrome(app, player, true, &look);
+    }
     let route = &app.history.current().route;
     // Guests join rooms without signing in, as on web.
     let in_room = matches!(route, Route::Together(_)) && app.together.is_some();
@@ -159,6 +174,13 @@ fn chrome<'a>(app: &'a App, base: Element<'a, Message>, focus: bool, look: &Look
             dialog,
             Message::Browsing(app.session.generation, crate::browsing::Message::Dialog(None)),
         );
+    }
+    if let Some(dialog) = crate::clips::view::dialog(app, look) {
+        let close = match app.clips.open.as_ref().filter(|open| open.confirm) {
+            Some(_) => Message::Clips(app.session.generation, crate::clips::Message::Confirm(false)),
+            None => Message::Clips(app.session.generation, crate::clips::Message::Close),
+        };
+        return crate::ui::modal::modal(base, dialog, close);
     }
     if app.gallery.is_none()
         && let Some(overlay) = app.overlay
@@ -362,6 +384,13 @@ fn page<'a>(app: &'a App, look: &Look) -> Element<'a, Message> {
     };
     let content: Element<'a, Message> = if *route == Route::Settings {
         crate::settings::view::view(app, look)
+    } else if matches!(route, Route::Clips | Route::Clip(_)) && crate::browsing::allowed(&app.browsing, route) {
+        let page = crate::ui::layout::page(crate::clips::view::page(app, look), false);
+        if app.clips.list().is_some() {
+            crate::ui::effects::enter(page, crate::ui::effects::Entrance::arrive(0), look)
+        } else {
+            page
+        }
     } else if let Some(content) = crate::browsing::view(app, route, look) {
         content
     } else {

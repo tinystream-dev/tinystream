@@ -23,18 +23,6 @@ query PlayerOverview($id: Int!, $videoId: Int!) {
   video(id: $videoId) { overview }
 }
 
-query PlayerClipAllowance {
-  clipAllowance { canClip canLink maxLength customDefaultFont }
-}
-
-mutation PlayerCreateClip($input: NewClip!) {
-  createClip(input: $input) { id }
-}
-
-query PlayerClipStatus($id: Int!) {
-  clip(id: $id) { id state progress error }
-}
-
 query Room($code: String!) {
   room(code: $code) { code signedIn isHost canShare canInvite title { id name backdrop } }
 }

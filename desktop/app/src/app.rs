@@ -28,6 +28,10 @@ pub struct App {
     pub history: History,
     pub browsing: crate::browsing::Browsing,
     pub settings: crate::settings::Settings,
+    pub clips: crate::clips::Clips,
+    /// Passing notices, bottom right (`toast()`).
+    pub toasts: Vec<crate::ui::overlay::Toast>,
+    toast_serial: u64,
     pub chrome: Chrome,
     pub overlay: Option<Overlay>,
     pub query: String,
@@ -44,6 +48,8 @@ pub struct App {
     pub together: Option<crate::together::Together>,
     /// A room link to join once saved servers are known.
     pending_host: Option<i64>,
+    /// A clip to change once its video's player is ready, as (video, clip).
+    pending_edit: Option<(i64, i64)>,
     pub pending_join: Option<(url::Url, String)>,
     rooms: u64,
     pub local_file: Option<std::path::PathBuf>,
@@ -97,6 +103,10 @@ pub enum Message {
     LocalVideo(crate::player::local::Message),
     Browsing(u64, crate::browsing::Message),
     Settings(crate::settings::Message),
+    Clips(u64, crate::clips::Message),
+    /// Change a clip of this video in the player's editor, as (video, clip).
+    EditClip(i64, i64),
+    DismissToast(u64),
 }
 
 /// Sends the app a message from any thread.
@@ -132,6 +142,9 @@ impl App {
             history: History::new(route),
             browsing: crate::browsing::Browsing::default(),
             settings: crate::settings::Settings::default(),
+            clips: crate::clips::Clips::default(),
+            toasts: Vec::new(),
+            toast_serial: 0,
             chrome,
             overlay: None,
             query: String::new(),
@@ -143,6 +156,7 @@ impl App {
             together: None,
             pending_join: None,
             pending_host: None,
+            pending_edit: None,
             rooms: 0,
             local_file: None,
             local_video: None,
@@ -194,10 +208,35 @@ impl App {
                 }
             }
         }
+        if let Some((video, clip)) = self.pending_edit {
+            if !matches!(self.history.current().route, Route::Watch(id, _) if id == video as u64) {
+                self.pending_edit = None;
+            } else if let Some(player) = &mut self.player
+                && player.pb.is_some()
+            {
+                self.pending_edit = None;
+                player.edit_existing(clip, effects);
+            }
+        }
         if self.session.screen == crate::session::Screen::Ready
             && let Some(api) = self.session.api.clone()
         {
             self.browsing.follow(&self.history.current().route, &api, effects);
+            let origin = self
+                .browsing
+                .data(&crate::browsing::Key::Shell)
+                .and_then(|d| d.server.as_ref()?.public_url.clone())
+                .unwrap_or_else(|| api.origin.as_str().to_owned());
+            let context = crate::clips::Context {
+                api: &api,
+                runtime: self.runtime.clone(),
+                who: self.who(),
+                origin: origin.clone(),
+            };
+            self.clips.follow(self.session.generation, &self.history.current().route, context, effects);
+            if let Some(player) = &mut self.player {
+                player.origin = origin;
+            }
         }
         if self.session.screen == crate::session::Screen::Ready
             && self.history.current().route == Route::Settings
@@ -221,6 +260,28 @@ impl App {
 
     fn handle(&mut self, message: Message, effects: &mut Vec<Effect>) {
         match message {
+            Message::Clips(generation, message) => {
+                if generation != self.session.generation {
+                    return;
+                }
+                let unauthorized = matches!(&message, crate::clips::Message::Listed(_, _, Err(e)) | crate::clips::Message::Fetched(_, _, Err(e)) | crate::clips::Message::Changed(_, _, Err(e)) if e.unauthorized);
+                if unauthorized {
+                    self.handle(
+                        Message::Session(crate::session::Message::Live(generation, crate::api::Live::Unauthorized)),
+                        effects,
+                    );
+                    return;
+                }
+                let Some(api) = self.session.api.clone() else { return };
+                if let Some(out) = self.clips.update(message, &api, effects) {
+                    self.clips_ask(out, effects);
+                }
+            },
+            Message::EditClip(video, clip) => {
+                self.pending_edit = Some((video, clip));
+                self.navigate(Route::Watch(video as u64, None), effects);
+            },
+            Message::DismissToast(id) => self.toasts.retain(|toast| toast.id != id),
             Message::Settings(message) => {
                 if matches!(&message, crate::settings::Message::Loaded(g,_,_,_) | crate::settings::Message::Done(g,_) if *g != self.session.generation)
                 {
@@ -324,6 +385,27 @@ impl App {
                     && g == generation
                 {
                     self.browsing.live(live);
+                    self.clips.live(live);
+                    if let crate::api::Live::Event(event) = live
+                        && let crate::api::events::EventsEvents::ClipChanged(change) = &event.events
+                        && let Some(player) = &mut self.player
+                    {
+                        let rendering = matches!(change.state, Some(crate::api::events::ClipState::RENDERING));
+                        player.clip_changed(change.clip_id, change.progress.filter(|_| rendering), effects);
+                    }
+                    // Watching a clip finish rendering is news enough; no need for a notification
+                    // too.
+                    if let crate::api::Live::Event(event) = live
+                        && let crate::api::events::EventsEvents::NotificationReceived(received) = &event.events
+                        && matches!(received.notification.kind, crate::api::events::NotificationKind::CLIP_READY)
+                        && let Some(clip) = self.player.as_ref().and_then(crate::player::Player::rendering)
+                        && received.notification.link.as_deref() == Some(Route::Clip(clip as u64).to_string().as_str())
+                        && let Some(api) = self.session.api.clone()
+                    {
+                        let read = crate::browsing::Action::Read(Some(vec![received.notification.id]));
+                        let route = self.history.current().route.clone();
+                        self.browsing.update(crate::browsing::Message::Act(read), &api, &route, effects);
+                    }
                     if matches!(live, crate::api::Live::Connected)
                         || matches!(live,crate::api::Live::Event(e) if matches!(&e.events,crate::api::events::EventsEvents::ConfigChanged(_) | crate::api::events::EventsEvents::ListChanged(_) | crate::api::events::EventsEvents::ClipChanged(_)))
                     {
@@ -343,6 +425,7 @@ impl App {
                     effects.push(Effect::PictureInPicture(false));
                     self.browsing.reset(self.session.generation);
                     self.settings = crate::settings::Settings::default();
+                    self.clips = crate::clips::Clips::default();
                     self.history = History::new(Route::Home);
                     self.overlay = None;
                     self.query.clear();
@@ -355,6 +438,9 @@ impl App {
                 self.chrome.fullscreen = fullscreen;
                 if let Some(player) = &mut self.player {
                     player.fullscreen = fullscreen;
+                }
+                if !fullscreen {
+                    self.clips.expanded = false;
                 }
                 self.window_state.maximized = maximized;
                 if !maximized && !fullscreen && size.width > 0.0 && size.height > 0.0 {
@@ -734,12 +820,71 @@ impl App {
             Out::Clip(id) => self.navigate(Route::Clip(id as u64), effects),
             Out::Together(code) => self.history.replace(Route::Together(code)),
             Out::Copy(text) => effects.push(Effect::Copy(text)),
+            Out::Clips(out) => self.clips_ask(out, effects),
         }
+    }
+
+    fn clips_ask(&mut self, out: crate::clips::Out, effects: &mut Vec<Effect>) {
+        use crate::clips::Out;
+        match out {
+            // The dialog comes and goes in place, as the web's `?clip=` does.
+            Out::Open(id) => self.replace_keeping_scroll(Route::Clip(id as u64)),
+            Out::Close => {
+                if matches!(self.history.current().route, Route::Clip(_)) {
+                    self.replace_keeping_scroll(Route::Clips);
+                }
+            },
+            Out::Toast(title, body, tone) => self.toast(title, body, tone, effects),
+            Out::Copy(text, title, body) => {
+                effects.push(Effect::Copy(text));
+                self.toast(title, body, crate::ui::overlay::Tone::Ok, effects);
+            },
+            Out::Fullscreen => {
+                self.clips.expanded = !self.chrome.fullscreen;
+                effects.push(Effect::Window(chrome::Action::Fullscreen(!self.chrome.fullscreen)));
+            },
+            Out::Navigate(route) => self.navigate(route, effects),
+        }
+    }
+
+    fn replace_keeping_scroll(&mut self, route: Route) {
+        let scroll = self.history.current().scroll;
+        self.history.replace(route);
+        self.history.set_scroll(scroll);
+    }
+
+    /// Shows a passing notice for a few seconds.
+    fn toast(
+        &mut self,
+        title: String,
+        body: Option<String>,
+        tone: crate::ui::overlay::Tone,
+        effects: &mut Vec<Effect>,
+    ) {
+        self.toast_serial += 1;
+        let id = self.toast_serial;
+        self.toasts.push(crate::ui::overlay::Toast { id, title, body, tone });
+        if self.toasts.len() > 3 {
+            self.toasts.remove(0);
+        }
+        effects.push(Effect::Task(Box::pin(async move {
+            tokio::time::sleep(std::time::Duration::from_secs(4)).await;
+            Message::DismissToast(id)
+        })));
+    }
+
+    /// The saved server in use and who's signed in to it, for what players remember.
+    fn who(&self) -> (u64, i64) {
+        let server = self.session.config.active.unwrap_or_default();
+        let user = self.session.config.active().and_then(|server| server.user.as_ref()).map_or(0, |user| user.id);
+        (server, user)
     }
 
     /// Whether something on screen moves without being asked to, so frames have to keep coming.
     pub fn animating(&self) -> bool {
-        if self.player.as_ref().is_some_and(|player| player.animating()) {
+        if self.player.as_ref().is_some_and(|player| player.animating())
+            || self.clips.open.as_ref().and_then(|open| open.player.as_ref()).is_some_and(|player| player.animating())
+        {
             return true;
         }
         let crossing = self
@@ -765,6 +910,9 @@ impl App {
             )
         {
             return Some(Message::Browsing(self.session.generation, crate::browsing::Message::Dialog(None)));
+        }
+        if let Some(message) = self.clip_key(event, status) {
+            return Some(message);
         }
         let watching = matches!(self.history.current().route, Route::Watch(..) | Route::Together(_));
         self.listen_in(event, status, watching)
@@ -855,6 +1003,31 @@ impl App {
             },
             _ => None,
         }
+    }
+
+    /// Keys for the open clip's player, as `ClipPlayer.tsx` listens for them.
+    fn clip_key(&mut self, event: &Event, status: event::Status) -> Option<Message> {
+        let Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. }) = event else { return None };
+        if status == event::Status::Captured
+            || self.overlay.is_some()
+            || !matches!(self.history.current().route, Route::Clip(_))
+        {
+            return None;
+        }
+        let generation = self.session.generation;
+        let open = self.clips.open.as_mut()?;
+        if open.confirm {
+            return None;
+        }
+        if self.clips.expanded && *key == keyboard::Key::Named(keyboard::key::Named::Escape) {
+            return Some(Message::Clips(
+                generation,
+                crate::clips::Message::Player(open.id, crate::player::clip_player::Message::Fullscreen),
+            ));
+        }
+        let id = open.id;
+        let message = open.player.as_mut()?.key(key, *modifiers)?;
+        Some(Message::Clips(generation, crate::clips::Message::Player(id, message)))
     }
 
     fn shortcut(&mut self, shortcut: Shortcut, effects: &mut Vec<Effect>) {

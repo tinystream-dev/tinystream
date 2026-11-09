@@ -11,6 +11,7 @@ mod api;
 mod app;
 mod browsing;
 mod chrome;
+mod clips;
 mod images;
 mod keys;
 mod paths;
