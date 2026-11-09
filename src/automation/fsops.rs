@@ -194,6 +194,16 @@ async fn move_with_progress(db: &SqlitePool, src: &Path, dst: &Path) -> anyhow::
         .bind(old.as_ref())
         .execute(&mut *tx)
         .await?;
+    for table in ["media", "items", "series"] {
+        sqlx::query(&format!(
+            "UPDATE {table} SET path = ?2 || substr(path, length(?1) + 1)
+             WHERE path = ?1 OR substr(path, 1, length(?1) + 1) = ?1 || '/'"
+        ))
+        .bind(old.as_ref())
+        .bind(new.as_ref())
+        .execute(&mut *tx)
+        .await?;
+    }
     move_file(src, dst).await?;
     if let Err(error) = tx.commit().await {
         move_file(dst, src).await.context("could not restore the file after saving watch history failed")?;
