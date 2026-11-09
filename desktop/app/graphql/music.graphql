@@ -1,0 +1,23 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+query MusicAlbums($library: String, $sort: AlbumSort!, $offset: Int!) { albums(library: $library, sort: $sort, offset: $offset, limit: 60) { ...AlbumCard } }
+query MusicArtists($library: String) { artists(library: $library) { ...ArtistCard } }
+query MusicSongs($library: String, $query: String!, $offset: Int!) { songs(library: $library, query: $query, offset: $offset, limit: 60) { ...MusicTrack } }
+query MusicPlaylists { playlists { ...PlaylistCard } }
+query MusicAlbum($id: Int!) { album(id: $id) { ...AlbumCard tracks { ...MusicTrack } genres } }
+query MusicArtist($id: Int!) { artist(id: $id) { ...ArtistCard albums { ...AlbumCard } tracks: topTracks(count: 200) { ...MusicTrack } } }
+query MusicPlaylist($id: Int!) { playlist(id: $id) { ...PlaylistCard tracks { ...MusicTrack } } }
+query MusicQueue { playQueue { tracks { ...MusicTrack } current position shuffled repeat changedBy updatedAt } }
+query MusicLyrics($trackId: Int!) { lyrics(trackId: $trackId) { synced lines { start text } } }
+mutation MusicSave($input: QueueInput!) { savePlayQueue(input: $input, client: "Desktop") { updatedAt } }
+mutation MusicPlaying($trackId: Int, $position: Float!, $paused: Boolean!) { nowPlaying(trackId: $trackId, position: $position, paused: $paused, client: "Desktop") }
+mutation MusicPlayed($trackId: Int!) { played(trackId: $trackId) }
+mutation MusicMeasure($trackId: Int!) { measureLoudness(trackId: $trackId) { ...MusicTrack } }
+mutation MusicStar($kind: MusicKind!, $id: Int!, $starred: Boolean!) { star(kind: $kind, id: $id, starred: $starred) }
+mutation MusicRate($kind: MusicKind!, $id: Int!, $rating: Int!) { rate(kind: $kind, id: $id, rating: $rating) }
+mutation MusicCreatePlaylist($name: String!) { createPlaylist(name: $name) { ...PlaylistCard } }
+mutation MusicUpdatePlaylist($id: Int!, $input: PlaylistInput!) { updatePlaylist(id: $id, input: $input) { ...PlaylistCard } }
+mutation MusicDeletePlaylist($id: Int!) { deletePlaylist(id: $id) }
+mutation MusicStartRoom($input: NewListenRoom!) { startListenRoom(input: $input) { code } }
+query MusicRoom($code: String!) { listenRoom(code: $code) { code signedIn isHost canShare canInvite tracks { ...MusicTrack } } }
+query MusicPeople { users { id username } }
+query MusicTrack($id: Int!) { track(id: $id) { ...MusicTrack } }

@@ -28,6 +28,7 @@ pub struct App {
     pub history: History,
     pub browsing: crate::browsing::Browsing,
     pub books: crate::books::Books,
+    pub music: crate::music::Music,
     pub settings: crate::settings::Settings,
     pub clips: crate::clips::Clips,
     /// Passing notices, bottom right (`toast()`).
@@ -105,6 +106,7 @@ pub enum Message {
     Browsing(u64, crate::browsing::Message),
     Settings(crate::settings::Message),
     Books(u64, crate::books::Message),
+    Music(u64, crate::music::Message),
     Clips(u64, crate::clips::Message),
     /// Change a clip of this video in the player's editor, as (video, clip).
     EditClip(i64, i64),
@@ -144,6 +146,7 @@ impl App {
             history: History::new(route),
             browsing: crate::browsing::Browsing::default(),
             books: crate::books::Books::default(),
+            music: crate::music::Music::default(),
             settings: crate::settings::Settings::default(),
             clips: crate::clips::Clips::default(),
             toasts: Vec::new(),
@@ -225,6 +228,12 @@ impl App {
             && let Some(api) = self.session.api.clone()
         {
             self.browsing.follow(&self.history.current().route, &api, effects);
+            self.music.blocked =
+                self.local_video.is_some() || self.clips.open.as_ref().and_then(|o| o.player.as_ref()).is_some();
+            let music_library = matches!(&self.history.current().route, Route::Library(name) if self.browsing.libraries().iter().any(|l| &l.name == name && l.kind == "MUSIC"));
+            if !matches!(self.history.current().route, Route::Listen(_)) || self.music.room_code.is_none() {
+                self.music.follow(self.session.generation, &self.history.current().route, &api, music_library, effects);
+            }
             self.books.follow(self.session.generation, &self.history.current().route, &api, effects);
             self.books.can_quote = self.browsing.viewer().is_some_and(|v| v.permissions.clip)
                 && self
@@ -272,8 +281,17 @@ impl App {
     fn handle(&mut self, message: Message, effects: &mut Vec<Effect>) {
         if matches!(&message, Message::Quit | Message::CloseRequested | Message::HideRequested) {
             self.books.flush(effects);
+            self.music.save(effects);
         }
         match message {
+            Message::Music(generation, message) => {
+                if generation != self.session.generation {
+                    return;
+                }
+                if let Some(route) = self.music.update(message, effects) {
+                    self.navigate(route, effects);
+                }
+            },
             Message::Books(generation, message) => {
                 if generation != self.session.generation {
                     return;
@@ -424,6 +442,7 @@ impl App {
                 {
                     self.browsing.live(live);
                     self.clips.live(live);
+                    self.music.live(live, effects);
                     if matches!(live, crate::api::Live::Connected)
                         || matches!(live, crate::api::Live::Event(e) if matches!(&e.events, crate::api::events::EventsEvents::ClipChanged(_) | crate::api::events::EventsEvents::ListChanged(_)))
                     {
@@ -466,6 +485,7 @@ impl App {
                         player.pip = false;
                     }
                     effects.push(Effect::PictureInPicture(false));
+                    self.music = crate::music::Music::default();
                     self.browsing.reset(self.session.generation);
                     self.settings = crate::settings::Settings::default();
                     self.clips = crate::clips::Clips::default();
@@ -512,10 +532,12 @@ impl App {
                         } else {
                             url.origin().ascii_serialization()
                         };
-                    } else if choice == 2
-                        && let Some((server, code)) = crate::together::link(&link)
-                    {
-                        self.join_room(server, code, effects);
+                    } else if choice == 2 {
+                        if let Some((server, code)) = crate::together::link(&link) {
+                            self.join_room(server, code, effects);
+                        } else if let Some(Route::Listen(code)) = Route::parse(url.path()) {
+                            self.join_listen(url, code, effects);
+                        }
                     }
                 }
             },
@@ -523,7 +545,9 @@ impl App {
             Message::HideRequested if self.tray_available && self.session.config.show_tray => self.hide(effects),
             Message::HideRequested => {},
             Message::CloseRequested
-                if self.tray_available && self.session.config.show_tray && self.together.is_some() =>
+                if self.tray_available
+                    && self.session.config.show_tray
+                    && (self.together.is_some() || self.music.playing || self.music.room_code.is_some()) =>
             {
                 self.hide(effects)
             },
@@ -718,6 +742,10 @@ impl App {
             self.unknown_link = Some(link.into());
             return;
         }
+        if let Route::Listen(code) = route {
+            self.join_listen(url, code, effects);
+            return;
+        }
         if let Route::Together(code) = route {
             let mut server = url.clone();
             server.set_path("/");
@@ -731,6 +759,32 @@ impl App {
             && self.session.config.active != Some(id)
         {
             self.session.update(crate::session::Message::Switch(id), effects);
+        }
+    }
+
+    fn join_listen(&mut self, mut server: url::Url, code: String, effects: &mut Vec<Effect>) {
+        let insecure = server.query_pairs().any(|(k, v)| k == "insecure" && v == "1");
+        server.set_path("/");
+        server.set_query(None);
+        server.set_fragment(None);
+        if server.scheme() == "tinystream" {
+            let Ok(origin) =
+                url::Url::parse(&format!("{}://{}/", if insecure { "http" } else { "https" }, server.authority()))
+            else {
+                return;
+            };
+            server = origin;
+        }
+        let api = self
+            .session
+            .api
+            .as_ref()
+            .filter(|a| crate::route::same_server(&server, &a.origin))
+            .cloned()
+            .or_else(|| crate::api::Api::new(server, None).ok());
+        if let Some(api) = api {
+            self.music.follow(self.session.generation, &Route::Listen(code.clone()), &api, false, effects);
+            self.navigate(Route::Listen(code), effects);
         }
     }
 
@@ -953,6 +1007,18 @@ impl App {
 
     /// Handles shell shortcuts, including search and Escape while a text field has focus.
     pub fn listen(&mut self, event: &Event, status: event::Status) -> Option<Message> {
+        if self.music.fullscreen
+            && status != event::Status::Captured
+            && matches!(
+                event,
+                Event::Keyboard(keyboard::Event::KeyPressed {
+                    key: keyboard::Key::Named(keyboard::key::Named::Escape),
+                    ..
+                })
+            )
+        {
+            return Some(Message::Music(self.session.generation, crate::music::Message::Fullscreen));
+        }
         if status != event::Status::Captured
             && matches!(self.history.current().route, Route::Read(_))
             && let Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. }) = event
@@ -1322,5 +1388,20 @@ mod desktop_tests {
         app.unknown_link = None;
         app.open_link("https://user:password@example.org/title/1", &mut effects);
         assert!(app.unknown_link.is_none());
+    }
+}
+
+#[cfg(test)]
+mod music_link_tests {
+    use super::*;
+    #[test]
+    fn an_unknown_listening_link_can_join_as_a_guest_without_switching_servers() {
+        let mut app = App::new(Route::Home, WindowState::default());
+        let mut effects = vec![];
+        app.unknown_link = Some("tinystream://music.example/listen/ROOM".into());
+        app.handle(Message::LinkChoice(2), &mut effects);
+        assert_eq!(app.history.current().route, Route::Listen("ROOM".into()));
+        assert_eq!(app.music.room_code.as_deref(), Some("ROOM"));
+        assert!(app.session.config.servers.is_empty());
     }
 }

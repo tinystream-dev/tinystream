@@ -20,6 +20,10 @@ pub trait IdleInhibit {
 }
 
 pub trait Desktop {
+    fn audio_output() -> anyhow::Result<crate::music::output::Output> {
+        anyhow::bail!("Music output is not available on this platform yet")
+    }
+
     fn idle_inhibit(
         _window: Arc<iced_winit::winit::window::Window>,
         _runtime: tokio::runtime::Handle,

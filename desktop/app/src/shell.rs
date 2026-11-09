@@ -46,6 +46,20 @@ const PAGES: &[(&str, Route, &str, Icon)] = &[
 
 pub fn view(app: &App) -> Element<'_, Message> {
     let screen = screen(app);
+    let screen =
+        if app.music.current().is_some() && !app.music.suspended && !app.music.dismissed && !app.music.fullscreen {
+            let generation = app.session.generation;
+            let pill = crate::music::pill(&app.music, &app.session.look()).map(move |m| Message::Music(generation, m));
+            iced_widget::Stack::with_children([
+                screen,
+                container(pill).align_bottom(Fill).center_x(Fill).padding(20).boxed(),
+            ])
+            .width(Fill)
+            .height(Fill)
+            .boxed()
+        } else {
+            screen
+        };
     if app.toasts.is_empty() {
         return screen;
     }
@@ -57,6 +71,15 @@ pub fn view(app: &App) -> Element<'_, Message> {
 }
 
 fn screen(app: &App) -> Element<'_, Message> {
+    if app.music.fullscreen && !app.music.suspended && !app.music.dismissed {
+        let look = app.session.look();
+        let generation = app.session.generation;
+        let content = container(crate::music::pill(&app.music, &look).map(move |m| Message::Music(generation, m)))
+            .center(Fill)
+            .padding(32)
+            .boxed();
+        return chrome(app, content, true, &look);
+    }
     if let Some(viewer) = &app.local_video {
         let look = app.session.look();
         return chrome(app, viewer.view(&look).map(Message::LocalVideo).boxed(), true, &look);
@@ -71,7 +94,8 @@ fn screen(app: &App) -> Element<'_, Message> {
     }
     let route = &app.history.current().route;
     // Guests join rooms without signing in, as on web.
-    let in_room = matches!(route, Route::Together(_)) && app.together.is_some();
+    let in_room = (matches!(route, Route::Together(_)) && app.together.is_some())
+        || (matches!(route, Route::Listen(_)) && app.music.room_code.is_some());
     let signed_in = app.session.screen == crate::session::Screen::Ready || in_room;
     let focus = route.is_focus() || (matches!(route, Route::Read(_)) && app.books.focused) || !signed_in;
 
@@ -97,7 +121,12 @@ fn screen(app: &App) -> Element<'_, Message> {
             button("Add server", &look).primary().on_press(Message::LinkChoice(1)).boxed()
         ]
         .spacing(8);
-        if crate::together::link(link).is_some() {
+        if crate::together::link(link).is_some()
+            || url::Url::parse(link)
+                .ok()
+                .and_then(|u| Route::parse(u.path()))
+                .is_some_and(|r| matches!(r, Route::Listen(_)))
+        {
             actions = actions.push(button("Join as guest", &look).on_press(Message::LinkChoice(2)).boxed());
         }
         let host = url::Url::parse(link).map(|url| url.authority().to_owned()).unwrap_or_default();
@@ -367,6 +396,10 @@ fn nav_link<'a>(label: &'a str, glyph: Icon, to: Route, current: &Route, look: &
 /// The page, in the window's single scroll container, under a strip that moves the window. While
 /// the route changes, the old page blurs away and the new one sharpens in.
 fn page<'a>(app: &'a App, look: &Look) -> Element<'a, Message> {
+    if app.music.owns(&app.history.current().route) {
+        let generation = app.session.generation;
+        return crate::music::page(&app.music, look).map(move |m| Message::Music(generation, m)).boxed();
+    }
     if matches!(app.history.current().route, Route::Book(_) | Route::Read(_)) {
         let generation = app.session.generation;
         return crate::books::view(&app.books, matches!(app.history.current().route, Route::Read(_)), look)

@@ -15,6 +15,7 @@ mod chrome;
 mod clips;
 mod images;
 mod keys;
+mod music;
 mod paths;
 mod platform;
 mod player;

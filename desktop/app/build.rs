@@ -22,6 +22,7 @@ fn main() {
         "graphql/settings.graphql",
         "graphql/clips.graphql",
         "graphql/books.graphql",
+        "graphql/music.graphql",
     ];
     for path in [schema, fragments].iter().chain(&queries) {
         println!("cargo:rerun-if-changed={path}");

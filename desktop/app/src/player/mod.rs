@@ -24,7 +24,7 @@ pub mod stream;
 mod strip;
 pub mod subtitles;
 pub mod sync;
-mod timeline;
+pub(crate) mod timeline;
 mod tracks;
 mod view;
 

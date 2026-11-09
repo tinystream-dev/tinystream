@@ -507,7 +507,12 @@ impl Runner {
             );
         }
         if let Some(integration) = &self.integration {
-            let mut media = self.app.player.as_ref().map(|player| player.desktop_media()).unwrap_or_default();
+            let mut media = self
+                .app
+                .player
+                .as_ref()
+                .map(|player| player.desktop_media())
+                .unwrap_or_else(|| self.app.music.desktop_media());
             media.tray = self.app.session.config.show_tray;
             integration.media.send_if_modified(|current| {
                 if *current == media {
@@ -624,6 +629,28 @@ impl Runner {
                 }
             },
             command => {
+                if self.app.player.is_none() && self.app.music.current().is_some() {
+                    use crate::music::Message as M;
+                    let music = &self.app.music;
+                    let message = match command {
+                        Command::Play if !music.playing => M::Toggle,
+                        Command::Pause if music.playing => M::Pause,
+                        Command::Toggle => M::Toggle,
+                        Command::Stop => M::Pause,
+                        Command::Next => M::Next,
+                        Command::Previous => M::Previous,
+                        Command::Seek(offset) if offset.is_finite() => M::Seek((music.position + offset).max(0.0)),
+                        Command::Position(track, time)
+                            if track == music.desktop_media().track && time.is_finite() && time >= 0.0 =>
+                        {
+                            M::Seek(time)
+                        },
+                        Command::Volume(volume) if volume.is_finite() => M::Volume(volume.clamp(0.0, 1.0) as f32),
+                        _ => return,
+                    };
+                    self.update(event_loop, Message::Music(self.app.session.generation, message));
+                    return;
+                }
                 let Some(player) = &self.app.player else { return };
                 use crate::player::Message as P;
                 let message = match command {

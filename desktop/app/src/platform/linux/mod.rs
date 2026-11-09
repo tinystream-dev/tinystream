@@ -20,6 +20,10 @@ mod video;
 pub struct Linux;
 
 impl Desktop for Linux {
+    fn audio_output() -> anyhow::Result<crate::music::output::Output> {
+        crate::music::output::Output::open()
+    }
+
     fn idle_inhibit(
         window: Arc<iced_winit::winit::window::Window>,
         runtime: tokio::runtime::Handle,
