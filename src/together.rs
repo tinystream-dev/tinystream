@@ -416,7 +416,7 @@ impl Room {
             }
 
             st.info.media_id = id;
-            st.clock = Clock { paused: st.clock.paused, running: false, position: 0.0, at: t, rate: st.clock.rate };
+            st.clock = Clock { paused: false, running: false, position: 0.0, at: t, rate: st.clock.rate };
 
             for m in st.members.iter_mut().filter(|m| m.status != Status::Blocked) {
                 m.status = Status::Loading;
@@ -667,4 +667,36 @@ impl Together {
 
 fn json<T: Serialize>(v: &T) -> String {
     serde_json::to_string(v).unwrap_or_else(|_| "null".into())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn changing_episodes_starts_playback_after_members_are_ready() {
+        let room = Room::new(
+            "test".into(),
+            Info { host_id: 1, media_id: 2, item_id: 1, library: "test".into(), public: false, invited: vec![] },
+            "host".into(),
+            Settings::default(),
+            Tracks::default(),
+            Clock { paused: true, running: false, position: 30.0, at: now_ms(), rate: 1.0 },
+        );
+        let member = room.join("host".into(), Some(1), None);
+        for (from, to) in [(2, 3), (3, 2)] {
+            assert!(room.set_media(member, to, from));
+            {
+                let state = room.lock();
+                assert!(!state.clock.paused);
+                assert!(!state.clock.running);
+                assert_eq!(state.clock.position, 0.0);
+            }
+            room.command(member, Command::Status { status: Status::Ready }).unwrap();
+            assert!(room.lock().clock.running);
+            room.command(member, Command::Pause { position: 10.0 }).unwrap();
+        }
+        assert!(!room.set_media(member, 4, 3));
+        assert!(room.lock().clock.paused);
+    }
 }
