@@ -11,6 +11,9 @@ publish = false
 [dependencies]
 ffmpeg-src = { path = "../native/ffmpeg" }
 
+[target.'cfg(not(target_vendor = "apple"))'.dependencies]
+ffmpeg-src = { path = "../native/ffmpeg", features = ["nvenc"] }
+
 [build-dependencies]
 bindgen = "0.72"
 pkg-config = "0.3"

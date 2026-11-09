@@ -62,7 +62,7 @@ export function plan(pb: Playback, audioIndex: number | null, maxHeight: number 
     mime = `video/mp4; codecs="${vCodec}, ${TRANSCODED_AUDIO}"`
   }
 
-  const hw = pb.transcoding.vaapi ? 'VA-API' : 'software'
+  const hw = pb.transcoding.vaapi ? 'VA-API' : pb.transcoding.nvenc ? 'NVENC' : 'software'
   const describe =
     video === 'copy'
       ? audioMode === 'copy'

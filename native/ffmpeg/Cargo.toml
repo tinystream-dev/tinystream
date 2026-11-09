@@ -28,6 +28,7 @@ ffnvcodec-src = { path = "../ffnvcodec", optional = true }
 
 [features]
 nvdec = ["dep:ffnvcodec-src"]
+nvenc = ["nvdec"]
 
 [build-dependencies]
 native-support = { path = "../support" }

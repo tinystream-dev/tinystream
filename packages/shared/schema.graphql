@@ -755,6 +755,7 @@ type Genre {
 enum Hardware {
 	AUTO
 	VAAPI
+	NVENC
 	SOFTWARE
 }
 
@@ -2301,16 +2302,20 @@ input TracksInput {
 type TranscodeConfig {
 	hardware: Hardware!
 	vaapiDevice: String!
+	cudaDevice: Int!
 }
 
 input TranscodeConfigInput {
 	hardware: Hardware!
 	vaapiDevice: String!
+	cudaDevice: Int!
 }
 
 type Transcoding {
 	vaapi: String
 	vaapiError: String
+	nvenc: String
+	nvencError: String
 	softwareH264: Boolean!
 }
 

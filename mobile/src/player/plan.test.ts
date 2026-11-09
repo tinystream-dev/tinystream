@@ -25,7 +25,7 @@ const pb = (over: Partial<Playback['media']> = {}, vaapi: string | null = null):
     chapters: [],
     ...over,
   },
-  transcoding: { vaapi, vaapiError: null, softwareH264: true },
+  transcoding: { vaapi, vaapiError: null, nvenc: null, nvencError: null, softwareH264: true },
 })
 
 /** A device that decodes these codecs (and records what it was asked). */

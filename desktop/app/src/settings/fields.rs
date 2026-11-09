@@ -148,7 +148,7 @@ pub fn fields(name: &str) -> &'static [(&'static str, &'static str)] {
             &[("detect", "Boolean!"), ("socket", "String"), ("expose", "Expose!"), ("httpsPort", "Int!")]
         },
         "TokenInput" => &[("name", "String!"), ("value", "String!")],
-        "TranscodeConfigInput" => &[("hardware", "Hardware!"), ("vaapiDevice", "String!")],
+        "TranscodeConfigInput" => &[("hardware", "Hardware!"), ("vaapiDevice", "String!"), ("cudaDevice", "Int!")],
         "UserPatch" => &[
             ("username", "String"),
             ("isAdmin", "Boolean"),
@@ -171,7 +171,7 @@ pub fn options(name: &str) -> &'static [&'static str] {
     match name {
         "ComponentStyle" => &["LAYERED", "FLAT", "GLASS"],
         "Expose" => &["MANUAL", "TAILNET", "PUBLIC"],
-        "Hardware" => &["AUTO", "VAAPI", "SOFTWARE"],
+        "Hardware" => &["AUTO", "VAAPI", "NVENC", "SOFTWARE"],
         "ImportMode" => &["AUTO", "HARDLINK", "COPY", "MOVE"],
         "LibraryKind" => &["VIDEO", "MUSIC", "BOOKS"],
         "Monitor" => &["NONE", "FUTURE", "MISSING"],

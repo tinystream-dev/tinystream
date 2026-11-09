@@ -692,6 +692,7 @@ export type Genre = {
 
 export type Hardware =
   | 'AUTO'
+  | 'NVENC'
   | 'SOFTWARE'
   | 'VAAPI';
 
@@ -2856,16 +2857,20 @@ export type TracksInput = {
 };
 
 export type TranscodeConfig = {
+  cudaDevice: Scalars['Int']['output'];
   hardware: Hardware;
   vaapiDevice: Scalars['String']['output'];
 };
 
 export type TranscodeConfigInput = {
+  cudaDevice: Scalars['Int']['input'];
   hardware: Hardware;
   vaapiDevice: Scalars['String']['input'];
 };
 
 export type Transcoding = {
+  nvenc?: Maybe<Scalars['String']['output']>;
+  nvencError?: Maybe<Scalars['String']['output']>;
   softwareH264: Scalars['Boolean']['output'];
   vaapi?: Maybe<Scalars['String']['output']>;
   vaapiError?: Maybe<Scalars['String']['output']>;

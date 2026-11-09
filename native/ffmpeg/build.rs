@@ -6,6 +6,7 @@ fn main() {
     let version = env!("CARGO_PKG_VERSION").strip_suffix(".0").unwrap_or(env!("CARGO_PKG_VERSION"));
 
     let apple = std::env::var("CARGO_CFG_TARGET_VENDOR").is_ok_and(|v| v == "apple");
+    let nvenc = std::env::var_os("CARGO_FEATURE_NVENC").is_some();
     let nvdec = std::env::var_os("CARGO_FEATURE_NVDEC").is_some();
 
     let mut deps = vec!["nasm", "dav1d", "x264", "zimg", "opus", "mp3lame"];
@@ -18,7 +19,7 @@ fn main() {
         deps.push("ffnvcodec");
     }
 
-    let b = Build::variant("ffmpeg", version, nvdec.then_some("nvdec"), &deps);
+    let b = Build::variant("ffmpeg", version, if nvenc { Some("nvenc") } else { nvdec.then_some("nvdec") }, &deps);
 
     let lame = std::env::var("DEP_MP3LAME_PREFIX").expect("no metadata from lame-src");
 
@@ -55,6 +56,15 @@ fn main() {
 
     if nvdec {
         args.extend(["--enable-ffnvcodec".into(), "--enable-nvdec".into(), "--enable-cuvid".into()]);
+    }
+
+    if nvenc {
+        args.extend([
+            "--enable-nvenc".into(),
+            "--enable-cuda-llvm".into(),
+            "--disable-cuda-nvcc".into(),
+            "--disable-libnpp".into(),
+        ]);
     }
 
     let url = format!("https://ffmpeg.org/releases/ffmpeg-{version}.tar.gz");

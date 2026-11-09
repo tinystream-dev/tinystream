@@ -57,6 +57,7 @@ fn label(name: &str) -> String {
         "downloadLimit" | "slowDownloadLimit" => "Download limit (KB/s)".into(),
         "uploadLimit" | "slowUploadLimit" => "Upload limit (KB/s)".into(),
         "tmdbApiKey" => "TMDB API key".into(),
+        "cudaDevice" => "CUDA device index".into(),
         "vaapiDevice" => "GPU device".into(),
         "cors" => "Allowed origins (CORS)".into(),
         "upnp" => "Open the port on the router (UPnP)".into(),

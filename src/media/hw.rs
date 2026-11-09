@@ -3,7 +3,7 @@
 use std::ffi::CStr;
 #[cfg(not(target_vendor = "apple"))]
 use std::ffi::{c_char, c_void};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::ptr;
 use std::sync::Mutex;
 
@@ -30,7 +30,10 @@ pub const GPU_FRAMES: bool = cfg!(not(target_vendor = "apple"));
 
 const API: &str = if cfg!(target_vendor = "apple") { "VideoToolbox" } else { "VA-API" };
 
-pub fn h264_encoder(hardware: bool) -> &'static CStr {
+pub fn h264_encoder(hardware: bool, device: Option<&BufferRef>) -> &'static CStr {
+    if hardware && is_cuda(device) {
+        return c"h264_nvenc";
+    }
     match (hardware, GPU_FRAMES) {
         (false, _) => c"libx264",
         (true, true) => c"h264_vaapi",
@@ -57,11 +60,13 @@ struct VaapiDeviceContext {
 pub struct Capabilities {
     pub vaapi: Option<String>,
     pub vaapi_error: Option<String>,
+    pub nvenc: Option<String>,
+    pub nvenc_error: Option<String>,
     pub software_h264: bool,
 }
 
 pub struct Hw {
-    state: Mutex<(Option<(PathBuf, BufferRef)>, Capabilities)>,
+    state: Mutex<(Option<(Transcode, BufferRef)>, Capabilities)>,
 }
 
 impl Hw {
@@ -69,7 +74,13 @@ impl Hw {
         Self {
             state: Mutex::new((
                 None,
-                Capabilities { vaapi: None, vaapi_error: None, software_h264: encoder_exists("libx264") },
+                Capabilities {
+                    vaapi: None,
+                    vaapi_error: None,
+                    nvenc: None,
+                    nvenc_error: None,
+                    software_h264: encoder_exists("libx264"),
+                },
             )),
         }
     }
@@ -77,50 +88,88 @@ impl Hw {
     pub fn configure(&self, t: &Transcode) {
         let mut state = self.state.lock().unwrap();
 
+        if state.0.as_ref().is_some_and(|(config, _)| config == t) {
+            return;
+        }
+        state.0 = None;
+        state.1.vaapi = None;
+        state.1.vaapi_error = None;
+        state.1.nvenc = None;
+        state.1.nvenc_error = None;
         if t.hardware == Hardware::Software {
-            state.0 = None;
-            state.1.vaapi = None;
-            state.1.vaapi_error = None;
             tracing::info!("transcoding: software (x264), as configured");
             return;
         }
-
-        let device = PathBuf::from(&t.vaapi_device);
-
-        if state.0.as_ref().is_some_and(|(p, _)| p == &device) {
-            return;
+        if t.hardware != Hardware::Nvenc {
+            match open_hardware(Path::new(&t.vaapi_device)) {
+                Ok((dev, vendor)) => {
+                    tracing::info!("transcoding: {API} ({vendor})");
+                    state.0 = Some((t.clone(), dev));
+                    state.1.vaapi = Some(vendor);
+                    return;
+                },
+                Err(error) => state.1.vaapi_error = Some(format!("{error:#}")),
+            }
         }
-
-        match open_hardware(&device) {
-            Ok((dev, vendor)) => {
-                tracing::info!("transcoding: {API} on {} ({vendor})", device.display());
-                state.0 = Some((device, dev));
-                state.1.vaapi = Some(vendor);
-                state.1.vaapi_error = None;
-            },
-            Err(e) => {
-                let msg = format!("{e:#}");
-
-                if t.hardware == Hardware::Vaapi {
-                    tracing::error!("{API} on {} isn't usable, falling back to software: {msg}", t.vaapi_device);
-                } else {
-                    tracing::info!("transcoding: software (x264); {API} unavailable: {msg}");
-                }
-
-                state.0 = None;
-                state.1.vaapi = None;
-                state.1.vaapi_error = Some(msg);
-            },
+        if matches!(t.hardware, Hardware::Auto | Hardware::Nvenc) {
+            match open_cuda(t.cuda_device) {
+                Ok((dev, vendor)) => {
+                    tracing::info!("transcoding: NVENC ({vendor})");
+                    state.0 = Some((t.clone(), dev));
+                    state.1.nvenc = Some(vendor);
+                    return;
+                },
+                Err(error) => state.1.nvenc_error = Some(format!("{error:#}")),
+            }
         }
+        tracing::info!(vaapi = ?state.1.vaapi_error, nvenc = ?state.1.nvenc_error, "transcoding: software (x264); hardware unavailable");
     }
 
     pub fn device(&self) -> Option<BufferRef> {
-        self.state.lock().unwrap().0.as_ref().map(|(_, d)| d.clone())
+        self.state.lock().unwrap().0.as_ref().map(|(_, device)| device.clone())
     }
 
     pub fn capabilities(&self) -> Capabilities {
         self.state.lock().unwrap().1.clone()
     }
+}
+
+pub fn is_cuda(device: Option<&BufferRef>) -> bool {
+    device.is_some_and(|dev| unsafe {
+        (*((*dev.0).data as *const ffi::AVHWDeviceContext)).type_ == ffi::AV_HWDEVICE_TYPE_CUDA
+    })
+}
+
+fn open_cuda(index: u32) -> anyhow::Result<(BufferRef, String)> {
+    anyhow::ensure!(encoder_exists("h264_nvenc"), "this build has no h264_nvenc encoder");
+    let mut buf = ptr::null_mut();
+    let device = ff::cstr(&index.to_string());
+    ff::check(
+        unsafe {
+            ffi::av_hwdevice_ctx_create(&mut buf, ffi::AV_HWDEVICE_TYPE_CUDA, device.as_ptr(), ptr::null_mut(), 0)
+        },
+        "can't open CUDA device",
+    )?;
+    let device = BufferRef(buf);
+    let codec = unsafe { ffi::avcodec_find_encoder_by_name(c"h264_nvenc".as_ptr()) };
+    let mut encoder = ff::Codec::alloc(codec)?;
+    let context = encoder.get_mut();
+    context.width = 256;
+    context.height = 256;
+    context.pix_fmt = ffi::AV_PIX_FMT_NV12;
+    context.time_base = ff::q(1, 24);
+    context.hw_device_ctx = device.new_ref();
+    encoder.open(&mut ff::Dict::new(&[("preset", "p4")]))?;
+    let name = std::process::Command::new("nvidia-smi")
+        .args(["--query-gpu=name", "--format=csv,noheader", &format!("--id={index}")])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| format!("CUDA device {index}"));
+    Ok((device, name))
 }
 
 fn encoder_exists(name: &str) -> bool {
@@ -179,6 +228,18 @@ fn open_hardware(device: &Path) -> anyhow::Result<(BufferRef, String)> {
 mod tests {
     use super::*;
     use crate::media::ff::{FilterGraph, Frame};
+
+    #[test]
+    fn unavailable_cuda_falls_back_without_affecting_software() {
+        let hw = Hw::new();
+        hw.configure(&Transcode { hardware: Hardware::Nvenc, cuda_device: u32::MAX, ..Default::default() });
+        assert!(hw.device().is_none());
+        assert!(hw.capabilities().nvenc_error.is_some());
+        hw.configure(&Transcode { hardware: Hardware::Software, ..Default::default() });
+        assert!(hw.device().is_none());
+        assert!(hw.capabilities().nvenc_error.is_none());
+        assert!(hw.capabilities().software_h264);
+    }
 
     #[test]
     fn pq_and_hlg_frames_become_tagged_sdr() {

@@ -193,7 +193,7 @@ pub struct Player {
     pub screen: Option<Arc<Screen>>,
     pub pb: Option<playback::Playback>,
     pub info_error: Option<String>,
-    vaapi: bool,
+    encoder: &'static str,
     pub can_clip: bool,
     pub can_together: bool,
     starting: bool,
@@ -334,7 +334,7 @@ impl Player {
             api: api.clone(),
             pb: None,
             info_error: None,
-            vaapi: false,
+            encoder: "software",
             can_clip: false,
             can_together: false,
             starting: false,
@@ -596,7 +596,7 @@ impl Player {
         match self.quality {
             Quality::Auto => "Direct play".into(),
             Quality::Height(height) => {
-                format!("Converting to {height}p ({})", if self.vaapi { "VA-API" } else { "software" })
+                format!("Converting to {height}p ({})", self.encoder)
             },
         }
     }
@@ -624,7 +624,13 @@ impl Player {
                     self.info_error = Some("This video isn’t here anymore.".into());
                     return None;
                 };
-                self.vaapi = data.server.transcoding.vaapi.is_some();
+                self.encoder = if data.server.transcoding.vaapi.is_some() {
+                    "VA-API"
+                } else if data.server.transcoding.nvenc.is_some() {
+                    "NVENC"
+                } else {
+                    "software"
+                };
                 self.can_clip = data.server.clips && data.viewer.as_ref().is_some_and(|v| v.permissions.clip);
                 self.can_together =
                     self.room.is_none() && data.viewer.as_ref().is_some_and(|v| v.permissions.watch_together);

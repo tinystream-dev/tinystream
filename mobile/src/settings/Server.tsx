@@ -87,18 +87,22 @@ export function General() {
           </Labeled>
         </Group>
 
-        <Group title="Transcoding" description={t.vaapi ? `VA-API: ${t.vaapi}` : t.vaapiError ? `VA-API unavailable: ${t.vaapiError}` : undefined}>
+        <Group title="Transcoding" description={t.vaapi ? `VA-API: ${t.vaapi}` : t.nvenc ? `NVENC: ${t.nvenc}` : [t.vaapiError, t.nvencError].filter(Boolean).join(" · ") || undefined}>
           <Labeled label="Encoder">
             <Select
               title="Encoder"
               value={draft.transcode.hardware}
               options={[
                 { value: 'AUTO', label: 'GPU, falling back to CPU' },
-                { value: 'VAAPI', label: 'GPU (VA-API) only' },
+                { value: 'VAAPI', label: 'GPU (VA-API)' },
+                { value: 'NVENC', label: 'NVIDIA (NVENC)' },
                 { value: 'SOFTWARE', label: 'CPU only' },
               ]}
               onChange={(v) => set((c) => void (c.transcode.hardware = v))}
             />
+          </Labeled>
+          <Labeled label="CUDA device index">
+            <Input keyboardType="number-pad" value={String(draft.transcode.cudaDevice)} onChangeText={(v) => set((c) => void (c.transcode.cudaDevice = Number(v)))} />
           </Labeled>
           <Labeled label="GPU device">
             <Input autoCapitalize="none" value={draft.transcode.vaapiDevice} onChangeText={(v) => set((c) => void (c.transcode.vaapiDevice = v))} />

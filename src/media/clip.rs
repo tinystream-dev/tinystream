@@ -369,7 +369,7 @@ impl Picture {
 
             if let Some(dev) = hw.filter(|_| hw::GPU_FRAMES) {
                 d.hw_device_ctx = dev.new_ref();
-                d.get_format = Some(super::stream::prefer_vaapi);
+                d.get_format = Some(super::stream::prefer_hardware);
                 d.extra_hw_frames = 8;
             }
         }
@@ -464,7 +464,7 @@ impl Picture {
         let f = self.frame.get();
         let (w, h) = self.size;
         let fps = format!("fps={}/{}", self.rate.num, self.rate.den);
-        let on_gpu = f.format == ffi::AV_PIX_FMT_VAAPI;
+        let on_gpu = matches!(f.format, ffi::AV_PIX_FMT_VAAPI | ffi::AV_PIX_FMT_CUDA);
         let hdr = matches!(f.color_trc, ffi::AVCOL_TRC_SMPTE2084 | ffi::AVCOL_TRC_ARIB_STD_B67);
 
         let memory = if self.hw.is_some() { "nv12" } else { "yuv420p" };
@@ -473,17 +473,28 @@ impl Picture {
 
         let tonemap = hw::SDR_TONEMAP;
 
-        let candidates = match (on_gpu, hdr) {
-            (true, false) => vec![format!("{fps},scale_vaapi=w={w}:h={h}:format=nv12{down}")],
-            (true, true) => vec![
-                format!(
-                    "{fps},tonemap_vaapi=format=nv12:matrix=bt709:primaries=bt709:transfer=bt709,\
+        let candidates = if hw::is_cuda(self.hw.as_ref()) {
+            let upload = if on_gpu { "" } else { "format=nv12,hwupload," };
+            if hdr {
+                let download =
+                    if on_gpu { format!("hwdownload,format={},", hw::download_format(f)) } else { String::new() };
+                vec![format!("{fps},{download}{scale},{tonemap},format={memory}")]
+            } else {
+                vec![format!("{fps},{upload}scale_cuda=w={w}:h={h}:format=nv12{down}")]
+            }
+        } else {
+            match (on_gpu, hdr) {
+                (true, false) => vec![format!("{fps},scale_vaapi=w={w}:h={h}:format=nv12{down}")],
+                (true, true) => vec![
+                    format!(
+                        "{fps},tonemap_vaapi=format=nv12:matrix=bt709:primaries=bt709:transfer=bt709,\
                      scale_vaapi=w={w}:h={h}:format=nv12{down}"
-                ),
-                format!("{fps},hwdownload,format={},{scale},{tonemap},format={memory}", hw::download_format(f)),
-            ],
-            (false, false) => vec![format!("{fps},{scale},format={memory}")],
-            (false, true) => vec![format!("{fps},{scale},{tonemap},format={memory}")],
+                    ),
+                    format!("{fps},hwdownload,format={},{scale},{tonemap},format={memory}", hw::download_format(f)),
+                ],
+                (false, false) => vec![format!("{fps},{scale},format={memory}")],
+                (false, true) => vec![format!("{fps},{scale},{tonemap},format={memory}")],
+            }
         };
 
         let mut last = None;
@@ -525,7 +536,7 @@ impl Picture {
                 o.draw(&mut self.filtered, self.start + at)?;
             }
 
-            let on_gpu = self.filtered.get().format == ffi::AV_PIX_FMT_VAAPI;
+            let on_gpu = matches!(self.filtered.get().format, ffi::AV_PIX_FMT_VAAPI | ffi::AV_PIX_FMT_CUDA);
 
             match self.hw.clone().filter(|_| hw::GPU_FRAMES && !on_gpu) {
                 Some(dev) => {
@@ -590,7 +601,7 @@ impl Picture {
         };
 
         let enc = if !hw::GPU_FRAMES && self.hw.is_some() {
-            let codec = unsafe { ffi::avcodec_find_encoder_by_name(hw::h264_encoder(true).as_ptr()) };
+            let codec = unsafe { ffi::avcodec_find_encoder_by_name(hw::h264_encoder(true, self.hw.as_ref()).as_ptr()) };
             anyhow::ensure!(!codec.is_null(), "no h264_videotoolbox encoder in this build");
             let mut enc = Codec::alloc(codec)?;
             setup(&mut enc);
@@ -615,6 +626,18 @@ impl Picture {
             enc.open(&mut Dict::new(&[("preset", "medium"), ("crf", "22"), ("level", &level)]))
                 .context("opening libx264")?;
 
+            enc
+        } else if hw::is_cuda(self.hw.as_ref()) {
+            let codec = unsafe { ffi::avcodec_find_encoder_by_name(c"h264_nvenc".as_ptr()) };
+            anyhow::ensure!(!codec.is_null(), "no h264_nvenc encoder in this build");
+            let mut enc = Codec::alloc(codec)?;
+            setup(&mut enc);
+            let e = enc.get_mut();
+            e.hw_frames_ctx = unsafe { ffi::av_buffer_ref(hw_frames) };
+            e.max_b_frames = 0;
+            e.level = level;
+            e.bit_rate = cap * 6 / 10;
+            enc.open(&mut Dict::new(&[("preset", "p5"), ("rc", "vbr"), ("cq", "23")]))?;
             enc
         } else {
             let codec = unsafe { ffi::avcodec_find_encoder_by_name(c"h264_vaapi".as_ptr()) };

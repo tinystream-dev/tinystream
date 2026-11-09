@@ -196,6 +196,7 @@ pub enum Hardware {
     #[default]
     Auto,
     Vaapi,
+    Nvenc,
     Software,
 }
 
@@ -205,11 +206,12 @@ pub enum Hardware {
 pub struct Transcode {
     pub hardware: Hardware,
     pub vaapi_device: String,
+    pub cuda_device: u32,
 }
 
 impl Default for Transcode {
     fn default() -> Self {
-        Self { hardware: Hardware::Auto, vaapi_device: "/dev/dri/renderD128".into() }
+        Self { hardware: Hardware::Auto, vaapi_device: "/dev/dri/renderD128".into(), cuda_device: 0 }
     }
 }
 
