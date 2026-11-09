@@ -72,14 +72,19 @@ pub fn spawn(req: StreamRequest, hw: Option<BufferRef>) -> mpsc::Receiver<Chunk>
         .spawn(move || {
             let started = std::time::Instant::now();
             let mut sink = Sink { tx, sent: false };
-            let mut result = run(&req, hw.as_ref(), &mut sink);
+            let mut result = run(&req, hw.as_ref(), true, &mut sink);
+
+            if matches!(result, Err(Stop::Hardware(_))) && hw::is_cuda(hw.as_ref()) {
+                tracing::info!("retrying {} with software decode and NVENC encode", req.path.display());
+                result = run(&req, hw.as_ref(), false, &mut sink);
+            }
 
             if let Err(Stop::Hardware(e)) = &result {
                 tracing::warn!(
                     "hardware transcoding couldn't handle {}: {e:#}; retrying in software",
                     req.path.display()
                 );
-                result = run(&req, None, &mut sink);
+                result = run(&req, None, false, &mut sink);
             }
 
             match result {
@@ -134,7 +139,7 @@ impl Mux {
     }
 }
 
-fn run(req: &StreamRequest, hw: Option<&BufferRef>, sink: &mut Sink) -> Result<(), Stop> {
+fn run(req: &StreamRequest, hw: Option<&BufferRef>, hardware_decode: bool, sink: &mut Sink) -> Result<(), Stop> {
     let mut input = Input::open(&req.path, true)?;
     let v_idx = unsafe { ffi::av_find_best_stream(input.0, ffi::AVMEDIA_TYPE_VIDEO, -1, -1, ptr::null_mut(), 0) };
 
@@ -209,9 +214,14 @@ fn run(req: &StreamRequest, hw: Option<&BufferRef>, sink: &mut Sink) -> Result<(
             Video::Copy { started: false }
         },
         VideoMode::Transcode { max_height } => Video::Transcode(Box::new(
-            VideoTranscode::new(vst, hw, max_height, (req.start * ff::q2d(ffi::av_inv_q(v_tb))) as i64, unsafe {
-                (*input.0).bit_rate
-            })
+            VideoTranscode::new(
+                vst,
+                hw,
+                hardware_decode,
+                max_height,
+                (req.start * ff::q2d(ffi::av_inv_q(v_tb))) as i64,
+                unsafe { (*input.0).bit_rate },
+            )
             .map_err(|error| if hw.is_some() { Stop::Hardware(error) } else { Stop::Failed(error) })?,
         )),
     };
@@ -432,6 +442,7 @@ impl VideoTranscode {
     fn new(
         st: &ffi::AVStream,
         hw: Option<&BufferRef>,
+        hardware_decode: bool,
         max_height: i32,
         start_pts: i64,
         container_bitrate: i64,
@@ -440,7 +451,7 @@ impl VideoTranscode {
         let mut decoder = unsafe { ffi::avcodec_find_decoder(par.codec_id) };
 
         if par.codec_id == ffi::AV_CODEC_ID_AV1 {
-            let name = if hw.is_some() && hw::GPU_FRAMES { c"av1" } else { c"libdav1d" };
+            let name = if hardware_decode && hw.is_some() && hw::GPU_FRAMES { c"av1" } else { c"libdav1d" };
             let d = unsafe { ffi::avcodec_find_decoder_by_name(name.as_ptr()) };
 
             if !d.is_null() {
@@ -460,7 +471,7 @@ impl VideoTranscode {
             d.pkt_timebase = st.time_base;
             d.thread_count = 0;
 
-            if let Some(dev) = hw.filter(|_| hw::GPU_FRAMES) {
+            if let Some(dev) = hw.filter(|_| hardware_decode && hw::GPU_FRAMES) {
                 d.hw_device_ctx = dev.new_ref();
                 d.get_format = Some(prefer_hardware);
                 d.extra_hw_frames = 8;

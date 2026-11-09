@@ -91,7 +91,12 @@ pub fn render(
     cancel: &AtomicBool,
 ) -> anyhow::Result<Rendered> {
     let tmp = out.with_extension("part");
-    let mut result = run(video, recipe, &tmp, hw, fonts, progress, cancel);
+    let mut result = run(video, recipe, &tmp, hw, true, fonts, progress, cancel);
+
+    if result.is_err() && hw::is_cuda(hw) && !cancel.load(Ordering::Relaxed) {
+        tracing::info!("retrying clip of {} with software decode and NVENC encode", video.display());
+        result = run(video, recipe, &tmp, hw, false, fonts, progress, cancel);
+    }
 
     if let Err(e) = &result
         && hw.is_some()
@@ -101,7 +106,7 @@ pub fn render(
             "hardware transcoding couldn't render a clip of {}: {e:#}; retrying in software",
             video.display()
         );
-        result = run(video, recipe, &tmp, None, fonts, progress, cancel);
+        result = run(video, recipe, &tmp, None, false, fonts, progress, cancel);
     }
 
     match result {
@@ -121,6 +126,7 @@ fn run(
     recipe: &Recipe,
     out: &Path,
     hw: Option<&BufferRef>,
+    hardware_decode: bool,
     fonts: &burn::Fonts,
     progress: &mut dyn FnMut(f32),
     cancel: &AtomicBool,
@@ -168,7 +174,7 @@ fn run(
     };
 
     let mut mux = Mux::create(out, &recipe.title, a_idx.is_some())?;
-    let mut pic = Picture::new(vst, hw, size, rate, start, end, overlay)?;
+    let mut pic = Picture::new(vst, hw, hardware_decode, size, rate, start, end, overlay)?;
 
     let mut sound = match a_idx {
         Some(i) => {
@@ -340,6 +346,7 @@ impl Picture {
     fn new(
         st: &ffi::AVStream,
         hw: Option<&BufferRef>,
+        hardware_decode: bool,
         size: (i32, i32),
         rate: ffi::AVRational,
         start: f64,
@@ -350,7 +357,7 @@ impl Picture {
         let mut decoder = unsafe { ffi::avcodec_find_decoder(par.codec_id) };
 
         if par.codec_id == ffi::AV_CODEC_ID_AV1 {
-            let name = if hw.is_some() && hw::GPU_FRAMES { c"av1" } else { c"libdav1d" };
+            let name = if hardware_decode && hw.is_some() && hw::GPU_FRAMES { c"av1" } else { c"libdav1d" };
             let d = unsafe { ffi::avcodec_find_decoder_by_name(name.as_ptr()) };
 
             if !d.is_null() {
@@ -367,7 +374,7 @@ impl Picture {
             d.pkt_timebase = st.time_base;
             d.thread_count = 0;
 
-            if let Some(dev) = hw.filter(|_| hw::GPU_FRAMES) {
+            if let Some(dev) = hw.filter(|_| hardware_decode && hw::GPU_FRAMES) {
                 d.hw_device_ctx = dev.new_ref();
                 d.get_format = Some(super::stream::prefer_hardware);
                 d.extra_hw_frames = 8;
