@@ -94,7 +94,7 @@ impl<'a> Batch<'a> {
             self.mkdirs(parent).await?;
         }
 
-        move_file(src, dst).await?;
+        move_with_progress(self.db, src, dst).await?;
         self.record("rename", Some(src), dst).await
     }
 
@@ -175,6 +175,33 @@ async fn move_file(src: &Path, dst: &Path) -> anyhow::Result<()> {
     }
 }
 
+async fn move_with_progress(db: &SqlitePool, src: &Path, dst: &Path) -> anyhow::Result<()> {
+    let (old, new) = (src.to_string_lossy(), dst.to_string_lossy());
+    let mut tx = db.begin().await?;
+    sqlx::query(
+        "INSERT INTO progress (user_id, media_path, position, duration, finished, updated_at)
+         SELECT user_id, ?2 || substr(media_path, length(?1) + 1), position, duration, finished, updated_at
+         FROM progress WHERE media_path = ?1 OR substr(media_path, 1, length(?1) + 1) = ?1 || '/'
+         ON CONFLICT(user_id, media_path) DO UPDATE SET position = excluded.position, duration = excluded.duration,
+             finished = excluded.finished, updated_at = excluded.updated_at
+         WHERE excluded.updated_at > progress.updated_at",
+    )
+    .bind(old.as_ref())
+    .bind(new.as_ref())
+    .execute(&mut *tx)
+    .await?;
+    sqlx::query("DELETE FROM progress WHERE media_path = ?1 OR substr(media_path, 1, length(?1) + 1) = ?1 || '/'")
+        .bind(old.as_ref())
+        .execute(&mut *tx)
+        .await?;
+    move_file(src, dst).await?;
+    if let Err(error) = tx.commit().await {
+        move_file(dst, src).await.context("could not restore the file after saving watch history failed")?;
+        return Err(error.into());
+    }
+    Ok(())
+}
+
 #[derive(Debug, Default, Serialize, async_graphql::SimpleObject)]
 #[serde(rename_all = "camelCase")]
 pub struct UndoReport {
@@ -212,7 +239,7 @@ pub async fn undo(db: &SqlitePool, batch: &str) -> anyhow::Result<UndoReport> {
                         std::fs::create_dir_all(parent)?;
                     }
 
-                    move_file(&dst, &src).await
+                    move_with_progress(db, &dst, &src).await
                 },
                 "hardlink" | "copy" => {
                     if dst.exists() {
@@ -348,6 +375,54 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("ts-fsops-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
         crate::db::open(&dir.join("t.db")).await.unwrap()
+    }
+
+    #[tokio::test]
+    async fn renames_and_undo_preserve_every_users_history() {
+        let db = db().await;
+        let dir = std::env::temp_dir().join(format!("ts-history-{}", uuid::Uuid::new_v4()));
+        let old = dir.join("Show_100%");
+        let new = dir.join("Renamed");
+        std::fs::create_dir_all(&old).unwrap();
+        std::fs::write(old.join("ep.mkv"), b"video").unwrap();
+        for id in [1, 2] {
+            sqlx::query(
+                "INSERT INTO users (id, handle, username, password_hash, created_at) VALUES (?1, ?1, ?1, '', 0)",
+            )
+            .bind(id)
+            .execute(&db)
+            .await
+            .unwrap();
+            for path in [old.join("ep.mkv"), dir.join("Show_100%Extra/ep.mkv")] {
+                sqlx::query("INSERT INTO progress VALUES (?, ?, 42, 100, ?, 10)")
+                    .bind(id)
+                    .bind(path.to_string_lossy().as_ref())
+                    .bind(id == 2)
+                    .execute(&db)
+                    .await
+                    .unwrap();
+            }
+        }
+        let batch = Batch::new(&db, "history", "test");
+        batch.rename(&old, &new).await.unwrap();
+        for path in [new.join("ep.mkv"), dir.join("Show_100%Extra/ep.mkv")] {
+            let rows: Vec<(i64, f64, bool)> = sqlx::query_as(
+                "SELECT user_id, position, finished FROM progress WHERE media_path = ? ORDER BY user_id",
+            )
+            .bind(path.to_string_lossy().as_ref())
+            .fetch_all(&db)
+            .await
+            .unwrap();
+            assert_eq!(rows, vec![(1, 42.0, false), (2, 42.0, true)]);
+        }
+        assert!(undo(&db, "history").await.unwrap().problems.is_empty());
+        let count: i64 = sqlx::query_scalar("SELECT count(*) FROM progress WHERE media_path = ?")
+            .bind(old.join("ep.mkv").to_string_lossy().as_ref())
+            .fetch_one(&db)
+            .await
+            .unwrap();
+        assert_eq!(count, 2);
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[tokio::test]
