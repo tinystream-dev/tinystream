@@ -471,8 +471,7 @@ impl Picture {
         let down = if self.overlay.is_some() { ",hwdownload,format=nv12" } else { "" };
         let scale = format!("scale={w}:{h}:flags=bicubic");
 
-        let tonemap = "zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,tonemap=tonemap=hable:desat=0,\
-                       zscale=t=bt709:m=bt709:r=tv";
+        let tonemap = hw::SDR_TONEMAP;
 
         let candidates = match (on_gpu, hdr) {
             (true, false) => vec![format!("{fps},scale_vaapi=w={w}:h={h}:format=nv12{down}")],
@@ -481,7 +480,7 @@ impl Picture {
                     "{fps},tonemap_vaapi=format=nv12:matrix=bt709:primaries=bt709:transfer=bt709,\
                      scale_vaapi=w={w}:h={h}:format=nv12{down}"
                 ),
-                format!("{fps},hwdownload,format={},{scale},{tonemap},format={memory}", gpu_format(f)),
+                format!("{fps},hwdownload,format={},{scale},{tonemap},format={memory}", hw::download_format(f)),
             ],
             (false, false) => vec![format!("{fps},{scale},format={memory}")],
             (false, true) => vec![format!("{fps},{scale},{tonemap},format={memory}")],
@@ -671,16 +670,6 @@ impl Picture {
 
         Ok(())
     }
-}
-
-fn gpu_format(f: &ffi::AVFrame) -> String {
-    let fmt = if f.hw_frames_ctx.is_null() {
-        ffi::AV_PIX_FMT_NV12
-    } else {
-        unsafe { (*((*f.hw_frames_ctx).data as *const ffi::AVHWFramesContext)).sw_format }
-    };
-
-    unsafe { ff::opt_str(ffi::av_get_pix_fmt_name(fmt)) }.unwrap_or_else(|| "nv12".into())
 }
 
 const RATE: c_int = 48_000;

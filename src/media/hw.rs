@@ -12,6 +12,18 @@ use serde::Serialize;
 use super::ff::{self, BufferRef, ffi};
 use crate::config::{Hardware, Transcode};
 
+pub const SDR_TONEMAP: &str =
+    "zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,tonemap=tonemap=hable:desat=0,zscale=t=bt709:m=bt709:r=tv";
+
+pub fn download_format(frame: &ffi::AVFrame) -> String {
+    let format = if frame.hw_frames_ctx.is_null() {
+        ffi::AV_PIX_FMT_NV12
+    } else {
+        unsafe { (*((*frame.hw_frames_ctx).data as *const ffi::AVHWFramesContext)).sw_format }
+    };
+    unsafe { ff::opt_str(ffi::av_get_pix_fmt_name(format)) }.unwrap_or_else(|| "nv12".into())
+}
+
 /// Whether the hardware works on frames in its own memory (VA-API's surfaces) rather than taking
 /// ordinary ones (VideoToolbox's encoder).
 pub const GPU_FRAMES: bool = cfg!(not(target_vendor = "apple"));
@@ -161,4 +173,41 @@ fn open_hardware(device: &Path) -> anyhow::Result<(BufferRef, String)> {
     };
 
     Ok((buf, vendor))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::media::ff::{FilterGraph, Frame};
+
+    #[test]
+    fn pq_and_hlg_frames_become_tagged_sdr() {
+        for transfer in [ffi::AVCOL_TRC_SMPTE2084, ffi::AVCOL_TRC_ARIB_STD_B67] {
+            let mut frame = Frame::new();
+            let f = frame.get_mut();
+            f.width = 32;
+            f.height = 32;
+            f.format = ffi::AV_PIX_FMT_YUV420P10LE;
+            f.color_primaries = ffi::AVCOL_PRI_BT2020;
+            f.color_trc = transfer;
+            f.colorspace = ffi::AVCOL_SPC_BT2020_NCL;
+            f.color_range = ffi::AVCOL_RANGE_MPEG;
+            ff::check(unsafe { ffi::av_frame_get_buffer(frame.0, 0) }, "frame buffer").unwrap();
+            let f = frame.get_mut();
+            for plane in 0..3 {
+                unsafe {
+                    ptr::write_bytes(f.data[plane], 0, f.linesize[plane] as usize * if plane == 0 { 32 } else { 16 })
+                };
+            }
+            let mut graph =
+                FilterGraph::video(f, ff::q(1, 24), &format!("{SDR_TONEMAP},format=yuv420p"), None).unwrap();
+            graph.push(Some(&mut frame)).unwrap();
+            let mut output = Frame::new();
+            assert!(graph.pull(&mut output).unwrap());
+            assert_eq!(output.get().color_trc, ffi::AVCOL_TRC_BT709);
+            assert_eq!(output.get().color_primaries, ffi::AVCOL_PRI_BT709);
+            assert_eq!(output.get().colorspace, ffi::AVCOL_SPC_BT709);
+            assert_eq!(output.get().color_range, ffi::AVCOL_RANGE_MPEG);
+        }
+    }
 }

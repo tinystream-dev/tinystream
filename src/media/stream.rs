@@ -524,13 +524,27 @@ impl VideoTranscode {
         let height = f.height.min(self.max_height.max(144)) & !1;
         let width = ((f.width as i64 * height as i64 / f.height.max(1) as i64) as i32 + 1) & !1;
 
-        let (desc, device) = match (&self.hw, f.format == ffi::AV_PIX_FMT_VAAPI) {
-            (Some(_), true) => (format!("scale_vaapi=w={width}:h={height}:format=nv12"), None),
-            (Some(dev), false) if hw::GPU_FRAMES => (format!("scale={width}:{height},format=nv12,hwupload"), Some(dev)),
-            (Some(_), false) => (format!("scale={width}:{height}:flags=bicubic,format=nv12"), None),
-            (None, _) => (format!("scale={width}:{height}:flags=bicubic,format=yuv420p"), None),
+        let hdr = matches!(f.color_trc, ffi::AVCOL_TRC_SMPTE2084 | ffi::AVCOL_TRC_ARIB_STD_B67);
+        let on_gpu = f.format == ffi::AV_PIX_FMT_VAAPI;
+        let (desc, device) = if hdr {
+            let download =
+                if on_gpu { format!("hwdownload,format={},", hw::download_format(f)) } else { String::new() };
+            let output = if self.hw.is_some() { "nv12" } else { "yuv420p" };
+            let upload = if self.hw.is_some() && hw::GPU_FRAMES { ",hwupload" } else { "" };
+            (
+                format!("{download}scale={width}:{height}:flags=bicubic,{},format={output}{upload}", hw::SDR_TONEMAP),
+                self.hw.as_ref(),
+            )
+        } else {
+            match (&self.hw, on_gpu) {
+                (Some(_), true) => (format!("scale_vaapi=w={width}:h={height}:format=nv12"), None),
+                (Some(dev), false) if hw::GPU_FRAMES => {
+                    (format!("scale={width}:{height},format=nv12,hwupload"), Some(dev))
+                },
+                (Some(_), false) => (format!("scale={width}:{height}:flags=bicubic,format=nv12"), None),
+                (None, _) => (format!("scale={width}:{height}:flags=bicubic,format=yuv420p"), None),
+            }
         };
-
         tracing::debug!(
             "transcoding {}x{} → {width}x{height} via `{desc}` ({} decode)",
             f.width,
@@ -591,6 +605,11 @@ impl VideoTranscode {
             e.rc_max_rate = bitrate * 3 / 2;
             e.rc_buffer_size = (bitrate * 2) as c_int;
             e.profile = ffi::AV_PROFILE_H264_HIGH as c_int;
+            let frame = self.filtered.get();
+            e.color_primaries = frame.color_primaries;
+            e.color_trc = frame.color_trc;
+            e.colorspace = frame.colorspace;
+            e.color_range = frame.color_range;
             e.flags |= ffi::AV_CODEC_FLAG_GLOBAL_HEADER as c_int;
 
             if !hw_frames.is_null() {
