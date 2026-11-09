@@ -12,6 +12,8 @@ import type { Playback } from '../lib/api'
 
 const BUFFER_AHEAD = 60
 const KEEP_BEHIND = 30
+const END_SLACK = 5
+const READ_TIMEOUT = 15_000
 /** Largest single appendBuffer call, well under any browser's quota. */
 const APPEND_SIZE = 1 << 20
 
@@ -291,6 +293,9 @@ export class StreamEngine {
       }
       reader.cancel().catch(() => {})
       if (gen === this.generation) {
+        if (this.duration && (this.front ?? start) < this.duration - END_SLACK) {
+          throw new Error('The stream ended before the video finished. Try again or choose another quality.')
+        }
         this.activeFrom = null
         this.endReached = true
         await this.exclusive(() => gen === this.generation && this.ms.readyState === 'open' && this.ms.endOfStream())
@@ -304,7 +309,7 @@ export class StreamEngine {
 
   /** Whether the stream has run out for good: it reached the file's end and nothing's left to play here. */
   exhausted() {
-    return this.endReached && !this.isBuffered(this.video.currentTime)
+    return this.endReached && (!this.duration || this.video.currentTime >= this.duration - END_SLACK) && !this.isBuffered(this.video.currentTime)
   }
 
   /** Called when the video stalls; restarts the stream if ours has ended early. */
