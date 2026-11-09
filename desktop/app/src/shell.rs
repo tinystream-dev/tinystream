@@ -73,7 +73,7 @@ fn screen(app: &App) -> Element<'_, Message> {
     // Guests join rooms without signing in, as on web.
     let in_room = matches!(route, Route::Together(_)) && app.together.is_some();
     let signed_in = app.session.screen == crate::session::Screen::Ready || in_room;
-    let focus = route.is_focus() || !signed_in;
+    let focus = route.is_focus() || (matches!(route, Route::Read(_)) && app.books.focused) || !signed_in;
 
     let base: Element<'_, Message> = if !signed_in {
         app.session.view()
@@ -367,6 +367,12 @@ fn nav_link<'a>(label: &'a str, glyph: Icon, to: Route, current: &Route, look: &
 /// The page, in the window's single scroll container, under a strip that moves the window. While
 /// the route changes, the old page blurs away and the new one sharpens in.
 fn page<'a>(app: &'a App, look: &Look) -> Element<'a, Message> {
+    if matches!(app.history.current().route, Route::Book(_) | Route::Read(_)) {
+        let generation = app.session.generation;
+        return crate::books::view(&app.books, matches!(app.history.current().route, Route::Read(_)), look)
+            .map(move |message| Message::Books(generation, message))
+            .boxed();
+    }
     if let (Route::Watch(..), Some(player)) = (&app.history.current().route, &app.player) {
         let serial = player.serial;
         return crate::player::view(player, look).map(move |message| Message::Player(serial, message)).boxed();

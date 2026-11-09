@@ -27,6 +27,7 @@ pub enum Overlay {
 pub struct App {
     pub history: History,
     pub browsing: crate::browsing::Browsing,
+    pub books: crate::books::Books,
     pub settings: crate::settings::Settings,
     pub clips: crate::clips::Clips,
     /// Passing notices, bottom right (`toast()`).
@@ -103,6 +104,7 @@ pub enum Message {
     LocalVideo(crate::player::local::Message),
     Browsing(u64, crate::browsing::Message),
     Settings(crate::settings::Message),
+    Books(u64, crate::books::Message),
     Clips(u64, crate::clips::Message),
     /// Change a clip of this video in the player's editor, as (video, clip).
     EditClip(i64, i64),
@@ -141,6 +143,7 @@ impl App {
         Self {
             history: History::new(route),
             browsing: crate::browsing::Browsing::default(),
+            books: crate::books::Books::default(),
             settings: crate::settings::Settings::default(),
             clips: crate::clips::Clips::default(),
             toasts: Vec::new(),
@@ -222,6 +225,14 @@ impl App {
             && let Some(api) = self.session.api.clone()
         {
             self.browsing.follow(&self.history.current().route, &api, effects);
+            self.books.follow(self.session.generation, &self.history.current().route, &api, effects);
+            self.books.can_quote = self.browsing.viewer().is_some_and(|v| v.permissions.clip)
+                && self
+                    .browsing
+                    .data(&crate::browsing::Key::Shell)
+                    .and_then(|d| d.server.as_ref())
+                    .is_some_and(|s| s.clips);
+            self.books.can_edit = self.browsing.viewer().is_some_and(|v| v.permissions.edit_metadata);
             let origin = self
                 .browsing
                 .data(&crate::browsing::Key::Shell)
@@ -259,7 +270,34 @@ impl App {
     }
 
     fn handle(&mut self, message: Message, effects: &mut Vec<Effect>) {
+        if matches!(&message, Message::Quit | Message::CloseRequested | Message::HideRequested) {
+            self.books.flush(effects);
+        }
         match message {
+            Message::Books(generation, message) => {
+                if generation != self.session.generation {
+                    return;
+                }
+                let unauthorized = matches!(&message,
+                    crate::books::Message::Detail(_,Err(e)) | crate::books::Message::Document(_,Err(e)) | crate::books::Message::Saved(_,_,Err(e)) | crate::books::Message::Changed(_,Err(e)) if e.unauthorized);
+                if unauthorized {
+                    self.handle(
+                        Message::Session(crate::session::Message::Live(generation, crate::api::Live::Unauthorized)),
+                        effects,
+                    );
+                    return;
+                }
+                if matches!(
+                    &message,
+                    crate::books::Message::Saved(_, _, Ok(())) | crate::books::Message::Changed(_, Ok(()))
+                ) {
+                    self.browsing
+                        .invalidate(|k| matches!(k, crate::browsing::Key::BookHome | crate::browsing::Key::Books(_)));
+                }
+                if let Some(route) = self.books.update(message, effects) {
+                    self.navigate(route, effects);
+                }
+            },
             Message::Clips(generation, message) => {
                 if generation != self.session.generation {
                     return;
@@ -386,6 +424,11 @@ impl App {
                 {
                     self.browsing.live(live);
                     self.clips.live(live);
+                    if matches!(live, crate::api::Live::Connected)
+                        || matches!(live, crate::api::Live::Event(e) if matches!(&e.events, crate::api::events::EventsEvents::ClipChanged(_) | crate::api::events::EventsEvents::ListChanged(_)))
+                    {
+                        self.books.reload(effects);
+                    }
                     if let crate::api::Live::Event(event) = live
                         && let crate::api::events::EventsEvents::ClipChanged(change) = &event.events
                         && let Some(player) = &mut self.player
@@ -891,7 +934,8 @@ impl App {
 
     /// Whether something on screen moves without being asked to, so frames have to keep coming.
     pub fn animating(&self) -> bool {
-        if self.player.as_ref().is_some_and(|player| player.animating())
+        if self.books.animating()
+            || self.player.as_ref().is_some_and(|player| player.animating())
             || self.clips.open.as_ref().and_then(|open| open.player.as_ref()).is_some_and(|player| player.animating())
         {
             return true;
@@ -909,6 +953,13 @@ impl App {
 
     /// Handles shell shortcuts, including search and Escape while a text field has focus.
     pub fn listen(&mut self, event: &Event, status: event::Status) -> Option<Message> {
+        if status != event::Status::Captured
+            && matches!(self.history.current().route, Route::Read(_))
+            && let Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. }) = event
+            && let Some(message) = self.books.key(key, *modifiers)
+        {
+            return Some(Message::Books(self.session.generation, message));
+        }
         if self.browsing.dialog.is_some()
             && matches!(
                 event,

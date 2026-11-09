@@ -1,0 +1,7 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+query ReaderBook($id: Int!) { book(id: $id) { ...BookDetail quotes { ...QuoteMark } } }
+mutation ReaderSave($id: Int!, $position: Int!) { saveReading(id: $id, position: $position) { id reading { position progress finished updatedAt } } }
+mutation ReaderFinished($id: Int!, $finished: Boolean!) { setBookFinished(id: $id, finished: $finished) { id reading { position progress finished updatedAt } } }
+mutation ReaderRefresh($id: Int!) { refreshBook(id: $id) { id } }
+mutation ReaderQuote($input: NewQuote!) { createQuote(input: $input) { ...QuoteMark } }
+mutation ReaderDeleteQuote($id: Int!) { deleteClip(id: $id) }

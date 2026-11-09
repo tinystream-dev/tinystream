@@ -9,6 +9,7 @@
 
 mod api;
 mod app;
+mod books;
 mod browsing;
 mod chrome;
 mod clips;
