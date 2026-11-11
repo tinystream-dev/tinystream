@@ -149,6 +149,11 @@ impl Browsing {
 /// `BENCH_SCENES` (`home,library`), `BENCH_TITLES` (400), `BENCH_FRAMES` (120) and `BENCH_EVENTS`
 /// change what's measured: with events, every frame has that many wheel events from a touchpad;
 /// without, a mouse wheel's notch comes every eight frames and is scrolled smoothly in between.
+///
+/// With `BENCH_ARRIVE`, pictures aren't there to begin with: `BENCH_RATE` (2) of the ones scrolled
+/// into view arrive each frame, `BENCH_WIDTH` × `BENCH_HEIGHT` (460 × 650) in size. `cached` has
+/// them come from disk, `fresh` from the network (developing in), and `both` from disk and then,
+/// 30 frames later, changed from the network.
 #[cfg(test)]
 mod bench {
     use std::time::{Duration, Instant};
@@ -175,9 +180,23 @@ mod bench {
             "continueWatching":(0..12).map(entry).collect::<Vec<_>>(),
             "recentlyAdded":(0..4).map(|l| json!({"library":"Shows","titles":(0..20).map(|i| card(l*20+i)).collect::<Vec<_>>()})).collect::<Vec<_>>(),
             "popularHere":(0..20).map(|i| json!({"people":3,"title":card(100+i)})).collect::<Vec<_>>()}}));
+        if std::env::var("BENCH_ARRIVE").is_ok() {
+            return;
+        }
         for i in 0..titles.max(120) {
             b.images.arrived(format!("p{i}"), Some(crate::ui::gallery::artwork(i as u32)), false);
         }
+    }
+
+    fn sized(seed: usize) -> iced_widget::image::Handle {
+        let (w, h) = (env("BENCH_WIDTH", 460) as u32, env("BENCH_HEIGHT", 650) as u32);
+        let mut pixels = vec![255u8; (w * h * 4) as usize];
+        for (i, pixel) in pixels.as_chunks_mut::<4>().0.iter_mut().enumerate() {
+            pixel[0] = (i as u32 % w * 255 / w) as u8;
+            pixel[1] = (seed * 67 % 256) as u8;
+            pixel[2] = (i as u32 / w * 255 / h) as u8;
+        }
+        iced_widget::image::Handle::from_rgba(w, h, pixels)
     }
 
     fn run(scene: &str) {
@@ -246,7 +265,47 @@ mod bench {
         let mut worst = Duration::ZERO;
         let epoch = Instant::now();
         let warmup = 20;
+        let arrive = std::env::var("BENCH_ARRIVE").ok();
+        let rate = env("BENCH_RATE", 2);
+        let mut cached = std::collections::HashMap::<usize, usize>::new();
+        let mut done = std::collections::HashSet::<usize>::new();
+        let mut arrivals = 0;
+        let mut over = 0;
+        let mut worst_times = [Duration::ZERO; 7];
         for frame in 0..warmup + frames {
+            if let Some(mode) = arrive.as_deref().filter(|_| frame >= warmup) {
+                let mut left = rate;
+                for i in 0..titles.max(120) {
+                    if left == 0 {
+                        break;
+                    }
+                    let path = format!("p{i}");
+                    if done.contains(&i) || app.browsing.images.picture(&path).is_none() {
+                        continue;
+                    }
+                    match (mode, cached.get(&i)) {
+                        ("fresh", _) => {
+                            app.browsing.images.arrived(path, Some(sized(i)), true);
+                            done.insert(i);
+                        },
+                        ("cached", _) => {
+                            app.browsing.images.arrived(path, Some(sized(i)), false);
+                            done.insert(i);
+                        },
+                        (_, None) => {
+                            app.browsing.images.arrived(path, Some(sized(i)), false);
+                            cached.insert(i, frame);
+                        },
+                        (_, Some(at)) if frame >= at + 30 => {
+                            app.browsing.images.arrived(path, Some(sized(i)), true);
+                            done.insert(i);
+                        },
+                        _ => continue,
+                    }
+                    left -= 1;
+                    arrivals += 1;
+                }
+            }
             let mut times = [Duration::ZERO; 7];
             let mut time = |stage: usize, start: Instant| times[stage] += start.elapsed();
             let begun = Instant::now();
@@ -303,13 +362,29 @@ mod bench {
                 for (stage, time) in stages.iter_mut().zip(times) {
                     *stage += time;
                 }
-                worst = worst.max(begun.elapsed());
+                let took = begun.elapsed();
+                if took > Duration::from_micros(6061) {
+                    over += 1;
+                }
+                if took > worst {
+                    worst_times = times;
+                }
+                worst = worst.max(took);
             }
         }
         crate::ui::backdrop::set_frame(None);
 
         let ms = |time: Duration| time.as_secs_f64() * 1000.0 / frames as f64;
         let report = names.iter().zip(stages).map(|(n, t)| format!("{n} {:.2}", ms(t))).collect::<Vec<_>>().join("  ");
+        println!(
+            "{arrivals} arrivals, {over} frames over 6.06 ms, worst: {}",
+            names
+                .iter()
+                .zip(worst_times)
+                .map(|(n, t)| format!("{n} {:.2}", t.as_secs_f64() * 1000.0))
+                .collect::<Vec<_>>()
+                .join("  ")
+        );
         println!(
             "{scene} ({titles} titles, {inputs} events a frame): {:.2} ms a frame (worst {:.2}): {report}",
             ms(stages.iter().sum()),
