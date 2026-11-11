@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 //! Pictures from the server: kept in memory for the session and on disk between runs. One on
-//! disk is shown at once and fetched again behind it, so a changed picture still turns up.
+//! disk is shown at once and fetched again behind it, so a changed picture still turns up; one
+//! that hasn't changed is left alone.
 
 use std::collections::HashMap;
 use std::hash::{DefaultHasher, Hash, Hasher};
@@ -118,8 +119,28 @@ pub async fn fetch(api: &Api, path: &str) -> Option<Vec<u8>> {
     Some(bytes)
 }
 
+/// `path` from the server, unless it's what's on disk already: the picture shown stays as it is.
+pub async fn changed(api: &Api, path: &str) -> Option<Vec<u8>> {
+    let shown = cached(api, path).await;
+    fetch(api, path).await.filter(|bytes| shown.as_ref() != Some(bytes))
+}
+
+/// How tall a poster or cover is kept: several times what the biggest one is shown at.
+const TALL: u32 = 1024;
+
 /// Decode away from the event loop, with a bound on decompressed memory as well as download size.
 pub async fn decode(bytes: Vec<u8>) -> Option<Handle> {
+    read(bytes, false).await
+}
+
+/// [`decode`] for artwork that's browsed: posters and covers (no wider than tall) are shrunk to
+/// [`TALL`], since a big one takes long enough to reach the GPU to drop frames. Backdrops, shown
+/// across the window, stay as they are.
+pub async fn artwork(bytes: Vec<u8>) -> Option<Handle> {
+    read(bytes, true).await
+}
+
+async fn read(bytes: Vec<u8>, shrink: bool) -> Option<Handle> {
     tokio::task::spawn_blocking(move || {
         let mut reader = image::ImageReader::new(std::io::Cursor::new(bytes)).with_guessed_format().ok()?;
         let mut limits = image::Limits::default();
@@ -127,7 +148,11 @@ pub async fn decode(bytes: Vec<u8>) -> Option<Handle> {
         limits.max_image_height = Some(8192);
         limits.max_alloc = Some(64 * 1024 * 1024);
         reader.limits(limits);
-        let rgba = reader.decode().ok()?.into_rgba8();
+        let mut rgba = reader.decode().ok()?.into_rgba8();
+        if shrink && rgba.height() > TALL && rgba.width() <= rgba.height() {
+            let width = (rgba.width() as u64 * TALL as u64 / rgba.height() as u64).max(1) as u32;
+            rgba = image::imageops::thumbnail(&rgba, width, TALL);
+        }
         Some(Handle::from_rgba(rgba.width(), rgba.height(), rgba.into_raw()))
     })
     .await
@@ -167,6 +192,22 @@ mod tests {
         images.clear();
         assert!(images.want("avatar"));
         assert!(!images.want("avatar"));
+    }
+
+    #[test]
+    fn artwork_shrinks_tall_pictures_only() {
+        let encode = |width, height| {
+            let mut bytes = std::io::Cursor::new(Vec::new());
+            image::RgbaImage::new(width, height).write_to(&mut bytes, image::ImageFormat::Png).unwrap();
+            bytes.into_inner()
+        };
+        let size = |handle: Option<Handle>| match handle {
+            Some(Handle::Rgba { width, height, .. }) => (width, height),
+            _ => panic!("not decoded"),
+        };
+        assert_eq!(size(crate::test_support::run(artwork(encode(1400, 2000)))), (716, 1024));
+        assert_eq!(size(crate::test_support::run(artwork(encode(2000, 1125)))), (2000, 1125));
+        assert_eq!(size(crate::test_support::run(decode(encode(1400, 2000)))), (1400, 2000));
     }
 
     #[test]

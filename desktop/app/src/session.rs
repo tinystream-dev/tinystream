@@ -567,7 +567,7 @@ impl Session {
         self.request(effects, async move {
             let mut pictures = vec![];
             for path in paths {
-                let handle = match images::fetch(&api, &path).await {
+                let handle = match images::changed(&api, &path).await {
                     Some(bytes) => images::decode(bytes).await,
                     None => None,
                 };

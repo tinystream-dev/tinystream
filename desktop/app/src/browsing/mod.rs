@@ -904,11 +904,11 @@ impl Browsing {
                     if let Some(bytes) = images::cached(&api, &path).await {
                         send(AppMessage::Browsing(
                             generation,
-                            Message::Picture(generation, path.clone(), images::decode(bytes).await, false),
+                            Message::Picture(generation, path.clone(), images::artwork(bytes).await, false),
                         ));
                     }
-                    let handle = match images::fetch(&api, &path).await {
-                        Some(bytes) => images::decode(bytes).await,
+                    let handle = match images::changed(&api, &path).await {
+                        Some(bytes) => images::artwork(bytes).await,
                         None => None,
                     };
                     send(AppMessage::Browsing(generation, Message::Picture(generation, path, handle, true)));
