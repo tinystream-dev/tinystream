@@ -92,123 +92,6 @@ pub fn avatar<'a, Message: 'a>(
         .boxed()
 }
 
-/// An image that develops as it arrives: blurry, washed out and a little too big, then sharp
-/// (`.develop`). One that came from the cache is just there.
-pub fn develop<'a, Message: 'a>(
-    content: impl Widget<Message, Theme, Renderer> + 'a,
-    arrived: Option<Instant>,
-    background: Color,
-    radius: f32,
-    look: &Look,
-) -> Element<'a, Message> {
-    Develop {
-        content: Widget::_boxed(content),
-        arrived: arrived.filter(|_| !look.reduce_motion),
-        background,
-        radius,
-        smoothing: look.corners().1,
-    }
-    .boxed()
-}
-
-struct Develop<'a, Message> {
-    content: Element<'a, Message>,
-    arrived: Option<Instant>,
-    background: Color,
-    radius: f32,
-    smoothing: f32,
-}
-
-const DEVELOP: Duration = Duration::from_millis(900);
-
-impl<Message> iced_core::widget::Meta for Develop<'_, Message> {}
-
-impl<Message> Widget<Message, Theme, Renderer> for Develop<'_, Message> {
-    fn tag(&self) -> tree::Tag {
-        tree::Tag::stateless()
-    }
-
-    fn diff(&mut self, tree: &mut Tree) {
-        tree.diff_children(std::slice::from_mut(&mut self.content));
-    }
-
-    fn size(&self) -> Size<Length> {
-        self.content.size()
-    }
-
-    fn layout(&mut self, tree: &mut Tree, renderer: &Renderer, limits: &layout::Limits) {
-        let size = self.content.size();
-        layout::padded(tree, limits, size.width, size.height, 0, |tree, limits| {
-            self.content.layout(tree, renderer, limits);
-            tree.size
-        });
-    }
-
-    fn update(
-        &mut self,
-        tree: &mut Tree,
-        event: &Event,
-        layout: Layout,
-        cursor: mouse::Cursor,
-        renderer: &Renderer,
-        shell: &mut iced_core::Shell<'_, Message>,
-        viewport: &Rectangle,
-    ) {
-        let (child, tree) = layout.iter_mut(&mut tree.children).next().expect("content");
-        self.content.update(tree, event, child, cursor, renderer, shell, viewport);
-        if let (Event::Window(window::Event::RedrawRequested(now)), Some(arrived)) = (event, self.arrived)
-            && now.saturating_duration_since(arrived) < DEVELOP
-        {
-            shell.request_redraw();
-        }
-    }
-
-    fn draw(
-        &self,
-        tree: &Tree,
-        renderer: &mut Renderer,
-        theme: &Theme,
-        style: &renderer::Style,
-        layout: Layout,
-        cursor: mouse::Cursor,
-        viewport: &Rectangle,
-    ) {
-        let bounds = layout.bounds();
-        let (child, tree) = layout.iter(&tree.children).next().expect("content");
-        self.content.draw(tree, renderer, theme, style, child, cursor, viewport);
-        let Some(arrived) = self.arrived else { return };
-        let t = motion::SETTLE.at(motion::progress(arrived, DEVELOP, Instant::now()));
-        if t >= 1.0 {
-            return;
-        }
-        // Opacity fades in faster (500ms) than the blur clears.
-        let shown = motion::EASE_OUT.at(motion::progress(arrived, Duration::from_millis(500), Instant::now()));
-        let tint = self.background.scale_alpha(1.0 - shown);
-        renderer.with_layer(bounds.intersection(viewport).unwrap_or(bounds), |renderer| {
-            if backdrop::available() {
-                let backdrop = Backdrop::new(
-                    14.0 * (1.0 - t),
-                    motion::lerp(0.3, 1.0, t),
-                    tint,
-                    self.radius,
-                    self.smoothing,
-                    motion::lerp(1.06, 1.0, t),
-                );
-                renderer.draw_primitive(bounds, backdrop);
-            } else {
-                renderer.fill_quad(
-                    renderer::Quad {
-                        bounds,
-                        border: Border::default().rounded(self.radius),
-                        ..renderer::Quad::default()
-                    },
-                    tint,
-                );
-            }
-        });
-    }
-}
-
 /// A picture drained of colour once it's been watched (`.drain`): grey and dimmed, wiped across
 /// from the left when it changes. `order` staggers a run of them down a list, and a new `key`
 /// (another episode in the same place) takes the state as it is.
@@ -373,8 +256,7 @@ pub fn poster<'a, Message: Clone + 'a>(card: Poster<'a>, on_press: Message, look
     use super::squircle::{Paint, squircle};
     use super::text::{self as type_, MEDIUM, text, truncate};
 
-    let art = super::tilt::art(card.picture.cloned(), 14.0, 1.5, look);
-    let mut layers = vec![develop(art, card.arrived, look.raised, look.radius(14.0), look)];
+    let mut layers = vec![super::tilt::art(card.picture.cloned(), 14.0, 1.5, look).arrived(card.arrived).boxed()];
     if card.picture.is_none() {
         layers.push(
             container(text(card.name, type_::S15, look.ink_2).font(MEDIUM))
@@ -458,17 +340,9 @@ pub fn img<'a, Message: 'a>(
     look: &Look,
 ) -> Element<'a, Message> {
     match picture {
-        Some(crate::images::Picture::Ready(handle, arrived)) => develop(
-            image(handle.clone())
-                .width(Length::Fill)
-                .height(Length::Fill)
-                .content_fit(ContentFit::Cover)
-                .border_radius(look.radius(radius)),
-            *arrived,
-            look.raised,
-            look.radius(radius),
-            look,
-        ),
+        Some(crate::images::Picture::Ready(handle, arrived)) => {
+            super::tilt::art(Some(handle.clone()), radius, 1.0, look).flat().arrived(*arrived).boxed()
+        },
         Some(crate::images::Picture::Missing) => {
             super::squircle::squircle(iced_widget::space().width(Length::Fill).height(Length::Fill), radius, look)
                 .fill(look.raised)

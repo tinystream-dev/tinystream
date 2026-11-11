@@ -7,7 +7,7 @@
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use iced_core::layout::{self, Layout};
 use iced_core::widget::{Tree, tree};
@@ -20,8 +20,8 @@ use iced_wgpu::primitive::{self, Primitive, Renderer as _};
 use iced_wgpu::wgpu;
 use iced_widget::{Element, Renderer, Widget as _};
 
-use super::backdrop;
 use super::theme::Look;
+use super::{backdrop, motion};
 
 /// How far artwork leans at most, in degrees.
 const MAX: f32 = 7.0;
@@ -30,14 +30,44 @@ const PERSPECTIVE: f32 = 700.0;
 
 /// Artwork in a squircle that tilts under the pointer, sized `width` × `width · ratio`.
 pub fn art(picture: Option<image::Handle>, radius: f32, ratio: f32, look: &Look) -> Art {
-    Art { picture, radius, ratio, look: *look }
+    Art { picture, radius, ratio, arrived: None, flat: false, look: *look }
 }
 
 pub struct Art {
     picture: Option<image::Handle>,
     radius: f32,
     ratio: f32,
+    arrived: Option<Instant>,
+    flat: bool,
     look: Look,
+}
+
+impl Art {
+    /// Develops the picture in from when it `arrived`: blurry, washed out and a little too big,
+    /// then sharp (`.develop`).
+    pub fn arrived(mut self, arrived: Option<Instant>) -> Self {
+        self.arrived = arrived.filter(|_| !self.look.reduce_motion);
+        self
+    }
+
+    /// Fills the room it's given and stays still, without a lit edge (`Img.tsx`).
+    pub fn flat(mut self) -> Self {
+        self.flat = true;
+        self
+    }
+}
+
+const DEVELOP: Duration = Duration::from_millis(900);
+
+/// How far a picture that `arrived` has developed: its blur (a CSS radius), saturation and zoom,
+/// and how much of the background still covers it.
+fn develop(arrived: Option<Instant>) -> [f32; 4] {
+    let Some(arrived) = arrived else { return [0.0, 1.0, 1.0, 0.0] };
+    let now = Instant::now();
+    let t = motion::SETTLE.at(motion::progress(arrived, DEVELOP, now));
+    // Opacity fades in faster (500ms) than the blur clears.
+    let shown = motion::EASE_OUT.at(motion::progress(arrived, Duration::from_millis(500), now));
+    [14.0 * (1.0 - t), motion::lerp(0.3, 1.0, t), motion::lerp(1.06, 1.0, t), 1.0 - shown]
 }
 
 #[derive(Default)]
@@ -142,6 +172,7 @@ impl Lean {
             media_ink: look.media_ink,
             glow: look.glow,
             edge: look.edge(),
+            develop: develop(None),
             id,
         };
         let reach = card.width.max(card.height) * 0.12;
@@ -167,10 +198,14 @@ impl<Message> Widget<Message, Theme, Renderer> for Art {
     }
 
     fn size(&self) -> Size<Length> {
-        Size::new(Length::Fill, Length::Shrink)
+        Size::new(Length::Fill, if self.flat { Length::Fill } else { Length::Shrink })
     }
 
     fn layout(&mut self, tree: &mut Tree, _renderer: &Renderer, limits: &layout::Limits) {
+        if self.flat {
+            tree.size = limits.resolve(Length::Fill, Length::Fill, Size::ZERO);
+            return;
+        }
         let width = limits.resolve_width(Length::Fill, 0.0);
         tree.size = limits.resolve(Length::Fill, Length::Shrink, Size::new(width, width * self.ratio));
     }
@@ -185,6 +220,14 @@ impl<Message> Widget<Message, Theme, Renderer> for Art {
         shell: &mut iced_core::Shell<'_, Message>,
         _viewport: &Rectangle,
     ) {
+        if let (Event::Window(window::Event::RedrawRequested(now)), Some(arrived)) = (event, self.arrived)
+            && now.saturating_duration_since(arrived) < DEVELOP
+        {
+            shell.request_redraw();
+        }
+        if self.flat {
+            return;
+        }
         let lean = tree.state.downcast_mut::<Lean>();
         lean.update(event, layout.bounds(), cursor, shell, &self.look, MAX);
     }
@@ -202,9 +245,13 @@ impl<Message> Widget<Message, Theme, Renderer> for Art {
         let lean = tree.state.downcast_ref::<Lean>();
         let id = NEXT.fetch_add(1, Ordering::Relaxed);
         let source = Source::Picture(self.picture.clone());
-        let (tilted, room) = lean.tilted(layout.bounds(), source, self.radius, &self.look, id);
+        let (mut tilted, room) = lean.tilted(layout.bounds(), source, self.radius, &self.look, id);
         if room.intersection(viewport).is_none() {
             return;
+        }
+        tilted.develop = develop(self.arrived);
+        if self.flat {
+            tilted.edge = [0.0; 3];
         }
         renderer.with_layer(*viewport, |renderer| renderer.draw_primitive(room, tilted));
     }
@@ -379,22 +426,21 @@ struct Tilted {
     media_ink: Color,
     glow: Color,
     edge: [f32; 3],
+    /// A picture's blur, saturation, zoom and cover of background, as [`develop`] has them.
+    develop: [f32; 4],
     id: u64,
 }
 
-/// A picture as pixels, whatever the handle holds.
-fn pixels(handle: &image::Handle) -> Option<(u32, u32, Vec<u8>)> {
-    match handle {
-        image::Handle::Rgba { width, height, pixels, .. } => Some((*width, *height, pixels.to_vec())),
-        image::Handle::Bytes(_, bytes) => {
-            let decoded = ::image::load_from_memory(bytes).ok()?.into_rgba8();
-            Some((decoded.width(), decoded.height(), decoded.into_raw()))
+/// A picture as a texture, whatever the handle holds.
+fn texture(device: &wgpu::Device, queue: &wgpu::Queue, handle: &image::Handle, mips: &Mips) -> Option<Uploaded> {
+    let decoded = match handle {
+        image::Handle::Rgba { width, height, pixels, .. } => {
+            return Some(upload(device, queue, (*width, *height, pixels), Some(mips)));
         },
-        image::Handle::Path(_, path) => {
-            let decoded = ::image::open(path).ok()?.into_rgba8();
-            Some((decoded.width(), decoded.height(), decoded.into_raw()))
-        },
-    }
+        image::Handle::Bytes(_, bytes) => ::image::load_from_memory(bytes).ok()?.into_rgba8(),
+        image::Handle::Path(_, path) => ::image::open(path).ok()?.into_rgba8(),
+    };
+    Some(upload(device, queue, (decoded.width(), decoded.height(), &decoded), Some(mips)))
 }
 
 impl Primitive for Tilted {
@@ -441,12 +487,13 @@ impl Primitive for Tilted {
             return;
         }
 
+        let mut develop = [0.0, 0.0, self.develop[1], self.develop[3]];
         let (texture, cover) = match &self.source {
             Source::Picture(handle) => {
                 let picture = handle.as_ref().map(image::Handle::id);
                 if let (Some(handle), Some(id)) = (handle, picture)
                     && !pipeline.pictures.contains_key(&id)
-                    && let Some(uploaded) = pixels(handle).map(|p| upload(device, queue, p))
+                    && let Some(uploaded) = texture(device, queue, handle, &pipeline.mips)
                 {
                     pipeline.pictures.insert(id, uploaded);
                 }
@@ -466,6 +513,13 @@ impl Primitive for Tilted {
                     let s = art / boxed;
                     [1.0, s, 0.0, (1.0 - s) / 2.0]
                 };
+                // The blur's standard deviation in the card's pixels, and the mip level whose
+                // texels are about that wide.
+                let sigma = self.develop[0] / 2.0 * scale;
+                if sigma > 0.0 {
+                    let texels = sigma * size.0 as f32 * cover[0] / card.width;
+                    develop[..2].copy_from_slice(&[sigma, texels.log2().max(0.0)]);
+                }
                 (texture, cover)
             },
             Source::Behind | Source::Drawn => {
@@ -491,7 +545,8 @@ impl Primitive for Tilted {
         params.extend(rgba(self.background));
         params.extend(rgba(self.media_ink));
         params.extend(rgba(self.glow));
-        params.extend([self.edge[0], self.edge[1], self.edge[2], 0.0]);
+        params.extend([self.edge[0], self.edge[1], self.edge[2], self.develop[2]]);
+        params.extend(develop);
 
         let key = [card.width, card.height, self.radius * scale, self.smoothing].map(f32::to_bits);
         let frame = pipeline.frame;
@@ -701,25 +756,86 @@ struct Uploaded {
     used: u64,
 }
 
-fn upload(device: &wgpu::Device, queue: &wgpu::Queue, (width, height, pixels): (u32, u32, Vec<u8>)) -> Uploaded {
+/// `pixels` as a texture. With `mips`, each smaller level is drawn from the one above it, for
+/// pictures shown smaller than they are and for blurring them as they develop.
+fn upload(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    (width, height, pixels): (u32, u32, &[u8]),
+    mips: Option<&Mips>,
+) -> Uploaded {
     let size = wgpu::Extent3d { width, height, depth_or_array_layers: 1 };
+    let levels = if mips.is_some() { (32 - width.max(height).leading_zeros()).min(8) } else { 1 };
     let texture = device.create_texture(&wgpu::TextureDescriptor {
         label: Some("tinystream artwork"),
         size,
-        mip_level_count: 1,
+        mip_level_count: levels,
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
         format: wgpu::TextureFormat::Rgba8Unorm,
-        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING
+            | wgpu::TextureUsages::COPY_DST
+            | wgpu::TextureUsages::RENDER_ATTACHMENT,
         view_formats: &[],
     });
     queue.write_texture(
         texture.as_image_copy(),
-        &pixels,
+        pixels,
         wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(width * 4), rows_per_image: Some(height) },
         size,
     );
+    if let Some(mips) = mips.filter(|_| levels > 1) {
+        let level = |level| {
+            texture.create_view(&wgpu::TextureViewDescriptor {
+                base_mip_level: level,
+                mip_level_count: Some(1),
+                ..Default::default()
+            })
+        };
+        let mut encoder = device.create_command_encoder(&Default::default());
+        let mut above = level(0);
+        for index in 1..levels {
+            let below = level(index);
+            let group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("tinystream artwork mip"),
+                layout: &mips.layout,
+                entries: &[
+                    wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&above) },
+                    wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::Sampler(&mips.sampler) },
+                ],
+            });
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("tinystream artwork mip"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &below,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+            pass.set_pipeline(&mips.pipeline);
+            pass.set_bind_group(0, &group, &[]);
+            pass.draw(0..3, 0..1);
+            drop(pass);
+            above = below;
+        }
+        queue.submit([encoder.finish()]);
+    }
     Uploaded { view: texture.create_view(&Default::default()), size: (width, height), used: 0 }
+}
+
+/// Draws a picture's smaller levels.
+struct Mips {
+    layout: wgpu::BindGroupLayout,
+    sampler: wgpu::Sampler,
+    pipeline: wgpu::RenderPipeline,
 }
 
 /// A card's outline, kept while cards of its size are drawn.
@@ -741,7 +857,7 @@ impl Slot {
     fn new(device: &wgpu::Device) -> Self {
         let params = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("tinystream tilt"),
-            size: 160,
+            size: 176,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -754,6 +870,7 @@ pub struct Pipeline {
     sampler: wgpu::Sampler,
     pipeline: wgpu::RenderPipeline,
     blank: wgpu::TextureView,
+    mips: Mips,
     pictures: HashMap<image::Id, Uploaded>,
     meshes: HashMap<[u32; 4], Shape>,
     slots: Vec<Slot>,
@@ -821,6 +938,7 @@ impl primitive::Pipeline for Pipeline {
             address_mode_v: wgpu::AddressMode::ClampToEdge,
             min_filter: wgpu::FilterMode::Linear,
             mag_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::MipmapFilterMode::Linear,
             ..Default::default()
         });
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -866,12 +984,61 @@ impl primitive::Pipeline for Pipeline {
             multiview_mask: None,
             cache: None,
         });
-        let blank = upload(device, queue, (1, 1, vec![0, 0, 0, 0])).view;
+        let blank = upload(device, queue, (1, 1, &[0, 0, 0, 0]), None).view;
+        let mip_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("tinystream artwork mip"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+            ],
+        });
+        let mip_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("tinystream artwork mip"),
+            bind_group_layouts: &[Some(&mip_layout)],
+            immediate_size: 0,
+        });
+        let mip_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("tinystream artwork mip"),
+            layout: Some(&mip_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: Some("mip_vs"),
+                buffers: &[],
+                compilation_options: Default::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: Some("mip_fs"),
+                targets: &[Some(wgpu::TextureFormat::Rgba8Unorm.into())],
+                compilation_options: Default::default(),
+            }),
+            primitive: wgpu::PrimitiveState::default(),
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            multiview_mask: None,
+            cache: None,
+        });
+        let mips = Mips { layout: mip_layout, sampler: sampler.clone(), pipeline: mip_pipeline };
         Self {
             layout,
             sampler,
             pipeline,
             blank,
+            mips,
             pictures: HashMap::new(),
             meshes: HashMap::new(),
             slots: Vec::new(),
