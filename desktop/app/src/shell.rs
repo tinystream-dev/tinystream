@@ -201,6 +201,14 @@ fn chrome<'a>(app: &'a App, base: Element<'a, Message>, focus: bool, look: &Look
             Message::Browsing(app.session.generation, crate::browsing::Message::Dialog(None)),
         );
     }
+    if let Some(dialog) = crate::music::dialog(&app.music, look) {
+        let generation = app.session.generation;
+        return crate::ui::modal::modal(
+            base,
+            dialog.map(move |m| Message::Music(generation, m)).boxed(),
+            Message::Music(generation, crate::music::Message::Dialog(None)),
+        );
+    }
     if let Some(dialog) = crate::clips::view::dialog(app, look) {
         let close = match app.clips.open.as_ref().filter(|open| open.confirm) {
             Some(_) => Message::Clips(app.session.generation, crate::clips::Message::Confirm(false)),
@@ -393,10 +401,6 @@ fn nav_link<'a>(label: &'a str, glyph: Icon, to: Route, current: &Route, look: &
 /// The page, in the window's single scroll container, under a strip that moves the window. While
 /// the route changes, the old page blurs away and the new one sharpens in.
 fn page<'a>(app: &'a App, look: &Look) -> Element<'a, Message> {
-    if app.music.owns(&app.history.current().route) {
-        let generation = app.session.generation;
-        return crate::music::page(&app.music, look).map(move |m| Message::Music(generation, m)).boxed();
-    }
     if matches!(app.history.current().route, Route::Book(_) | Route::Read(_)) {
         let generation = app.session.generation;
         return crate::books::view(&app.books, matches!(app.history.current().route, Route::Read(_)), look)
@@ -427,6 +431,15 @@ fn page<'a>(app: &'a App, look: &Look) -> Element<'a, Message> {
         } else {
             page
         }
+    } else if app.music.owns(route) {
+        let generation = app.session.generation;
+        let counts = match route {
+            Route::Library(name) => {
+                app.browsing.libraries().iter().find(|l| &l.name == name).map(|l| (l.album_count, l.track_count))
+            },
+            _ => None,
+        };
+        crate::music::page(&app.music, counts, look).map(move |m| Message::Music(generation, m)).boxed()
     } else if let Some(content) = crate::browsing::view(app, route, look) {
         content
     } else {

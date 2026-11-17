@@ -4,6 +4,7 @@ mod engine;
 mod listen;
 pub mod model;
 pub(crate) mod output;
+mod pages;
 mod ring;
 mod view;
 use std::sync::{Arc, Mutex};
@@ -11,9 +12,10 @@ use std::time::Instant;
 
 use graphql_client::GraphQLQuery;
 use model::{Entry, Repeat, Settings, Track};
+pub use pages::{dialog, page};
 use serde::Deserialize;
 use serde_json::{Value, json};
-pub use view::{now_playing, page, pill};
+pub use view::{now_playing, pill};
 
 use crate::api::{self, Api};
 use crate::app::{Effect, Message as AppMessage};
@@ -25,14 +27,51 @@ pub struct Card {
     pub id: i64,
     pub name: String,
     pub artist: String,
+    pub artists: Vec<model::Ref>,
+    pub year: Option<i64>,
     pub cover: Option<String>,
     pub covers: Vec<String>,
+    pub cover_tint: Option<String>,
     pub tracks: Vec<Track>,
     pub albums: Vec<Card>,
+    pub appears_on: Vec<Card>,
     pub genres: Vec<String>,
+    pub release_types: Vec<String>,
+    pub labels: Vec<String>,
+    pub release_date: Option<String>,
+    pub original_date: Option<String>,
+    pub disc_titles: Vec<DiscTitle>,
+    pub compilation: bool,
+    pub starred: bool,
+    pub album_count: i64,
+    pub track_count: i64,
+    pub duration: f64,
     pub comment: Option<String>,
+    pub owner: model::Ref,
     pub mine: bool,
     pub public: bool,
+}
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default)]
+pub struct DiscTitle {
+    pub disc: i64,
+    pub title: String,
+}
+/// How the albums of a library are put in order.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub enum Sort {
+    #[default]
+    Name,
+    Artist,
+    Newest,
+    Year,
+    Recent,
+}
+/// What's asked of the person over the page.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Dialog {
+    NewPlaylist,
+    DeletePlaylist(i64, String),
 }
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub enum Tab {
@@ -50,10 +89,12 @@ pub enum Message {
     Edited(Result<Value, api::Error>),
     Remote(i64, f64, Result<Value, api::Error>),
     Deleted(Result<Value, api::Error>),
-    PlaylistMove(usize, i32),
     PlaylistRemove(usize),
     PlaylistPublic,
-    AskDelete(i64),
+    Dialog(Option<Dialog>),
+    Created(Result<Value, api::Error>),
+    Rename(bool),
+    Popular(bool),
     Measured(i64, Result<Value, api::Error>),
     RoomCommand(Value),
     JoinRoom,
@@ -64,10 +105,13 @@ pub enum Message {
     Restored(Result<Value, api::Error>),
     Done(Result<Value, api::Error>),
     Tab(Tab),
+    Sort(Sort),
     Query(String),
-    More,
     Play(Vec<Track>, usize),
-    Add(Arc<Track>, bool),
+    PlayFrom(usize, usize),
+    ShuffleSongs,
+    PlayAlbum(i64),
+    Add(Vec<Track>, bool),
     Toggle,
     Pause,
     Next,
@@ -88,11 +132,11 @@ pub enum Message {
     Fullscreen,
     Panel(u8),
     Star(i64, bool),
-    Rating(i64, i64),
+    StarDetail(bool),
     Name(String),
     CreatePlaylist,
     DeletePlaylist(i64),
-    SavePlaylist(i64),
+    SavePlaylist,
     Go(Route),
     StartRoom,
 }
@@ -106,7 +150,9 @@ pub struct Music {
     pub images: crate::images::Images,
     pub people: Vec<(i64, String)>,
     pub can_invite: bool,
-    pub delete: Option<i64>,
+    pub dialog: Option<Dialog>,
+    pub renaming: bool,
+    pub popular: bool,
     measured: std::collections::HashSet<i64>,
     pub generation: u64,
     pub room_code: Option<String>,
@@ -136,19 +182,19 @@ pub struct Music {
     pub fullscreen: bool,
     pub panel: u8,
     pub tab: Tab,
+    pub sort: Sort,
     pub query: String,
     pub name: String,
     pub cards: Vec<Card>,
     pub songs: Vec<Track>,
     pub detail: Option<Card>,
+    pub more_by: Vec<Card>,
     pub error: Option<String>,
     pub loading: bool,
-    pub more: bool,
     pub lyrics: Vec<(Option<i64>, String)>,
     route: Option<Route>,
     library: bool,
     key: String,
-    offset: usize,
     uid: u64,
     saved: Instant,
 }
@@ -158,7 +204,9 @@ impl Default for Music {
             images: crate::images::Images::default(),
             people: vec![],
             can_invite: false,
-            delete: None,
+            dialog: None,
+            renaming: false,
+            popular: false,
             measured: std::collections::HashSet::new(),
             generation: 0,
             room_code: None,
@@ -188,19 +236,19 @@ impl Default for Music {
             fullscreen: false,
             panel: 0,
             tab: Tab::Albums,
+            sort: Sort::Name,
             query: String::new(),
             name: String::new(),
             cards: vec![],
             songs: vec![],
             detail: None,
+            more_by: vec![],
             error: None,
             loading: false,
-            more: false,
             lyrics: vec![],
             route: None,
             library: false,
             key: String::new(),
-            offset: 0,
             uid: 0,
             saved: Instant::now(),
         }
@@ -270,8 +318,11 @@ impl Music {
         }
         if self.route.as_ref() != Some(route) {
             self.route = Some(route.clone());
-            self.offset = 0;
             self.detail = None;
+            self.more_by.clear();
+            self.renaming = false;
+            self.popular = false;
+            self.dialog = None;
             self.cards.clear();
             self.songs.clear();
             if let Route::Listen(code) = route {
@@ -305,7 +356,7 @@ impl Music {
     fn fetch(&mut self, effects: &mut Vec<Effect>) {
         self.loading = true;
         self.error = None;
-        self.key = format!("{:?}:{:?}:{}:{}", self.route, self.tab, self.query, self.offset);
+        self.key = format!("{:?}:{:?}:{:?}:{}", self.route, self.tab, self.sort, self.query);
         let key = self.key.clone();
         let done = move |r| Message::Loaded(key, r);
         match self.route.clone() {
@@ -322,8 +373,13 @@ impl Music {
                 Tab::Albums => self.request::<api::MusicAlbums>(
                     api::music_albums::Variables {
                         library: Some(library),
-                        sort: api::music_albums::AlbumSort::NAME,
-                        offset: self.offset as i64,
+                        sort: match self.sort {
+                            Sort::Name => api::music_albums::AlbumSort::NAME,
+                            Sort::Artist => api::music_albums::AlbumSort::ARTIST,
+                            Sort::Newest => api::music_albums::AlbumSort::NEWEST,
+                            Sort::Year => api::music_albums::AlbumSort::YEAR,
+                            Sort::Recent => api::music_albums::AlbumSort::RECENT,
+                        },
                     },
                     done,
                     effects,
@@ -334,11 +390,7 @@ impl Music {
                     effects,
                 ),
                 Tab::Songs => self.request::<api::MusicSongs>(
-                    api::music_songs::Variables {
-                        library: Some(library),
-                        query: self.query.clone(),
-                        offset: self.offset as i64,
-                    },
+                    api::music_songs::Variables { library: Some(library), query: self.query.clone() },
                     done,
                     effects,
                 ),
@@ -463,7 +515,9 @@ impl Music {
                 Message::Jump(index) => Some(json!({"type":"skip","index":index,"from":self.index})),
                 Message::Remove(index) => Some(json!({"type":"remove","index":index})),
                 Message::Move(from, by) => Some(json!({"type":"move","from":from,"to":(*from as i32+by).max(0)})),
-                Message::Add(track, next) => Some(json!({"type":"add","tracks":[track.id],"next":next})),
+                Message::Add(tracks, next) => {
+                    Some(json!({"type":"add","tracks":tracks.iter().map(|t| t.id).collect::<Vec<_>>(),"next":next}))
+                },
                 _ => None,
             };
             if let Some(outgoing) = outgoing {
@@ -499,27 +553,37 @@ impl Music {
                 Ok(_) => self.fetch(effects),
                 Err(e) => self.error = Some(e.message),
             },
+            Message::Created(result) => match result {
+                Ok(value) => {
+                    self.dialog = None;
+                    if let Some(id) = value["createPlaylist"]["id"].as_u64() {
+                        return Some(Route::Playlist(id));
+                    }
+                },
+                Err(e) => self.error = Some(e.message),
+            },
             Message::Deleted(result) => match result {
                 Ok(_) => return Some(Route::Home),
                 Err(e) => self.error = Some(e.message),
             },
-            Message::PlaylistMove(index, by) => {
-                let to = (index as i32 + by).max(0) as usize;
-                if index < self.songs.len() && to < self.songs.len() {
-                    let track = self.songs.remove(index);
-                    self.songs.insert(to, track);
-                }
-            },
             Message::PlaylistRemove(index) => {
                 if index < self.songs.len() {
                     self.songs.remove(index);
+                    self.save_playlist(None, None, true, effects);
                 }
             },
             Message::PlaylistPublic => {
-                if let Some(detail) = &mut self.detail {
-                    detail.public = !detail.public;
+                if let Some(public) = self.detail.as_ref().map(|d| !d.public) {
+                    self.save_playlist(None, Some(public), false, effects);
                 }
             },
+            Message::Rename(renaming) => {
+                self.renaming = renaming;
+                if let Some(detail) = &self.detail {
+                    self.name = detail.name.clone();
+                }
+            },
+            Message::Popular(all) => self.popular = all,
             Message::Measured(id, result) => {
                 if let Ok(value) = result
                     && let Ok(track) = serde_json::from_value::<Track>(value["measureLoudness"].clone())
@@ -541,7 +605,12 @@ impl Music {
                     }
                 }
             },
-            Message::AskDelete(id) => self.delete = Some(id),
+            Message::Dialog(dialog) => {
+                if dialog == Some(Dialog::NewPlaylist) {
+                    self.name.clear();
+                }
+                self.dialog = dialog;
+            },
             Message::CopyRoom => {
                 if let (Some(api), Some(code)) = (&self.api, &self.room_code)
                     && let Ok(url) = api.origin.join(&format!("listen/{code}"))
@@ -612,6 +681,29 @@ impl Music {
                     }
                     return None;
                 }
+                if key == "play-album" {
+                    match result {
+                        Ok(value) => {
+                            let tracks = serde_json::from_value(value["album"]["tracks"].clone()).unwrap_or_default();
+                            return self.update(Message::Play(tracks, 0), effects);
+                        },
+                        Err(e) => self.error = Some(e.message),
+                    }
+                    return None;
+                }
+                if key == "more" {
+                    if let Ok(value) = result {
+                        let id = self.detail.as_ref().map(|d| d.id);
+                        self.more_by = serde_json::from_value::<Vec<Card>>(value["artist"]["albums"].clone())
+                            .unwrap_or_default()
+                            .into_iter()
+                            .filter(|a| Some(a.id) != id)
+                            .take(12)
+                            .collect();
+                        self.fetch_art(effects);
+                    }
+                    return None;
+                }
                 if key == "lyrics" {
                     if let Ok(value) = result {
                         self.lyrics = value["lyrics"]["lines"]
@@ -636,22 +728,22 @@ impl Music {
                             self.songs = self.detail.as_ref().map_or(vec![], |d| d.tracks.clone());
                             self.cards = self.detail.as_ref().map_or(vec![], |d| d.albums.clone());
                             self.name = self.detail.as_ref().map_or(String::new(), |d| d.name.clone());
-                        } else if let Some(songs) = value.get("songs") {
-                            let next: Vec<Track> = serde_json::from_value(songs.clone()).unwrap_or_default();
-                            self.more = next.len() == 60;
-                            if self.offset == 0 {
-                                self.songs.clear();
+                            if let (Some(Route::Album(_)), Some(album)) = (&self.route, &self.detail)
+                                && !album.compilation
+                                && let Some(artist) = album.artists.first()
+                            {
+                                self.request::<api::MusicMore>(
+                                    api::music_more::Variables { id: artist.id },
+                                    |r| Message::Loaded("more".into(), r),
+                                    effects,
+                                );
                             }
-                            self.songs.extend(next);
+                        } else if let Some(songs) = value.get("songs") {
+                            self.songs = serde_json::from_value(songs.clone()).unwrap_or_default();
                         } else if let Some(rows) =
                             value.get("albums").or_else(|| value.get("artists")).or_else(|| value.get("playlists"))
                         {
-                            let next: Vec<Card> = serde_json::from_value(rows.clone()).unwrap_or_default();
-                            self.more = next.len() == 60 && self.tab == Tab::Albums;
-                            if self.offset == 0 {
-                                self.cards.clear();
-                            }
-                            self.cards.extend(next);
+                            self.cards = serde_json::from_value(rows.clone()).unwrap_or_default();
                         }
                     },
                     Err(error) => self.error = Some(error.message),
@@ -732,19 +824,17 @@ impl Music {
             },
             Message::Tab(tab) => {
                 self.tab = tab;
-                self.offset = 0;
+                self.cards.clear();
+                self.songs.clear();
+                self.fetch(effects);
+            },
+            Message::Sort(sort) => {
+                self.sort = sort;
                 self.fetch(effects);
             },
             Message::Query(query) => {
                 self.query = query;
-                self.offset = 0;
                 self.fetch(effects);
-            },
-            Message::More => {
-                if !self.loading {
-                    self.offset += 60;
-                    self.fetch(effects);
-                }
             },
             Message::Play(tracks, index) => {
                 self.queue = self.entries(tracks);
@@ -752,8 +842,32 @@ impl Music {
                 self.unshuffled = None;
                 self.start(index, 0.0, true, effects);
             },
-            Message::Add(track, next) => {
-                let entries = self.entries(vec![(*track).clone()]);
+            Message::PlayFrom(index, end) => {
+                let tracks = self.songs[..end.min(self.songs.len())].to_vec();
+                return self.update(Message::Play(tracks, index), effects);
+            },
+            Message::ShuffleSongs => {
+                if !self.songs.is_empty() {
+                    self.queue = self.entries(self.songs.clone());
+                    self.unshuffled = Some(self.queue.clone());
+                    let mut bytes = [0; 8];
+                    let first = if getrandom::fill(&mut bytes).is_ok() {
+                        (u64::from_le_bytes(bytes) % self.queue.len() as u64) as usize
+                    } else {
+                        0
+                    };
+                    shuffle(&mut self.queue, first);
+                    self.shuffled = true;
+                    self.start(0, 0.0, true, effects);
+                }
+            },
+            Message::PlayAlbum(id) => self.request::<api::MusicAlbum>(
+                api::music_album::Variables { id },
+                |r| Message::Loaded("play-album".into(), r),
+                effects,
+            ),
+            Message::Add(tracks, next) => {
+                let entries = self.entries(tracks);
                 let at = if next { (self.index + 1).min(self.queue.len()) } else { self.queue.len() };
                 self.queue.splice(at..at, entries);
                 if self.playing {
@@ -903,63 +1017,62 @@ impl Music {
                     effects,
                 );
             },
-            Message::Rating(id, rating) => {
-                for t in &mut self.songs {
-                    if t.id == id {
-                        t.rating = Some(rating);
-                    }
+            Message::StarDetail(starred) => {
+                let kind = match self.route {
+                    Some(Route::Album(_)) => api::music_star::MusicKind::ALBUM,
+                    Some(Route::Artist(_)) => api::music_star::MusicKind::ARTIST,
+                    _ => return None,
+                };
+                if let Some(detail) = &mut self.detail {
+                    detail.starred = starred;
+                    let id = detail.id;
+                    self.request::<api::MusicStar>(
+                        api::music_star::Variables { kind, id, starred },
+                        Message::Done,
+                        effects,
+                    );
                 }
-                for e in &mut self.queue {
-                    if e.track.id == id {
-                        e.track.rating = Some(rating);
-                    }
-                }
-                self.request::<api::MusicRate>(
-                    api::music_rate::Variables { kind: api::music_rate::MusicKind::TRACK, id, rating },
-                    Message::Done,
-                    effects,
-                );
             },
             Message::Name(name) => {
                 self.name = name.clone();
                 self.guest_name = name;
             },
-            Message::CreatePlaylist => self.request::<api::MusicCreatePlaylist>(
-                api::music_create_playlist::Variables { name: self.name.clone() },
-                Message::Edited,
-                effects,
-            ),
-            Message::DeletePlaylist(id) => self.request::<api::MusicDeletePlaylist>(
-                api::music_delete_playlist::Variables { id },
-                Message::Deleted,
-                effects,
-            ),
-            Message::SavePlaylist(id) => self.request::<api::MusicUpdatePlaylist>(
-                api::music_update_playlist::Variables {
-                    id,
-                    input: api::music_update_playlist::PlaylistInput {
-                        name: Some(self.name.clone()),
-                        comment: None,
-                        public: self.detail.as_ref().map(|d| d.public),
-                        tracks: Some(self.songs.iter().map(|t| t.id).collect()),
-                    },
-                },
-                Message::Edited,
-                effects,
-            ),
+            Message::CreatePlaylist => {
+                if !self.name.trim().is_empty() {
+                    self.request::<api::MusicCreatePlaylist>(
+                        api::music_create_playlist::Variables { name: self.name.trim().to_owned() },
+                        Message::Created,
+                        effects,
+                    )
+                }
+            },
+            Message::DeletePlaylist(id) => {
+                self.dialog = None;
+                self.request::<api::MusicDeletePlaylist>(
+                    api::music_delete_playlist::Variables { id },
+                    Message::Deleted,
+                    effects,
+                )
+            },
+            Message::SavePlaylist => {
+                self.renaming = false;
+                let name = self.name.trim().to_owned();
+                if !name.is_empty() && self.detail.as_ref().is_some_and(|d| d.name != name) {
+                    if let Some(detail) = &mut self.detail {
+                        detail.name = name.clone();
+                    }
+                    self.save_playlist(Some(name), None, false, effects);
+                }
+            },
             Message::Go(route) => return Some(route),
             Message::StartRoom => {
-                let tracks = if self.queue.is_empty() {
-                    self.songs.iter().map(|t| t.id).collect()
-                } else {
-                    self.queue.iter().map(|e| e.track.id).collect()
-                };
+                let tracks = self.songs.iter().map(|t| t.id).collect();
                 self.request::<api::MusicStartRoom>(
                     api::music_start_room::Variables {
                         input: api::music_start_room::NewListenRoom {
                             tracks,
-                            current: self.index as i64,
-                            position: self.position,
+                            current: 0,
+                            position: 0.0,
                             paused: true,
                             public: false,
                         },
@@ -990,7 +1103,6 @@ impl Music {
             crate::api::Live::Event(event) => match &event.events {
                 api::events::EventsEvents::LibraryChanged(_) | api::events::EventsEvents::ScanFinished(_) => {
                     if self.route.as_ref().is_some_and(|r| self.owns(r)) {
-                        self.offset = 0;
                         self.fetch(effects);
                     }
                 },
@@ -998,7 +1110,6 @@ impl Music {
                     if matches!(change.list, api::events::ChangedList::PLAYLISTS)
                         && (self.tab == Tab::Playlists || matches!(self.route, Some(Route::Playlist(_))))
                     {
-                        self.offset = 0;
                         self.fetch(effects);
                     }
                 },
@@ -1027,12 +1138,13 @@ impl Music {
     }
 
     fn fetch_art(&mut self, effects: &mut Vec<Effect>) {
-        let paths: Vec<String> = self
-            .cards
-            .iter()
-            .filter_map(|c| c.cover.clone().or_else(|| c.covers.first().cloned()))
-            .chain(self.detail.as_ref().and_then(|d| d.cover.clone()))
-            .chain(self.current().and_then(|e| e.track.cover.clone()))
+        let cards = self.cards.iter().chain(&self.more_by).chain(self.detail.iter().flat_map(|d| &d.appears_on));
+        let paths: Vec<String> = cards
+            .chain(self.detail.as_ref())
+            .flat_map(|c| c.cover.iter().chain(c.covers.iter().take(4)))
+            .chain(self.songs.iter().filter_map(|t| t.cover.as_ref()))
+            .chain(self.queue.iter().skip(self.index.saturating_sub(1)).take(30).filter_map(|e| e.track.cover.as_ref()))
+            .cloned()
             .collect();
         for path in paths {
             if self.images.want(&path)
@@ -1172,6 +1284,24 @@ impl Music {
         if let Some(room) = &self.room {
             room.send(json!({"type":"status","status":if self.waiting && self.playing{"buffering"}else{"ready"}}));
         }
+    }
+
+    /// Sends a change to the playlist on the page: its name, who sees it, or its songs as listed.
+    fn save_playlist(&self, name: Option<String>, public: Option<bool>, tracks: bool, effects: &mut Vec<Effect>) {
+        let Some(id) = self.detail.as_ref().map(|d| d.id) else { return };
+        self.request::<api::MusicUpdatePlaylist>(
+            api::music_update_playlist::Variables {
+                id,
+                input: api::music_update_playlist::PlaylistInput {
+                    name,
+                    comment: None,
+                    public,
+                    tracks: tracks.then(|| self.songs.iter().map(|t| t.id).collect()),
+                },
+            },
+            Message::Edited,
+            effects,
+        );
     }
 
     fn settings_changed(&self) {

@@ -8,8 +8,10 @@ pub struct Track {
     pub id: i64,
     pub title: String,
     pub artist: String,
+    pub artists: Vec<Ref>,
     pub album: String,
     pub album_id: Option<i64>,
+    pub disc: Option<i64>,
     pub number: Option<i64>,
     pub duration: f64,
     pub codec: String,
@@ -27,6 +29,55 @@ pub struct Track {
     pub bit_depth: Option<u32>,
     pub channels: Option<u32>,
     pub gains: Gains,
+}
+
+/// An artist or owner as a list credits them.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default)]
+pub struct Ref {
+    pub id: i64,
+    #[serde(alias = "username")]
+    pub name: String,
+}
+
+/// `quality()`: the codec, and depth and rate for lossless files or the bitrate for lossy ones.
+pub fn quality(track: &Track) -> String {
+    let name = match track.codec.as_str() {
+        "pcm" => "PCM".into(),
+        "wavpack" => "WavPack".into(),
+        "musepack" => "Musepack".into(),
+        codec => codec.to_uppercase(),
+    };
+    match (track.lossless, track.sample_rate, track.bitrate) {
+        (true, Some(rate), _) => {
+            let khz = rate as f64 / 1000.0;
+            let khz = if khz.fract() == 0.0 { format!("{khz}") } else { format!("{khz:.1}") };
+            format!("{name} {}/{khz}", track.bit_depth.unwrap_or(16))
+        },
+        (_, _, Some(bitrate)) => format!("{name} {bitrate}"),
+        _ => name,
+    }
+}
+
+/// `hiRes()`: more than CD's 16 bits or 48 kHz.
+pub fn hi_res(track: &Track) -> bool {
+    track.lossless && (track.bit_depth.unwrap_or(16) > 16 || track.sample_rate.unwrap_or(44100) > 48000)
+}
+
+/// `duration()`: "3:07", or "1:02:07".
+pub fn duration(seconds: f64) -> String {
+    let s = seconds.max(0.0).round() as u64;
+    let (h, m, r) = (s / 3600, s % 3600 / 60, s % 60);
+    if h > 0 { format!("{h}:{m:02}:{r:02}") } else { format!("{m}:{r:02}") }
+}
+
+/// `length()`: "1 hr 12 min", for whole albums.
+pub fn length(seconds: f64) -> String {
+    if seconds < 60.0 {
+        return format!("{} sec", seconds.round());
+    }
+    let m = (seconds / 60.0).round() as u64;
+    if m >= 60 { format!("{} hr {} min", m / 60, m % 60) } else { format!("{m} min") }
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
