@@ -1399,6 +1399,120 @@ mod tests {
         assert_eq!(music.repeat, Repeat::All);
     }
     #[test]
+    #[ignore = "requires Vulkan; draws the library and the album, artist and playlist pages"]
+    fn music_pages_render() {
+        use iced_core::{Point, Size};
+        let dir = std::env::var_os("MUSIC_PAGES").map_or_else(|| std::env::temp_dir().join("music-pages"), Into::into);
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut app = crate::app::App::new(Route::Library("Music".into()), crate::window_state::WindowState::default());
+        app.session.screen = crate::session::Screen::Ready;
+        let shades: [(u8, u8, u8); 6] =
+            [(200, 40, 70), (40, 90, 200), (230, 160, 40), (30, 150, 110), (120, 60, 180), (90, 90, 90)];
+        for (i, (r, g, b)) in shades.iter().enumerate() {
+            let pixels = (0..64 * 64).flat_map(|p| {
+                let k = (p % 64 + p / 64) as u8;
+                [r.saturating_add(k), *g, b.saturating_sub(k / 2), 255]
+            });
+            let handle = iced_widget::image::Handle::from_rgba(64, 64, pixels.collect::<Vec<u8>>());
+            app.music.images.arrived(format!("/c/{i}"), Some(handle), false);
+        }
+        let card = |id: i64, name: &str| Card {
+            id,
+            name: name.into(),
+            artist: "The River Quartet".into(),
+            artists: vec![model::Ref { id: 1, name: "The River Quartet".into() }],
+            year: Some(2019 + id),
+            cover: (id != 3).then(|| format!("/c/{}", id % 6)),
+            covers: (0..4).map(|i| format!("/c/{}", (id + i) % 6)).collect(),
+            track_count: 9,
+            album_count: 3,
+            duration: 2460.0,
+            owner: model::Ref { id: 2, name: "sol".into() },
+            ..Card::default()
+        };
+        let names = [
+            "A quiet afternoon",
+            "Northern lights",
+            "Paper boats",
+            "Signal fires",
+            "Low tide",
+            "Glass houses",
+            "Late trains",
+        ];
+        app.music.library = true;
+        app.music.route = Some(Route::Library("Music".into()));
+        app.music.cards = names.iter().enumerate().map(|(i, n)| card(i as i64, n)).collect();
+        let mut songs: Vec<Track> = (1..=7)
+            .map(|id| Track {
+                id,
+                title: format!("{} part {id}", names[id as usize - 1]),
+                artist: "The River Quartet".into(),
+                artists: vec![model::Ref { id: 1, name: "The River Quartet".into() }],
+                album: "A quiet afternoon".into(),
+                album_id: Some(0),
+                number: Some(id),
+                disc: Some(if id > 4 { 2 } else { 1 }),
+                duration: 200.0 + id as f64 * 13.0,
+                codec: "flac".into(),
+                lossless: true,
+                sample_rate: Some(if id == 2 { 96000 } else { 44100 }),
+                bit_depth: Some(if id == 2 { 24 } else { 16 }),
+                cover: Some(format!("/c/{}", id % 6)),
+                starred: id == 3,
+                ..Track::default()
+            })
+            .collect();
+        let size = Size::new(1280, 1500);
+        let draw = |app: &mut crate::app::App, name: &str, cursor: Option<Point>| {
+            crate::snapshot::snapshot(app, size, 1.0, cursor, &dir.join(name), &[]).unwrap();
+        };
+        for tab in [Tab::Albums, Tab::Artists, Tab::Playlists] {
+            app.music.tab = tab;
+            draw(&mut app, &format!("library-{tab:?}.png"), Some(Point::new(400.0, 300.0)));
+        }
+        app.music.tab = Tab::Songs;
+        app.music.songs = songs.clone();
+        draw(&mut app, "library-songs.png", Some(Point::new(600.0, 330.0)));
+
+        app.history = crate::route::History::new(Route::Album(0));
+        app.music.route = Some(Route::Album(0));
+        let mut album = card(0, names[0]);
+        album.cover_tint = Some("200 40 70".into());
+        album.release_types = vec!["album".into()];
+        album.genres = vec!["Jazz".into(), "Ambient".into()];
+        album.labels = vec!["Quiet Records".into()];
+        album.release_date = Some("2019-04-12".into());
+        album.disc_titles = vec![DiscTitle { disc: 2, title: "Night".into() }];
+        album.track_count = 7;
+        app.music.detail = Some(album);
+        app.music.songs = songs.clone();
+        app.music.more_by = app.music.cards[1..5].to_vec();
+        app.music.queue = app.music.entries(songs.clone());
+        app.music.index = 1;
+        app.music.playing = true;
+        draw(&mut app, "album.png", Some(Point::new(700.0, 520.0)));
+
+        app.history = crate::route::History::new(Route::Artist(1));
+        app.music.route = Some(Route::Artist(1));
+        let mut artist = card(1, "The River Quartet");
+        artist.cover_tint = Some("40 90 200".into());
+        artist.albums = app.music.cards[..4].to_vec();
+        artist.albums[3].release_types = vec!["single".into()];
+        app.music.detail = Some(artist);
+        songs[0].album = "Northern lights".into();
+        app.music.songs = songs.clone();
+        draw(&mut app, "artist.png", None);
+
+        app.history = crate::route::History::new(Route::Playlist(4));
+        app.music.route = Some(Route::Playlist(4));
+        let mut list = card(4, "Sunday morning");
+        list.mine = true;
+        app.music.detail = Some(list);
+        draw(&mut app, "playlist.png", Some(Point::new(700.0, 470.0)));
+        app.music.dialog = Some(Dialog::NewPlaylist);
+        draw(&mut app, "new-playlist.png", None);
+    }
+    #[test]
     #[ignore = "requires Vulkan; clicks native player controls and verifies close/collapse behavior"]
     fn native_music_render() {
         use iced_core::{Event, Point, Size, mouse};
