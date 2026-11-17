@@ -39,7 +39,17 @@ pub fn select<'a, Message: Clone + 'a, T: Clone + PartialEq + 'a>(
     .center_y(36)
     .padding([0, 12])
     .boxed();
-    Select { options, labels, chosen, on_change: Box::new(on_change), content, look: *look, menu_width: None }.boxed()
+    Select {
+        options,
+        labels,
+        chosen,
+        on_change: Box::new(on_change),
+        content,
+        look: *look,
+        menu_width: None,
+        width: Length::Fill,
+    }
+    .boxed()
 }
 
 pub fn icon_menu<'a, Message: Clone + 'a, T: Clone + PartialEq + 'a>(
@@ -58,6 +68,29 @@ pub fn icon_menu<'a, Message: Clone + 'a, T: Clone + PartialEq + 'a>(
         content: container(icon(glyph, 16.0)).center(36).boxed(),
         look: *look,
         menu_width: Some(224.0),
+        width: Length::Fixed(36.0),
+    }
+    .boxed()
+}
+
+/// A menu opened from `content` (a labelled button, say), with nothing in it chosen.
+pub fn menu<'a, Message: Clone + 'a, T: Clone + PartialEq + 'a>(
+    content: Element<'a, Message>,
+    options: &'a [T],
+    label: impl Fn(&T) -> String,
+    on_change: impl Fn(T) -> Message + 'a,
+    width: f32,
+    look: &Look,
+) -> Element<'a, Message> {
+    Select {
+        options,
+        labels: options.iter().map(label).collect(),
+        chosen: None,
+        on_change: Box::new(on_change),
+        content,
+        look: *look,
+        menu_width: Some(width),
+        width: Length::Shrink,
     }
     .boxed()
 }
@@ -70,6 +103,8 @@ struct Select<'a, T, Message> {
     content: Element<'a, Message>,
     look: Look,
     menu_width: Option<f32>,
+    /// How wide the field or button opening the menu is.
+    width: Length,
 }
 
 #[derive(Default)]
@@ -160,7 +195,7 @@ impl<T: Clone, Message: Clone> Widget<Message, Theme, Renderer> for Select<'_, T
     }
 
     fn size(&self) -> Size<Length> {
-        Size::new(if self.menu_width.is_some() { Length::Fixed(36.0) } else { Length::Fill }, Length::Fixed(36.0))
+        Size::new(self.width, Length::Fixed(36.0))
     }
 
     fn layout(&mut self, tree: &mut Tree, renderer: &Renderer, limits: &layout::Limits) {
