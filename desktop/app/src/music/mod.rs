@@ -1580,6 +1580,53 @@ mod tests {
         draw(&mut app, "playlist.png", Some(Point::new(700.0, 470.0)));
         app.music.dialog = Some(Dialog::NewPlaylist);
         draw(&mut app, "new-playlist.png", None);
+        app.music.dialog = None;
+
+        app.history = crate::route::History::new(Route::Listen("ROOM".into()));
+        app.music.route = Some(Route::Listen("ROOM".into()));
+        app.music.room_code = Some("ROOM".into());
+        app.music.host_name = "sol".into();
+        app.session.screen = crate::session::Screen::Connect;
+        draw(&mut app, "room-join.png", None);
+        app.session.screen = crate::session::Screen::Ready;
+        app.music.room_joined = true;
+        app.music.is_host = true;
+        app.music.can_share = true;
+        app.music.people = vec![(7, "cranky".into())];
+        app.music.queue[1].track.cover_tint = Some("40 90 200".into());
+        app.music.snapshot.connected = true;
+        app.music.snapshot.room = serde_json::from_value(json!({
+            "queue": [1, 2, 3, 4, 5, 6, 7],
+            "current": 1,
+            "clock": { "paused": false, "running": true, "position": 63.0, "at": 0.0, "rate": 1.0 },
+            "members": [
+                { "id": 1, "name": "David", "userId": 1, "status": "ready" },
+                { "id": 2, "name": "Guest Fox", "status": "buffering" }
+            ],
+            "host": { "id": 1, "name": "David" },
+            "public": false,
+            "settings": { "control": "everyone", "waitForAll": false }
+        }))
+        .ok();
+        assert!(app.music.snapshot.room.is_some());
+        app.music.fill_room_menu();
+        app.music.position = 63.0;
+        draw(&mut app, "room.png", Some(Point::new(1000.0, 260.0)));
+        let click = [
+            iced_core::Event::Mouse(iced_core::mouse::Event::ButtonPressed(iced_core::mouse::Button::Left)),
+            iced_core::Event::Mouse(iced_core::mouse::Event::ButtonReleased(iced_core::mouse::Button::Left)),
+        ];
+        crate::snapshot::snapshot(
+            &mut app,
+            size,
+            1.0,
+            Some(Point::new(1077.0, 44.0)),
+            &dir.join("room-menu.png"),
+            &click,
+        )
+        .unwrap();
+        app.music.room_gone = Some("Whoever started this room has ended it.".into());
+        draw(&mut app, "room-gone.png", None);
     }
     #[test]
     #[ignore = "requires Vulkan; clicks native player controls and verifies close/collapse behavior"]
