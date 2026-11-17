@@ -27,9 +27,6 @@ const NAME: ty::Size = ty::Size { px: 48.0, line: 52.8 };
 /// The music page for the route: a library, an album, an artist or a playlist. `counts` are the
 /// library's albums and songs.
 pub fn page<'a>(music: &'a Music, counts: Option<(i64, i64)>, look: &Look) -> View<'a> {
-    if music.room_code.is_some() {
-        return layout::page(super::view::room(music, look), false);
-    }
     let detail = music.detail.as_ref();
     let (content, glow) = match &music.route {
         Some(Route::Album(_)) => (album(music, look), Some((640.0, (0.7, 0.6), (0.15, 0.0)))),
@@ -632,7 +629,7 @@ fn star<'a>(starred: bool, message: Message, look: &Look) -> View<'a> {
     tip(button, if starred { "Unstar" } else { "Star" }, look)
 }
 
-fn quality<'a>(track: &Track, look: &Look) -> View<'a> {
+pub(super) fn quality<'a>(track: &Track, look: &Look) -> View<'a> {
     badge(model::quality(track), if model::hi_res(track) { Tone::Warn } else { Tone::Quiet }, look)
 }
 
@@ -802,7 +799,7 @@ fn track_row<'a>(
 }
 
 /// `<Playing>`: three bars, for the track that's on.
-fn bars<'a>(color: Color) -> View<'a> {
+pub(super) fn bars<'a>(color: Color) -> View<'a> {
     Row::with_children([12.0, 7.0, 10.0].map(|height| {
         container(space().width(3).height(height))
             .style(move |_| container::Style {

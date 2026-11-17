@@ -18,6 +18,6 @@ mutation MusicCreatePlaylist($name: String!) { createPlaylist(name: $name) { ...
 mutation MusicUpdatePlaylist($id: Int!, $input: PlaylistInput!) { updatePlaylist(id: $id, input: $input) { ...PlaylistCard } }
 mutation MusicDeletePlaylist($id: Int!) { deletePlaylist(id: $id) }
 mutation MusicStartRoom($input: NewListenRoom!) { startListenRoom(input: $input) { code } }
-query MusicRoom($code: String!) { listenRoom(code: $code) { code signedIn isHost canShare canInvite tracks { ...MusicTrack } } }
+query MusicRoom($code: String!) { listenRoom(code: $code) { code hostName signedIn isHost canShare canInvite tracks { ...MusicTrack } } }
 query MusicPeople { users { id username } }
 query MusicTrack($id: Int!) { track(id: $id) { ...MusicTrack } }

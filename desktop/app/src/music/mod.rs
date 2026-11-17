@@ -6,6 +6,7 @@ pub mod model;
 pub(crate) mod output;
 mod pages;
 mod ring;
+mod room;
 mod view;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
@@ -13,6 +14,7 @@ use std::time::Instant;
 use graphql_client::GraphQLQuery;
 use model::{Entry, Repeat, Settings, Track};
 pub use pages::{dialog, page};
+pub use room::view as room;
 use serde::Deserialize;
 use serde_json::{Value, json};
 pub use view::{now_playing, pill};
@@ -67,6 +69,16 @@ pub enum Sort {
     Year,
     Recent,
 }
+/// What the listening room's menu does.
+#[derive(Debug, Clone, PartialEq)]
+pub enum RoomAction {
+    Copy,
+    Public(bool),
+    Everyone(bool),
+    Invite(i64, String),
+    End,
+    Leave,
+}
 /// What's asked of the person over the page.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Dialog {
@@ -96,7 +108,7 @@ pub enum Message {
     Rename(bool),
     Popular(bool),
     Measured(i64, Result<Value, api::Error>),
-    RoomCommand(Value),
+    RoomMenu(RoomAction),
     JoinRoom,
     RoomStarted(Result<Value, api::Error>),
     Ready(Arc<Mutex<engine::Engine>>),
@@ -150,6 +162,12 @@ pub struct Music {
     pub images: crate::images::Images,
     pub people: Vec<(i64, String)>,
     pub can_invite: bool,
+    pub can_share: bool,
+    pub is_host: bool,
+    pub host_name: String,
+    /// Why there's no room to join, once that's known.
+    pub room_gone: Option<String>,
+    pub room_menu: Vec<RoomAction>,
     pub dialog: Option<Dialog>,
     pub renaming: bool,
     pub popular: bool,
@@ -204,6 +222,11 @@ impl Default for Music {
             images: crate::images::Images::default(),
             people: vec![],
             can_invite: false,
+            can_share: false,
+            is_host: false,
+            host_name: String::new(),
+            room_gone: None,
+            room_menu: vec![],
             dialog: None,
             renaming: false,
             popular: false,
@@ -622,9 +645,24 @@ impl Music {
                 self.images.arrived(path, handle, true);
                 self.images.limit_ready(256);
             },
-            Message::RoomCommand(value) => {
+            Message::RoomMenu(action) => {
+                let command = match action {
+                    RoomAction::Copy => return self.update(Message::CopyRoom, effects),
+                    RoomAction::Public(public) => json!({"type":"settings","public":public}),
+                    RoomAction::Everyone(everyone) => {
+                        json!({"type":"settings","control":if everyone {"everyone"} else {"host"}})
+                    },
+                    RoomAction::Invite(id, _) => json!({"type":"invite","userId":id}),
+                    RoomAction::End => {
+                        if let Some(room) = &self.room {
+                            room.send(json!({"type":"end"}));
+                        }
+                        return Some(Route::Home);
+                    },
+                    RoomAction::Leave => return Some(Route::Home),
+                };
                 if let Some(room) = &self.room {
-                    room.send(value);
+                    room.send(command);
                 }
             },
             Message::JoinRoom => self.connect_room(effects),
@@ -652,6 +690,7 @@ impl Music {
                             .flatten()
                             .filter_map(|v| Some((v["id"].as_i64()?, v["username"].as_str()?.to_owned())))
                             .collect();
+                        self.fill_room_menu();
                     }
                     return None;
                 }
@@ -661,6 +700,9 @@ impl Music {
                         Ok(value) => {
                             let info = &value["listenRoom"];
                             self.can_invite = info["canInvite"].as_bool().unwrap_or(false);
+                            self.can_share = info["canShare"].as_bool().unwrap_or(false);
+                            self.is_host = info["isHost"].as_bool().unwrap_or(false);
+                            self.host_name = info["hostName"].as_str().unwrap_or_default().to_owned();
                             if self.can_invite {
                                 self.request::<api::MusicPeople>(
                                     api::music_people::Variables {},
@@ -677,8 +719,10 @@ impl Music {
                             }
                             self.sync_room(effects);
                         },
+                        Err(e) if self.room_ids.is_empty() => self.room_gone = Some(e.message),
                         Err(e) => self.error = Some(e.message),
                     }
+                    self.fill_room_menu();
                     return None;
                 }
                 if key == "play-album" {
@@ -1198,8 +1242,8 @@ impl Music {
         self.room_started = false;
         self.room_code = Some(code.clone());
         self.room_joined = false;
+        self.room_gone = None;
         self.loading = true;
-        self.expanded = true;
         self.snapshot = listen::Snapshot::default();
         self.request::<api::MusicRoom>(
             api::music_room::Variables { code },
@@ -1248,9 +1292,10 @@ impl Music {
             return;
         };
         self.snapshot = room.snapshot();
+        self.fill_room_menu();
         if self.snapshot.ended {
             self.pause(effects);
-            self.error = Some("This listening room has ended".into());
+            self.room_gone = Some("Whoever started this room has ended it.".into());
             return;
         }
         let Some(state) = &self.snapshot.room else {
@@ -1284,6 +1329,30 @@ impl Music {
         if let Some(room) = &self.room {
             room.send(json!({"type":"status","status":if self.waiting && self.playing{"buffering"}else{"ready"}}));
         }
+    }
+
+    /// What the room's menu offers, for who's asking and who's in it.
+    fn fill_room_menu(&mut self) {
+        let mut menu = vec![RoomAction::Copy];
+        if let Some(room) = &self.snapshot.room {
+            if self.can_share {
+                menu.push(RoomAction::Public(!room.public));
+            }
+            if self.is_host {
+                menu.push(RoomAction::Everyone(room.settings.control != crate::player::sync::Control::Everyone));
+            }
+            if self.can_invite {
+                let here = room.members.iter().filter_map(|m| m.user_id).collect::<Vec<_>>();
+                menu.extend(
+                    self.people
+                        .iter()
+                        .filter(|(id, _)| !here.contains(id))
+                        .map(|(id, name)| RoomAction::Invite(*id, name.clone())),
+                );
+            }
+        }
+        menu.push(if self.is_host { RoomAction::End } else { RoomAction::Leave });
+        self.room_menu = menu;
     }
 
     /// Sends a change to the playlist on the page: its name, who sees it, or its songs as listed.

@@ -6,83 +6,9 @@ use iced_widget::{Column, Element, Widget, column, container, row, scrollable};
 use super::model::Gain;
 use super::{Message, Music};
 use crate::ui::Look;
-use crate::ui::controls::{button, input};
 use crate::ui::icon::Icon;
 use crate::ui::text::{self as ty, text};
 
-/// A listening room: who's in it, and what the host can change.
-pub fn room<'a>(music: &'a Music, look: &Look) -> Element<'a, Message> {
-    let Some(code) = &music.room_code else { return iced_widget::space().boxed() };
-    let mut body = Column::new().spacing(20).width(Fill);
-    body = body.push(text("Listening together", ty::TITLE, look.ink).font(ty::SEMIBOLD).boxed());
-    body = body.push(text(format!("Room {code}"), ty::SM, look.ink_3).boxed());
-    body = body.push(button("Copy room link", look).on_press(Message::CopyRoom).boxed());
-    if !music.room_joined {
-        body = body.push(
-            row![
-                input("guest-name", &music.guest_name, "Your name", Message::Name, look).boxed(),
-                button("Join", look).on_press(Message::JoinRoom).boxed()
-            ]
-            .spacing(8)
-            .boxed(),
-        );
-    }
-    if let Some(room) = &music.snapshot.room {
-        body = body.push(text(format!("Hosted by {}", room.host.name), ty::SM, look.ink_2).boxed());
-        for member in &room.members {
-            body = body.push(text(format!("{} · {:?}", member.name, member.status), ty::SM, look.ink_2).boxed());
-        }
-        if music.can_invite {
-            for (id, name) in &music.people {
-                body = body.push(
-                    button(format!("Invite {name}"), look)
-                        .small()
-                        .on_press(Message::RoomCommand(serde_json::json!({"type":"invite","userId":id})))
-                        .boxed(),
-                );
-            }
-        }
-        if music.snapshot.you == Some(room.host.id) {
-            body = body.push(
-                row![
-                    button(if room.public { "Make private" } else { "Make public" }, look)
-                        .on_press(Message::RoomCommand(serde_json::json!({"type":"settings","public":!room.public})))
-                        .boxed(),
-                    button(if room.settings.wait_for_all { "Don't wait" } else { "Wait for all" }, look)
-                        .on_press(Message::RoomCommand(
-                            serde_json::json!({"type":"settings","waitForAll":!room.settings.wait_for_all})
-                        ))
-                        .boxed(),
-                    button(if room.settings.control==crate::player::sync::Control::Everyone {"Host controls"}else{"Everyone controls"},look).on_press(Message::RoomCommand(serde_json::json!({"type":"settings","control":if room.settings.control==crate::player::sync::Control::Everyone{"host"}else{"everyone"}}))).boxed(),
-                    button("End room", look).on_press(Message::RoomCommand(serde_json::json!({"type":"end"}))).boxed()
-                ]
-                .spacing(8)
-                .boxed(),
-            );
-        }
-    }
-    if let Some(error) = music.snapshot.error.as_ref().or(music.error.as_ref()) {
-        body = body.push(text(error, ty::SM, look.danger).boxed());
-    }
-    for (index, entry) in music.queue.iter().enumerate() {
-        body = body.push(
-            row![
-                control(Icon::Play, "Play", Some(Message::Jump(index)), false, false, 32.0, look),
-                column![
-                    crate::ui::text::truncate(&entry.track.title, ty::SM, look.ink),
-                    crate::ui::text::truncate(&entry.track.artist, ty::XS, look.ink_3)
-                ]
-                .spacing(2)
-                .width(Fill),
-                text(time(entry.track.duration), ty::XS, look.ink_3)
-            ]
-            .spacing(12)
-            .align_y(Alignment::Center)
-            .boxed(),
-        );
-    }
-    body.boxed()
-}
 pub fn pill<'a>(music: &'a Music, look: &Look) -> Element<'a, Message> {
     let Some(current) = music.current().filter(|_| !music.dismissed && !music.suspended) else {
         return iced_widget::space().boxed();
@@ -177,7 +103,7 @@ fn play<'a>(music: &Music, size: f32, look: &Look) -> Element<'a, Message> {
         look,
     )
 }
-fn transport<'a>(music: &Music, look: &Look) -> Element<'a, Message> {
+pub(super) fn transport<'a>(music: &Music, look: &Look) -> Element<'a, Message> {
     row![
         control(Icon::Shuffle, "Shuffle", Some(Message::Shuffle), music.shuffled, false, 36.0, look),
         control(Icon::SkipBack, "Previous", Some(Message::Previous), false, false, 40.0, look),
@@ -197,7 +123,7 @@ fn transport<'a>(music: &Music, look: &Look) -> Element<'a, Message> {
     .align_y(Alignment::Center)
     .boxed()
 }
-fn scrubber<'a>(music: &Music, look: &Look) -> Element<'a, Message> {
+pub(super) fn scrubber<'a>(music: &Music, look: &Look) -> Element<'a, Message> {
     let duration = music.current().map_or(0.0, |e| e.track.duration).max(0.0);
     column![
         crate::player::timeline::volume((music.position / duration.max(1.0)).clamp(0.0, 1.0), look.ink, move |p| {
@@ -213,7 +139,7 @@ fn scrubber<'a>(music: &Music, look: &Look) -> Element<'a, Message> {
     .width(Fill)
     .boxed()
 }
-fn volume<'a>(music: &Music, look: &Look) -> Element<'a, Message> {
+pub(super) fn volume<'a>(music: &Music, look: &Look) -> Element<'a, Message> {
     let value = if music.settings.muted { 0.0 } else { music.settings.volume as f64 };
     row![
         control(
@@ -514,7 +440,7 @@ fn time(seconds: f64) -> String {
     format!("{}:{:02}", n / 60, n % 60)
 }
 
-fn art<'a>(music: &'a Music, path: Option<&str>, size: f32, look: &Look) -> Element<'a, Message> {
+pub(super) fn art<'a>(music: &'a Music, path: Option<&str>, size: f32, look: &Look) -> Element<'a, Message> {
     let radius = (size / 14.0).round().max(6.0);
     let content = match path.and_then(|p| music.images.picture(p)) {
         picture @ Some(crate::images::Picture::Ready(..) | crate::images::Picture::Loading) => {
