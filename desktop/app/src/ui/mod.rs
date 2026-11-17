@@ -19,6 +19,7 @@ pub mod motion;
 pub mod numbers;
 pub mod overlay;
 pub mod pressable;
+pub mod reveal;
 pub mod select;
 pub mod squircle;
 pub mod text;

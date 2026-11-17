@@ -341,7 +341,9 @@ pub fn view<'a>(app: &'a App, route: &'a Route, look: &Look) -> Option<View<'a>>
             .width(Fill)
             .boxed(),
         ];
-        if let Some(color) = t.card.backdrop_tint.as_deref().or(t.card.poster_tint.as_deref()).and_then(parse_tint) {
+        if let Some(color) =
+            t.card.backdrop_tint.as_deref().or(t.card.poster_tint.as_deref()).and_then(media::parse_tint)
+        {
             layers.push(effects::ambient(effects::Ambient::title(color)));
         }
         let mut stack = iced_widget::Stack::with_children([page]);
@@ -391,7 +393,7 @@ fn hero<'a>(b: &'a Browsing, props: Hero<'a>, look: &Look) -> View<'a> {
         vec![(0.0, l.canvas), (0.5, l.canvas.scale_alpha(0.68)), (1.0, Color::TRANSPARENT)],
         look,
     ));
-    if let Some(color) = tint.and_then(parse_tint) {
+    if let Some(color) = tint.and_then(media::parse_tint) {
         layers.push(effects::ambient(effects::Ambient::corner(color)));
     }
     if let Some(value) = bar {
@@ -607,14 +609,6 @@ fn date(at: i64) -> String {
         ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][(month - 1) as usize]
     )
 }
-fn parse_tint(tint: &str) -> Option<Color> {
-    let rgb = tint.split_whitespace().map(str::parse::<f32>).collect::<Result<Vec<_>, _>>().ok()?;
-    if rgb.len() != 3 {
-        return None;
-    }
-    Some(Color::from_rgb(rgb[0] / 255.0, rgb[1] / 255.0, rgb[2] / 255.0))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

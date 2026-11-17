@@ -28,6 +28,15 @@ pub fn hue(name: &str) -> f32 {
     (h % 360) as f32
 }
 
+/// A tint as the server sends it (`"r g b"`, for `rgb(<tint> / <alpha>)`).
+pub fn parse_tint(tint: &str) -> Option<Color> {
+    let rgb = tint.split_whitespace().map(str::parse::<f32>).collect::<Result<Vec<_>, _>>().ok()?;
+    if rgb.len() != 3 {
+        return None;
+    }
+    Some(Color::from_rgb(rgb[0] / 255.0, rgb[1] / 255.0, rgb[2] / 255.0))
+}
+
 /// CSS's `oklch()` in sRGB.
 pub fn oklch(l: f32, c: f32, h: f32) -> Color {
     let (a, b) = (c * h.to_radians().cos(), c * h.to_radians().sin());
