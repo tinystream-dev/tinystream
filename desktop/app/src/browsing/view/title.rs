@@ -3,6 +3,8 @@
 use iced_widget::{column, row};
 
 use super::*;
+use crate::ui::icon::icon;
+use crate::ui::text::inherit;
 
 pub(super) fn title<'a>(b: &'a Browsing, id: i64, look: &Look) -> View<'a> {
     let key = Key::Title(id);
@@ -30,24 +32,39 @@ pub(super) fn title<'a>(b: &'a Browsing, id: i64, look: &Look) -> View<'a> {
             if t.seasons.is_empty() { tabs.first().map_or(1, |(n, _)| *n) } else { initial_season(t) }
         });
     let mut actions = Vec::new();
+    let done = c.video_count > 0 && c.watched_count >= c.video_count;
+    let primary = |verb: &str, video: i64, extra: Vec<String>| {
+        let mut content = row![icon(Icon::Play, 18.0), inherit(verb.to_owned(), ty::S15).font(MEDIUM)]
+            .spacing(10)
+            .align_y(Alignment::Center);
+        for words in extra.into_iter().filter(|w| !w.is_empty()) {
+            content = content.push(text(words, ty::S15, look.on_accent.scale_alpha(0.6)).boxed());
+        }
+        button("", look)
+            .primary()
+            .large()
+            .content(content)
+            .on_press(AppMessage::Navigate(Route::Watch(video as u64, None)))
+            .boxed()
+    };
     if let Some(n) = &t.next_up {
-        actions.push(
-            button(if n.resuming { "Resume" } else { "Play" }, look)
-                .primary()
-                .large()
-                .icon(Icon::Play)
-                .on_press(AppMessage::Navigate(Route::Watch(n.video.id as u64, None)))
-                .boxed(),
-        );
+        let verb = if n.resuming {
+            "Resume"
+        } else if done {
+            "Watch again"
+        } else {
+            "Play"
+        };
+        let mut extra = Vec::new();
+        if c.kind == "SHOW" {
+            extra.extend(n.video.label.clone());
+        }
+        if n.resuming {
+            extra.push(remaining(n.video.position.unwrap_or(0.0), n.video.duration));
+        }
+        actions.push(primary(verb, n.video.id, extra));
     } else if let Some(v) = &t.movie {
-        actions.push(
-            button("Play", look)
-                .primary()
-                .large()
-                .icon(Icon::Play)
-                .on_press(AppMessage::Navigate(Route::Watch(v.id as u64, None)))
-                .boxed(),
-        );
+        actions.push(primary("Play", v.id, Vec::new()));
     }
     if can.watch_together
         && let Some(video) =
@@ -57,89 +74,52 @@ pub(super) fn title<'a>(b: &'a Browsing, id: i64, look: &Look) -> View<'a> {
             button("Watch together", look).large().icon(Icon::Users).on_press(AppMessage::HostRoom(video)).boxed(),
         );
     }
-    let done = c.video_count > 0 && c.watched_count >= c.video_count;
-    actions.push(
-        button(if done { "Watched" } else { "Mark watched" }, look)
-            .large()
-            .on_press_maybe((!b.busy).then(|| act(b, Action::TitleWatched(id, !done))))
-            .boxed(),
-    );
-    if can.edit_metadata {
-        actions.push(icon_button(
-            Icon::Sparkles,
-            "Fix match",
-            (!b.busy).then(|| msg(b, Message::Dialog(Some(Dialog::Match(id))))),
-            look,
-        ));
-        actions.push(icon_button(
-            Icon::RotateCw,
-            "Refresh details",
-            (!b.busy).then(|| act(b, Action::Refresh(id))),
-            look,
-        ));
+    actions.push(title_menu(b, t, done, look));
+    let mut meta = Row::<View<'a>>::new().spacing(16);
+    for words in [
+        c.year.map(|y| y.to_string()),
+        Some(if c.kind == "SHOW" {
+            let regular = t.seasons.iter().filter(|s| s.number > 0).count();
+            let n = if regular > 0 { regular } else { t.seasons.len() };
+            format!("{n} season{}", if n == 1 { "" } else { "s" })
+        } else {
+            t.movie.as_ref().and_then(|v| v.duration).map(runtime).unwrap_or_default()
+        }),
+        t.rating.map(|r| format!("{r:.1} rating")),
+    ]
+    .into_iter()
+    .flatten()
+    .filter(|w| !w.is_empty())
+    {
+        meta = meta.push(text(words, ty::SM, look.ink_2).boxed());
+    }
+    if !t.genres.is_empty() {
+        meta = meta
+            .push(text(t.genres.iter().take(4).cloned().collect::<Vec<_>>().join(", "), ty::SM, look.ink_3).boxed());
     }
     let details = column![
-        text(&c.name, ty::Size { px: 44.0, line: 49.0 }, look.ink).font(SEMIBOLD),
-        text(
-            [
-                c.year.map(|y| y.to_string()),
-                Some(if c.kind == "SHOW" {
-                    format!("{} season{}", t.seasons.len(), if t.seasons.len() == 1 { "" } else { "s" })
-                } else {
-                    t.movie.as_ref().and_then(|v| v.duration).map(runtime).unwrap_or_default()
-                }),
-                t.rating.map(|r| format!("{r:.1} rating"))
-            ]
-            .into_iter()
-            .flatten()
-            .collect::<Vec<_>>()
-            .join(" · "),
-            ty::SM,
-            look.ink_2
-        ),
-        text(t.genres.join(" · "), ty::S13, look.ink_3),
-        if let Some(next) = schedule.and_then(|s| s.next.as_ref()).filter(|e| e.air_at.is_some()) {
-            text(
-                format!(
-                    "{} {} · {}",
-                    code(next.season, next.episode),
-                    next.name.as_deref().unwrap_or(""),
-                    countdown(next.air_at.unwrap_or_default())
-                ),
-                ty::SM,
-                look.ink_2,
-            )
-            .boxed()
-        } else {
-            space().boxed()
-        },
-        line(actions)
+        container(text(&c.name, ty::Size { px: 42.0, line: 44.5 }, look.ink).font(SEMIBOLD)).width(Fill.max(600)),
+        meta.wrap()
     ]
-    .spacing(14)
+    .spacing(12)
     .width(Fill);
     let header =
-        row![picture(b, c.poster.as_deref(), 208.0, 312.0, 14.0, look), details].spacing(32).align_y(Alignment::End);
-    page = page.push(container(header).padding(Padding { top: 40.0, ..Padding::ZERO }).boxed());
-    if can.edit_metadata {
-        page = page.push(
-            (container(line(vec![
-                artwork(b, id, Some("POSTER"), "thumbnail", t.custom_poster, look),
-                artwork(b, id, Some("BACKDROP"), "banner", t.custom_backdrop, look),
-            ]))
-            .padding([16, 0]))
-            .boxed(),
-        );
-    }
-    if can.edit_metadata
-        && let Some(movie) = &t.movie
-    {
-        page = page.push(artwork(b, movie.id, None, "video thumbnail", movie.custom_still, look));
-    }
+        row![picture(b, c.poster.as_deref(), 152.0, 228.0, 16.0, look), details].spacing(28).align_y(Alignment::End);
+    page = page.push(container(header).padding(Padding { top: 64.0, ..Padding::ZERO }).boxed());
+    page = page.push(container(line(actions)).padding(Padding { top: 20.0, ..Padding::ZERO }).boxed());
+
+    let show = c.kind == "SHOW";
+    let mut side = Column::<View<'a>>::new().spacing(28).width(Fill);
     if let Some(overview) = &t.overview {
-        let long = overview.chars().count() > 420;
+        let (lines, after) = if show { (7.0, 280) } else { (4.0, 420) };
+        let long = overview.chars().count() > after;
         let expanded = b.expanded.contains(&id);
         let text = text(overview, ty::S15, look.ink_2).line_height(iced_core::text::LineHeight::Relative(1.5));
-        let text = if long && !expanded { text.height(90).ellipsis(iced_core::text::Ellipsis::End) } else { text };
+        let text = if long && !expanded {
+            text.height(ty::S15.px * 1.5 * lines).ellipsis(iced_core::text::Ellipsis::End)
+        } else {
+            text
+        };
         let mut overview = column![text].width(Fill);
         if long {
             overview = overview.push(
@@ -150,51 +130,69 @@ pub(super) fn title<'a>(b: &'a Browsing, id: i64, look: &Look) -> View<'a> {
                     .boxed(),
             );
         }
-        page = page.push(container(overview).width(Fill.max(768)).padding([24, 0]).boxed());
+        side = side.push(overview.boxed());
+    }
+    if let Some(next) = schedule.and_then(|s| s.next.as_ref()).filter(|e| e.air_at.is_some()) {
+        side = side.push(
+            row![
+                icon(Icon::CalendarDays, 16.0).color(look.ink_3),
+                text(
+                    format!(
+                        "{}{} airs {}, {}",
+                        code(next.season, next.episode),
+                        next.name.as_deref().map(|n| format!(" “{n}”")).unwrap_or_default(),
+                        airs(next.air_at.unwrap_or_default()),
+                        countdown(next.air_at.unwrap_or_default())
+                    ),
+                    ty::SM,
+                    look.ink_2
+                )
+            ]
+            .spacing(8)
+            .boxed(),
+        );
     }
     if let Some(series) = b.data(&Key::Series(id)).and_then(|d| d.title.as_ref()).and_then(|t| t.series.as_ref()) {
         if can.manage_shows {
-            page = page.push((series_panel(b, series, selected_season, look)).boxed());
+            side = side.push(series_panel(b, series, selected_season, look));
         }
-    } else if b.features() && can.manage_shows && c.kind == "SHOW" {
-        page = page.push((button("Manage downloads", look).on_press(act(b, Action::Manage(id))).boxed()).boxed());
+    } else if b.features() && can.manage_shows && show {
+        side = side.push(button("Manage downloads", look).on_press(act(b, Action::Manage(id))).boxed());
     }
-    if !tabs.is_empty() {
+
+    if !show || tabs.is_empty() {
+        page = page.push(container(side).width(Fill.max(768)).padding(Padding { top: 40.0, ..Padding::ZERO }).boxed());
+    } else {
         let season = selected_season;
+        let current = t.seasons.iter().find(|s| s.number == season);
+        let mut episodes = Column::<View<'a>>::new().spacing(8).width(Fill);
+        let mut bar = Row::<View<'a>>::new().spacing(4).align_y(Alignment::Center);
         if tabs.len() > 1 {
-            page = page.push(
-                container(line(
-                    tabs.iter()
-                        .map(|(n, label)| chip(label.clone(), *n == season, msg(b, Message::Season(*n)), look))
-                        .collect(),
-                ))
-                .padding([20, 0])
-                .boxed(),
-            );
+            for (n, label) in &tabs {
+                bar = bar.push(chip(label.clone(), *n == season, msg(b, Message::Season(*n)), look));
+            }
+        } else if let Some(s) = current.filter(|_| season == 0) {
+            bar = bar.push(text(&s.name, ty::S15, look.ink).font(SEMIBOLD).boxed());
         }
-        if let Some(s) = t.seasons.iter().find(|s| s.number == season) {
+        bar = bar.push(space().width(Fill).boxed());
+        if let Some(s) = current.filter(|s| !s.episodes.is_empty()) {
             let ids: Vec<_> = s.episodes.iter().map(|e| e.id).collect();
             let all = s.episodes.iter().all(|e| e.finished);
-            if season == 0 && tabs.len() == 1 {
-                page = page.push((text(&s.name, ty::S15, look.ink).font(SEMIBOLD)).boxed());
-            }
-            page = page.push(
-                (row![
-                    match s.title.as_deref().filter(|title| *title != c.name) {
-                        Some(title) => text(title, ty::SM, look.ink_3).width(Fill).boxed(),
-                        None => space().width(Fill).boxed(),
-                    },
-                    button(if all { "Mark season unwatched" } else { "Mark season watched" }, look)
-                        .plain()
-                        .small()
-                        .on_press(act(b, Action::Watched(ids, !all)))
-                        .boxed()
-                ]
-                .align_y(Alignment::Center))
-                .boxed(),
+            bar = bar.push(
+                button(if all { "Mark season not watched" } else { "Mark season watched" }, look)
+                    .plain()
+                    .small()
+                    .on_press(act(b, Action::Watched(ids, !all)))
+                    .boxed(),
             );
+        }
+        episodes = episodes.push(container(bar).height(32).align_y(Alignment::Center).boxed());
+        if let Some(title) = current.and_then(|s| s.title.as_deref()).filter(|title| *title != c.name) {
+            episodes = episodes.push(text(title, ty::SM, look.ink_3).boxed());
+        }
+        if let Some(s) = current {
             for (i, v) in s.episodes.iter().enumerate() {
-                page = page.push((episode(b, t, v, i, look)).boxed());
+                episodes = episodes.push(episode(b, t, v, i, look));
             }
         }
         if let Some(series) = b.data(&Key::Series(id)).and_then(|d| d.title.as_ref()).and_then(|t| t.series.as_ref()) {
@@ -203,9 +201,16 @@ pub(super) fn title<'a>(b: &'a Browsing, id: i64, look: &Look) -> View<'a> {
                 .iter()
                 .filter(|e| e.season == season && e.video.is_none() && (e.aired || e.air_at.is_some()))
             {
-                page = page.push(ghost(b, series, e, look));
+                episodes = episodes.push(ghost(b, series, e, look));
             }
         }
+        page = page.push(
+            container(
+                row![episodes, container(side).width(300).padding(Padding { top: 40.0, ..Padding::ZERO })].spacing(56),
+            )
+            .padding(Padding { top: 28.0, ..Padding::ZERO })
+            .boxed(),
+        );
     }
     if let Some(s) = b.data(&Key::Similar(id)).and_then(|d| d.title.as_ref()).and_then(|t| t.similar.as_ref()) {
         if !s.also_watched.is_empty() {
@@ -255,28 +260,6 @@ fn initial_season(t: &Title) -> i64 {
         .or_else(|| regular.first().copied())
         .or_else(|| t.seasons.first())
         .map_or(0, |s| s.number)
-}
-fn artwork<'a>(b: &'a Browsing, id: i64, kind: Option<&str>, label: &str, custom: bool, look: &Look) -> View<'a> {
-    let mut buttons = vec![
-        button(format!("Change {label}"), look)
-            .small()
-            .on_press_maybe(
-                (!b.busy).then(|| act(b, Action::Artwork { id, kind: kind.map(str::to_owned), reset: false })),
-            )
-            .boxed(),
-    ];
-    if custom {
-        buttons.push(
-            button(format!("Reset {label}"), look)
-                .plain()
-                .small()
-                .on_press_maybe(
-                    (!b.busy).then(|| act(b, Action::Artwork { id, kind: kind.map(str::to_owned), reset: true })),
-                )
-                .boxed(),
-        );
-    }
-    line(buttons)
 }
 fn episode<'a>(b: &'a Browsing, t: &'a Title, v: &'a Video, order: usize, look: &Look) -> View<'a> {
     let next = t.next_up.as_ref().is_some_and(|n| n.video.id == v.id)
@@ -431,61 +414,188 @@ fn episode<'a>(b: &'a Browsing, t: &'a Title, v: &'a Video, order: usize, look: 
     }
     crate::ui::context_menu::context_menu(iced_widget::Stack::with_children(layers).width(Fill).boxed(), menu, look)
 }
-fn series_panel<'a>(b: &'a Browsing, s: &'a Series, season: i64, look: &Look) -> View<'a> {
-    let monitors = line(
-        [("NONE", "Off"), ("FUTURE", "New episodes"), ("MISSING", "Everything")]
-            .into_iter()
-            .map(|(v, l)| chip(l, s.monitor == v, act(b, Action::UpdateSeries(s.id, json!({"monitor":v}))), look))
-            .collect(),
-    );
-    raised(
-        column![
-            text("Download automatically", ty::S15, look.ink).font(SEMIBOLD),
-            monitors,
-            text(format!("{} of {} in library · {} downloading · {} to find · {} missing · {} not aired yet · {} skipped · {}",s.counts.have,s.counts.total,s.counts.grabbed,s.counts.wanted,s.counts.missing,s.counts.upcoming,s.counts.skipped,s.effective_profile),ty::XS,look.ink_3),
-            line(vec![
-                button("Settings", look)
-                    .small()
-                    .on_press(msg(b, Message::Dialog(Some(Dialog::SeriesSettings(std::sync::Arc::new(s.clone()))))))
-                    .boxed(),
-                button("Look for skipped episodes again", look)
-                    .plain()
-                    .small()
-                    .on_press(act(b, Action::LookAgain(s.id, None, None)))
-                    .boxed(),
-                button("Refresh schedule", look)
-                    .plain()
-                    .small()
-                    .on_press(act(b, Action::RefreshSchedule(s.id)))
-                    .boxed(),
-                button("Search", look)
-                    .small()
-                    .on_press(msg(
-                        b,
-                        Message::Dialog(Some(Dialog::Releases {
-                            series: s.id,
-                            season,
-                            episodes: vec![],
-                            name: s.name.clone()
-                        }))
-                    ))
-                    .boxed(),
-                button("Remove from managed shows", look)
-                    .danger()
-                    .small()
-                    .on_press(confirm(
-                        b,
-                        "Remove show?",
-                        "Existing files will stay in your library.",
-                        Action::RemoveSeries(s.id)
-                    ))
-                    .boxed()
-            ])
-        ]
-        .spacing(12)
-        .boxed(),
+/// What's done to a title less often, behind its ⋯: marking all of it watched, its artwork and its
+/// details.
+#[derive(Debug, Clone, PartialEq)]
+enum TitleChoice {
+    Watched(bool),
+    Artwork { id: i64, kind: Option<&'static str>, label: &'static str, reset: bool },
+    Match,
+    Refresh,
+}
+
+fn title_menu<'a>(b: &'a Browsing, t: &'a Title, done: bool, look: &Look) -> View<'a> {
+    let id = t.card.id;
+    let mut choices = vec![TitleChoice::Watched(!done)];
+    if b.can().edit_metadata {
+        let mut artwork = vec![
+            (id, Some("POSTER"), "thumbnail", t.custom_poster),
+            (id, Some("BACKDROP"), "banner", t.custom_backdrop),
+        ];
+        if let Some(movie) = &t.movie {
+            artwork.push((movie.id, None, "video thumbnail", movie.custom_still));
+        }
+        for (id, kind, label, custom) in artwork {
+            choices.push(TitleChoice::Artwork { id, kind, label, reset: false });
+            if custom {
+                choices.push(TitleChoice::Artwork { id, kind, label, reset: true });
+            }
+        }
+        choices.extend([TitleChoice::Match, TitleChoice::Refresh]);
+    }
+    let trigger = squircle(container(icon(Icon::Ellipsis, 18.0)).center(44), 14.0, look).fill(look.panel).edge();
+    crate::ui::select::menu(
+        trigger.boxed(),
+        choices,
+        |choice| match choice {
+            TitleChoice::Watched(true) => "Mark watched".into(),
+            TitleChoice::Watched(false) => "Mark not watched".into(),
+            TitleChoice::Artwork { label, reset, .. } => format!("{} {label}", if *reset { "Reset" } else { "Change" }),
+            TitleChoice::Match => "Fix match".into(),
+            TitleChoice::Refresh => "Refresh details".into(),
+        },
+        move |choice| match choice {
+            TitleChoice::Watched(watched) => act(b, Action::TitleWatched(id, watched)),
+            TitleChoice::Artwork { id, kind, reset, .. } => {
+                act(b, Action::Artwork { id, kind: kind.map(str::to_owned), reset })
+            },
+            TitleChoice::Match => msg(b, Message::Dialog(Some(Dialog::Match(id)))),
+            TitleChoice::Refresh => act(b, Action::Refresh(id)),
+        },
+        240.0,
         look,
     )
+}
+
+const MONITORS: &[&str] = &["NONE", "FUTURE", "MISSING"];
+
+/// What's in the ⋯ of a show's downloads card.
+#[derive(Debug, Clone, PartialEq)]
+enum SeriesChoice {
+    Schedule,
+    LookAgain,
+    Remove,
+}
+
+fn series_panel<'a>(b: &'a Browsing, s: &'a Series, season: i64, look: &Look) -> View<'a> {
+    let monitor = crate::ui::select::select(
+        Some(s.monitor.as_str()),
+        MONITORS,
+        |m| {
+            match *m {
+                "NONE" => "Off",
+                "FUTURE" => "New episodes",
+                _ => "Everything",
+            }
+            .into()
+        },
+        move |m| act(b, Action::UpdateSeries(s.id, json!({ "monitor": m }))),
+        look,
+    );
+    let c = &s.counts;
+    let status = if c.total == 0 {
+        None
+    } else if c.grabbed > 0 {
+        Some((look.info, format!("{} downloading", c.grabbed)))
+    } else if c.missing > 0 {
+        Some((look.danger, format!("{} missing", c.missing)))
+    } else if c.wanted > 0 {
+        Some((look.warn, format!("{} to find", c.wanted)))
+    } else if c.have >= c.total {
+        Some((look.ok, format!("All {} episodes are in the library", c.total)))
+    } else {
+        Some((look.ink_3, format!("{} of {} in the library", c.have, c.total)))
+    };
+    let more = [
+        ((c.grabbed > 0 || c.missing > 0 || c.wanted > 0) && c.have < c.total)
+            .then(|| format!("{} of {} in the library", c.have, c.total)),
+        (c.grabbed > 0 && c.wanted > 0).then(|| format!("{} to find", c.wanted)),
+        (c.upcoming > 0).then(|| format!("{} not aired yet", c.upcoming)),
+        (c.skipped > 0).then(|| format!("{} skipped", c.skipped)),
+    ]
+    .into_iter()
+    .flatten()
+    .collect::<Vec<_>>();
+    let mut card = column![
+        row![text("Downloads", ty::SM, look.ink).font(MEDIUM).width(Fill), container(monitor).width(160)]
+            .align_y(Alignment::Center)
+    ]
+    .spacing(12);
+    if !s.managed && s.monitor != "NONE" {
+        card = card.push(text(format!("{} isn't managed; can't import.", s.library), ty::XS, look.warn).boxed());
+    }
+    if let Some((tone, words)) = status {
+        let mut lines = column![
+            row![squircle(space().width(6).height(6), 3.0, look).fill(tone), text(words, ty::S13, look.ink_2)]
+                .spacing(10)
+                .align_y(Alignment::Center)
+        ]
+        .spacing(4);
+        if !more.is_empty() {
+            lines = lines.push(
+                container(text(more.join(", "), ty::XS, look.ink_3))
+                    .padding(Padding { left: 16.0, ..Padding::ZERO })
+                    .boxed(),
+            );
+        }
+        card = card.push(lines.boxed());
+    }
+    let mut choices = vec![SeriesChoice::Schedule];
+    if c.skipped > 0 {
+        choices.push(SeriesChoice::LookAgain);
+    }
+    choices.push(SeriesChoice::Remove);
+    let more = crate::ui::select::menu(
+        container(icon(Icon::Ellipsis, 16.0)).center(32).boxed(),
+        choices,
+        |choice| {
+            match choice {
+                SeriesChoice::Schedule => "Refresh the schedule",
+                SeriesChoice::LookAgain => "Look for skipped episodes again",
+                SeriesChoice::Remove => "Remove from managed shows",
+            }
+            .into()
+        },
+        move |choice| match choice {
+            SeriesChoice::Schedule => act(b, Action::RefreshSchedule(s.id)),
+            SeriesChoice::LookAgain => act(b, Action::LookAgain(s.id, None, None)),
+            SeriesChoice::Remove => {
+                confirm(b, "Remove show?", "Existing files will stay in your library.", Action::RemoveSeries(s.id))
+            },
+        },
+        256.0,
+        look,
+    );
+    card = card.push(divider(look)).push(
+        row![
+            truncate(s.effective_profile.clone(), ty::S13, look.ink_3).width(Fill),
+            icon_button(
+                Icon::Search,
+                "Search for releases",
+                Some(msg(
+                    b,
+                    Message::Dialog(Some(Dialog::Releases {
+                        series: s.id,
+                        season,
+                        episodes: vec![],
+                        name: s.name.clone()
+                    })),
+                )),
+                look,
+            ),
+            icon_button(
+                Icon::Settings2,
+                "Settings",
+                Some(msg(b, Message::Dialog(Some(Dialog::SeriesSettings(std::sync::Arc::new(s.clone())))))),
+                look,
+            ),
+            more
+        ]
+        .spacing(2)
+        .align_y(Alignment::Center)
+        .boxed(),
+    );
+    raised(card.boxed(), look)
 }
 
 fn ghost<'a>(b: &'a Browsing, series: &'a Series, e: &'a SeriesEpisode, look: &Look) -> View<'a> {

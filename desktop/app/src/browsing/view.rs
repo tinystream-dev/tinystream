@@ -328,13 +328,29 @@ pub fn view<'a>(app: &'a App, route: &'a Route, look: &Look) -> Option<View<'a>>
         && let Some(t) = b.data(&Key::Title(*id as i64)).and_then(|d| d.title.as_ref())
         && let Some(path) = &t.card.backdrop
     {
+        // The art sits behind the right of the page, faded out before it reaches the title.
         let canvas = look.canvas;
         let mut layers = vec![
-            container(art(b, Some(path), 0.0, look)).width(Fill).height(544).boxed(),
+            row![
+                space().width(iced_core::Length::FillPortion(1)).boxed(),
+                iced_widget::Stack::with_children([
+                    art(b, Some(path), 0.0, look),
+                    crate::ui::squircle::gradient(
+                        0.0,
+                        std::f32::consts::FRAC_PI_2,
+                        vec![(0.0, canvas), (0.5, canvas.scale_alpha(0.0))],
+                        look,
+                    ),
+                ])
+                .width(iced_core::Length::FillPortion(3))
+                .boxed()
+            ]
+            .height(544)
+            .boxed(),
             container(crate::ui::squircle::gradient(
                 0.0,
                 std::f32::consts::PI,
-                vec![(0.0, canvas.scale_alpha(0.55)), (0.2, canvas.scale_alpha(0.55)), (1.0, canvas)],
+                vec![(0.0, canvas.scale_alpha(0.6)), (0.3, canvas.scale_alpha(0.6)), (1.0, canvas)],
                 look,
             ))
             .height(544)
