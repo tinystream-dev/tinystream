@@ -331,21 +331,15 @@ pub fn view<'a>(app: &'a App, route: &'a Route, look: &Look) -> Option<View<'a>>
         // The art sits behind the right of the page, faded out before it reaches the title.
         let canvas = look.canvas;
         let mut layers = vec![
-            row![
-                space().width(iced_core::Length::FillPortion(1)).boxed(),
-                iced_widget::Stack::with_children([
-                    art(b, Some(path), 0.0, look),
-                    crate::ui::squircle::gradient(
-                        0.0,
-                        std::f32::consts::FRAC_PI_2,
-                        vec![(0.0, canvas), (0.5, canvas.scale_alpha(0.0))],
-                        look,
-                    ),
-                ])
-                .width(iced_core::Length::FillPortion(3))
-                .boxed()
-            ]
+            container(art(b, Some(path), 0.0, look)).width(Fill).height(544).boxed(),
+            container(crate::ui::squircle::gradient(
+                0.0,
+                std::f32::consts::FRAC_PI_2,
+                vec![(0.0, canvas), (0.25, canvas), (0.62, canvas.scale_alpha(0.0))],
+                look,
+            ))
             .height(544)
+            .width(Fill)
             .boxed(),
             container(crate::ui::squircle::gradient(
                 0.0,
