@@ -2,6 +2,7 @@
 
 //! The web's select: a focusable field and a material menu, with native-style keyboard navigation.
 
+use std::borrow::Cow;
 use std::time::{Duration, Instant};
 
 use iced_core::layout::{self, Layout};
@@ -40,7 +41,7 @@ pub fn select<'a, Message: Clone + 'a, T: Clone + PartialEq + 'a>(
     .padding([0, 12])
     .boxed();
     Select {
-        options,
+        options: Cow::Borrowed(options),
         labels,
         chosen,
         on_change: Box::new(on_change),
@@ -61,7 +62,7 @@ pub fn icon_menu<'a, Message: Clone + 'a, T: Clone + PartialEq + 'a>(
     look: &Look,
 ) -> Element<'a, Message> {
     Select {
-        options,
+        options: Cow::Borrowed(options),
         labels: options.iter().map(label).collect(),
         chosen: selected.as_ref().and_then(|value| options.iter().position(|o| o == value)),
         on_change: Box::new(on_change),
@@ -76,15 +77,16 @@ pub fn icon_menu<'a, Message: Clone + 'a, T: Clone + PartialEq + 'a>(
 /// A menu opened from `content` (a labelled button, say), with nothing in it chosen.
 pub fn menu<'a, Message: Clone + 'a, T: Clone + PartialEq + 'a>(
     content: Element<'a, Message>,
-    options: &'a [T],
+    options: impl Into<Cow<'a, [T]>>,
     label: impl Fn(&T) -> String,
     on_change: impl Fn(T) -> Message + 'a,
     width: f32,
     look: &Look,
 ) -> Element<'a, Message> {
+    let options = options.into();
     Select {
-        options,
         labels: options.iter().map(label).collect(),
+        options,
         chosen: None,
         on_change: Box::new(on_change),
         content,
@@ -95,8 +97,8 @@ pub fn menu<'a, Message: Clone + 'a, T: Clone + PartialEq + 'a>(
     .boxed()
 }
 
-struct Select<'a, T, Message> {
-    options: &'a [T],
+struct Select<'a, T: Clone, Message> {
+    options: Cow<'a, [T]>,
     labels: Vec<String>,
     chosen: Option<usize>,
     on_change: Box<dyn Fn(T) -> Message + 'a>,
@@ -172,7 +174,7 @@ impl State {
     }
 }
 
-impl<T, Message> iced_core::widget::Meta for Select<'_, T, Message> {}
+impl<T: Clone, Message> iced_core::widget::Meta for Select<'_, T, Message> {}
 
 impl<T: Clone, Message: Clone> Widget<Message, Theme, Renderer> for Select<'_, T, Message> {
     fn tag(&self) -> tree::Tag {
@@ -322,7 +324,7 @@ impl<T: Clone, Message: Clone> Widget<Message, Theme, Renderer> for Select<'_, T
             return vec![];
         }
         let l = self.look;
-        let options = self.options;
+        let options = &*self.options;
         let change = &self.on_change;
         let choices = self.labels.iter().enumerate().map(|(i, label)| {
             let active = i == state.active;
