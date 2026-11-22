@@ -464,16 +464,16 @@ pub fn chip<'a, Message: Clone + 'a>(
 }
 
 /// `<Segmented>`: mutually exclusive choices, the chosen one lifted on a thumb that slides over.
-pub fn segmented<'a, Message: Clone + 'a, T: Copy + PartialEq + 'a>(
+pub fn segmented<'a, Message: Clone + 'a, T: Copy + PartialEq + 'a, L: AsRef<str>>(
     value: T,
-    options: &[(T, &'a str)],
+    options: &[(T, L)],
     message: impl Fn(T) -> Message,
     look: &Look,
 ) -> Element<'a, Message> {
     let l = *look;
-    let choices = options.iter().map(|&(option, label)| {
-        let on = option == value;
-        let content = container(inherit(label, type_::S13)).center_y(32).padding([0, 12]);
+    let choices = options.iter().map(|(option, label)| {
+        let (option, on) = (*option, *option == value);
+        let content = container(inherit(label.as_ref().to_owned(), type_::S13)).center_y(32).padding([0, 12]);
         pressable(content, 9.0, &l, move |status| Appearance {
             paint: Paint::NONE,
             ink: if on || matches!(status, Status::Hovered | Status::Pressed) { l.ink } else { l.ink_2 },
@@ -481,7 +481,7 @@ pub fn segmented<'a, Message: Clone + 'a, T: Copy + PartialEq + 'a>(
         .on_press(message(option))
         .boxed()
     });
-    let on = options.iter().position(|&(option, _)| option == value);
+    let on = options.iter().position(|(option, _)| *option == value);
     let row = Row::with_children(choices);
     squircle(Segments { row, on, look: l }, 11.0, look).fill(look.raised).edge().padding(2).boxed()
 }
