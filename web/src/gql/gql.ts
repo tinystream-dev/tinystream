@@ -205,6 +205,7 @@ type Documents = {
     "\n  mutation SetWatched($videoIds: [Int!]!, $watched: Boolean!) {\n    setWatched(videoIds: $videoIds, watched: $watched) {\n      id\n    }\n  }\n": typeof types.SetWatchedDocument,
     "\n  mutation SetTitleWatched($id: Int!, $watched: Boolean!) {\n    setTitleWatched(id: $id, watched: $watched) {\n      id\n    }\n  }\n": typeof types.SetTitleWatchedDocument,
     "\n  mutation RefreshTitle($id: Int!) {\n    refreshTitle(id: $id) {\n      id\n    }\n  }\n": typeof types.RefreshTitleDocument,
+    "\n  mutation StartTitleRoom($input: NewRoom!) {\n    startRoom(input: $input) {\n      code\n    }\n  }\n": typeof types.StartTitleRoomDocument,
     "\n  mutation MatchTitle($id: Int!, $provider: Provider!, $providerId: String!) {\n    matchTitle(id: $id, provider: $provider, providerId: $providerId) {\n      id\n    }\n  }\n": typeof types.MatchTitleDocument,
     "\n  query Wanted {\n    wanted {\n      seriesId\n      title {\n        id\n      }\n      show\n      season\n      episode\n      name\n      airAt\n      aired\n      state\n      attempts\n      searchedAt\n      nextSearch\n    }\n  }\n": typeof types.WantedDocument,
 };
@@ -399,6 +400,7 @@ const documents: Documents = {
     "\n  mutation SetWatched($videoIds: [Int!]!, $watched: Boolean!) {\n    setWatched(videoIds: $videoIds, watched: $watched) {\n      id\n    }\n  }\n": types.SetWatchedDocument,
     "\n  mutation SetTitleWatched($id: Int!, $watched: Boolean!) {\n    setTitleWatched(id: $id, watched: $watched) {\n      id\n    }\n  }\n": types.SetTitleWatchedDocument,
     "\n  mutation RefreshTitle($id: Int!) {\n    refreshTitle(id: $id) {\n      id\n    }\n  }\n": types.RefreshTitleDocument,
+    "\n  mutation StartTitleRoom($input: NewRoom!) {\n    startRoom(input: $input) {\n      code\n    }\n  }\n": types.StartTitleRoomDocument,
     "\n  mutation MatchTitle($id: Int!, $provider: Provider!, $providerId: String!) {\n    matchTitle(id: $id, provider: $provider, providerId: $providerId) {\n      id\n    }\n  }\n": types.MatchTitleDocument,
     "\n  query Wanted {\n    wanted {\n      seriesId\n      title {\n        id\n      }\n      show\n      season\n      episode\n      name\n      airAt\n      aired\n      state\n      attempts\n      searchedAt\n      nextSearch\n    }\n  }\n": types.WantedDocument,
 };
@@ -1163,6 +1165,10 @@ export function graphql(source: "\n  mutation SetTitleWatched($id: Int!, $watche
  * The graphql function is used to parse GraphQL queries into a document that can be used by GraphQL clients.
  */
 export function graphql(source: "\n  mutation RefreshTitle($id: Int!) {\n    refreshTitle(id: $id) {\n      id\n    }\n  }\n"): typeof import('./graphql').RefreshTitleDocument;
+/**
+ * The graphql function is used to parse GraphQL queries into a document that can be used by GraphQL clients.
+ */
+export function graphql(source: "\n  mutation StartTitleRoom($input: NewRoom!) {\n    startRoom(input: $input) {\n      code\n    }\n  }\n"): typeof import('./graphql').StartTitleRoomDocument;
 /**
  * The graphql function is used to parse GraphQL queries into a document that can be used by GraphQL clients.
  */

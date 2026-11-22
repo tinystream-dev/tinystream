@@ -8,7 +8,7 @@ import { Squircle } from './Squircle'
 
 type ButtonProps = ComponentPropsWithoutRef<'button'> & {
   variant?: 'primary' | 'quiet' | 'plain' | 'danger'
-  size?: 'sm' | 'md' | 'lg'
+  size?: 'sm' | 'md' | 'lg' | 'square'
   radius?: number
 }
 
@@ -23,13 +23,14 @@ const sizes = {
   sm: 'h-7 px-2.5 text-[13px] gap-1.5',
   md: 'h-8 px-3 text-sm gap-2',
   lg: 'h-11 px-5 text-[15px] gap-2.5 font-medium',
+  square: 'size-11',
 }
 
 export function Button({ variant = 'quiet', size = 'md', radius, className = '', ...rest }: ButtonProps) {
   return (
     <Squircle
       as="button"
-      radius={radius ?? (size === 'lg' ? 14 : 9)}
+      radius={radius ?? (size === 'lg' || size === 'square' ? 14 : 9)}
       edge={variant === 'quiet'}
       className={`inline-flex shrink-0 items-center justify-center whitespace-nowrap transition-colors duration-100 select-none disabled:pointer-events-none disabled:opacity-40 ${variants[variant]} ${sizes[size]} ${className}`}
       {...rest}

@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Link, createFileRoute } from '@tanstack/react-router'
-import { Check, CheckCheck, CircleCheck, Play, RefreshCw, RotateCcw, Search, Undo2, Wand2 } from 'lucide-react'
-import { type CSSProperties, useEffect, useRef, useState } from 'react'
+import { Link, createFileRoute, useNavigate } from '@tanstack/react-router'
+import { Check, CheckCheck, CircleCheck, Ellipsis, ImageUp, Play, RefreshCw, RotateCcw, Search, Undo2, Users, Wand2 } from 'lucide-react'
+import { type CSSProperties, Fragment, useEffect, useRef, useState } from 'react'
 import { remaining, runtime } from '@tinystream/shared/format'
 import { DiscoverShelf } from '../components/DiscoverCard'
 import { ReleaseDialog, StateBadge, useLookForAgain } from '../components/downloads'
@@ -11,13 +11,13 @@ import { NextEpisode, SeriesPanel, useItemSeries } from '../components/SeriesPan
 import { toast, toastError } from '../components/feedback'
 import { Empty, Page, Section } from '../components/Page'
 import { Img } from '../components/Img'
-import { ArtworkEditor } from '../components/ArtworkEditor'
+import { ArtworkEditor, useArtwork } from '../components/ArtworkEditor'
 import { Overview } from '../components/Overview'
 import { Poster, morphFrom } from '../components/Poster'
 import { Row } from '../components/Row'
 import { TitleSkeleton } from '../components/Skeleton'
 import { Squircle } from '../components/Squircle'
-import { Button, IconButton, Input, Panel, Spinner, Tip } from '../components/ui'
+import { Button, IconButton, Input, MenuItem, Panel, Popover, Spinner, Tip } from '../components/ui'
 import { graphql } from '../gql'
 import { type Download, type Episode, type Item, type Provider, type SeriesEpisode, request } from '../lib/api'
 import { airs, duration, shortDate, speed, useFeatures } from '../lib/downloads'
@@ -97,6 +97,14 @@ const RefreshTitle = graphql(`
   mutation RefreshTitle($id: Int!) {
     refreshTitle(id: $id) {
       id
+    }
+  }
+`)
+
+const StartTitleRoom = graphql(`
+  mutation StartTitleRoom($input: NewRoom!) {
+    startRoom(input: $input) {
+      code
     }
   }
 `)
@@ -191,6 +199,15 @@ function TitlePage() {
     onSettled: settle,
   })
   const refresh = useMutation({ mutationFn: () => request(RefreshTitle, { id: Number(id) }), onError: toastError })
+  const navigate = useNavigate()
+  const together = useMutation({
+    mutationFn: (videoId: number) => {
+      const resume = item?.nextUp?.video.id === videoId && item.nextUp.resuming ? item.nextUp.video.position : null
+      return request(StartTitleRoom, { input: { videoId, position: resume ?? 0, paused: true } })
+    },
+    onSuccess: ({ startRoom }) => void navigate({ to: '/together/$code', params: { code: startRoom.code } }),
+    onError: toastError,
+  })
   useTitle(item?.name)
   useEffect(() => {
     if (item) remember({ id: item.id, title: item.name, poster: item.poster, kind: item.kind === 'SHOW' ? 'show' : 'movie' })
@@ -242,23 +259,85 @@ function TitlePage() {
     item.rating ? `${item.rating.toFixed(1)} rating` : null,
   ].filter(Boolean)
 
+  const toggleWatched = () => {
+    // Remember exactly what was watched, so undo can put it back.
+    const was = all.filter((e) => e.finished).map((e) => e.id)
+    const target = !allWatched
+    watchAll.mutate(target, {
+      onSuccess: () =>
+        toast({
+          title: target ? `Marked ${item.name} watched` : `Marked ${item.name} not watched`,
+          image: item.poster,
+          action: {
+            label: 'Undo',
+            run: async () => {
+              try {
+                await request(SetTitleWatched, { id: item.id, watched: false })
+                if (was.length) await request(SetWatched, { videoIds: was, watched: true })
+              } catch (e) {
+                toastError(e)
+              }
+              settle()
+            },
+          },
+        }),
+    })
+  }
+  const seasonDone = regular.length > 0 && regular.every((e) => e.finished)
+  const toggleSeason = () => {
+    const ids = regular.filter((e) => e.finished === seasonDone).map((e) => e.id)
+    setEpisodes.mutate(
+      { ids, watched: !seasonDone },
+      {
+        onSuccess: () =>
+          toast({
+            title: `Marked ${current?.name ?? 'the season'} ${seasonDone ? 'not watched' : 'watched'}`,
+            action: { label: 'Undo', run: () => setEpisodes.mutate({ ids, watched: seasonDone }) },
+          }),
+      },
+    )
+  }
+  const togetherVideo = next?.video.id ?? item.movie?.id
+  const side = (
+    <>
+      {item.overview && (
+        item.kind === 'SHOW'
+          ? <Overview text={item.overview} style={refreshing(3)} lines={7} long={280} className="" />
+          : <Overview text={item.overview} style={refreshing(3)} className="max-w-[68ch]" />
+      )}
+      {series?.next && <NextEpisode series={series} />}
+      {can?.manageShows && features && item.kind === 'SHOW' && series !== undefined && (
+        <SeriesPanel item={item} series={series && 'counts' in series ? series : null} season={season} />
+      )}
+      {can?.editMetadata && item.matchState === 'UNMATCHED' && (
+        <p className="text-sm text-ink-3">
+          No {item.libraryProvider === 'TMDB' ? 'TMDB' : 'AniList'} match was found for this folder.{' '}
+          <button className="text-ink-2 underline underline-offset-4 hover:text-ink" onClick={() => setMatching(true)}>
+            Pick one
+          </button>
+        </p>
+      )}
+    </>
+  )
+
   return (
     <div className="relative" data-fetching={fetching || undefined}>
-      {/* The backdrop bleeds behind the page and fades into it. */}
+      {/* The backdrop sits behind the right of the page, fading out before the title and into the page. */}
       {item.backdrop && !backdropBroken && (
         <div className="pointer-events-none absolute inset-x-0 top-0 h-[34rem] overflow-hidden">
-          <div className="refreshable size-full" style={refreshing(0, 28, 1.06)}>
-            <div className="parallax size-full">
-              <img
-                key={item.backdrop}
-                src={item.backdrop}
-                alt=""
-                onError={() => setBackdropBroken(true)}
-                className="size-full animate-[fade_900ms_ease-out] object-cover opacity-45 [mask-image:linear-gradient(to_bottom,black_20%,transparent)]"
-              />
+          <div className="absolute inset-y-0 right-0 w-full md:w-3/4">
+            <div className="refreshable size-full" style={refreshing(0, 28, 1.06)}>
+              <div className="parallax size-full">
+                <img
+                  key={item.backdrop}
+                  src={item.backdrop}
+                  alt=""
+                  onError={() => setBackdropBroken(true)}
+                  className="size-full animate-[fade_900ms_ease-out] object-cover opacity-40 [mask-composite:intersect] [mask-image:linear-gradient(to_right,transparent,black_50%),linear-gradient(to_bottom,black_30%,transparent)]"
+                />
+              </div>
             </div>
           </div>
-          <div className="absolute inset-0 bg-linear-to-r from-canvas/90 via-canvas/40 to-transparent" />
         </div>
       )}
       <div
@@ -273,9 +352,9 @@ function TitlePage() {
 
       <div className="relative">
       <Page>
-        <div className="relative flex flex-col gap-8 pt-6 sm:flex-row sm:items-end md:pt-20">
-          <div className="lift w-40 shrink-0 sm:w-52">
-            <Squircle radius={18} edge className="aspect-[2/3] bg-panel" style={{ viewTransitionName: 'poster' }}>
+        <div className="relative flex flex-col gap-7 pt-6 sm:flex-row sm:items-end md:pt-16">
+          <div className="lift w-36 shrink-0 sm:w-38">
+            <Squircle radius={16} edge className="aspect-[2/3] bg-panel" style={{ viewTransitionName: 'poster' }}>
               <div className="refreshable size-full" style={refreshing(0, 16, 1.08)}>
                 {item.poster && <img src={item.poster} alt="" className="size-full object-cover" />}
               </div>
@@ -283,206 +362,162 @@ function TitlePage() {
             </Squircle>
           </div>
           <div className="min-w-0 flex-1 pb-1">
-            <h1 style={refreshing(1, 14)} className="refreshable text-[34px] leading-[1.1] font-semibold tracking-[-0.025em] text-balance md:text-[44px]">
+            <h1 style={refreshing(1, 14)} className="refreshable max-w-[15ch] text-[34px] leading-[1.06] font-semibold tracking-[-0.03em] text-balance md:text-[42px]">
               <Resolve key={item.id} text={item.name} hold={fetching} />
             </h1>
-            <p style={refreshing(2)} className="refreshable mt-2.5 flex flex-wrap gap-x-4 gap-y-1 text-sm text-ink-2">
+            <p style={refreshing(2)} className="refreshable mt-3 flex flex-wrap gap-x-4 gap-y-1 text-sm text-ink-2">
               {meta.map((m) => (
                 <span key={String(m)}>{m}</span>
               ))}
               {item.genres.length > 0 && <span className="text-ink-3">{item.genres.slice(0, 4).join(', ')}</span>}
             </p>
-            {series?.next && <NextEpisode series={series} />}
-            <div className="mt-6 flex flex-wrap items-center gap-2">
-              {next && (
-                <Link to="/watch/$id" params={{ id: String(next.video.id) }}>
-                  <Button variant="primary" size="lg">
-                    <Play className="size-4.5 fill-current" />
-                    {next.resuming ? 'Resume' : allWatched ? 'Watch again' : 'Play'}
-                    {item.kind === 'SHOW' && next.video.label && <span className="font-normal opacity-60">{next.video.label}</span>}
-                    {next.resuming && (
-                      <span className="font-normal opacity-60">{remaining(next.video.position, next.video.duration)}</span>
-                    )}
-                  </Button>
-                </Link>
-              )}
-              <Button
-                size="lg"
-                onClick={() => {
-                  // Remember exactly what was watched, so undo can put it back.
-                  const was = all.filter((e) => e.finished).map((e) => e.id)
-                  const target = !allWatched
-                  watchAll.mutate(target, {
-                    onSuccess: () =>
-                      toast({
-                        title: target ? `Marked ${item.name} watched` : `Marked ${item.name} not watched`,
-                        image: item.poster,
-                        action: {
-                          label: 'Undo',
-                          run: async () => {
-                            try {
-                              await request(SetTitleWatched, { id: item.id, watched: false })
-                              if (was.length) await request(SetWatched, { videoIds: was, watched: true })
-                            } catch (e) {
-                              toastError(e)
-                            }
-                            settle()
-                          },
-                        },
-                      }),
-                  })
-                }}
-              >
-                {allWatched ? <CircleCheck className="size-4.5" /> : <Check className="size-4.5" />}
-                {allWatched ? 'Watched' : 'Mark watched'}
+          </div>
+        </div>
+        <div className="mt-7 flex flex-wrap items-center gap-2">
+          {next && (
+            <Link to="/watch/$id" params={{ id: String(next.video.id) }}>
+              <Button variant="primary" size="lg">
+                <Play className="size-4.5 fill-current" />
+                {next.resuming ? 'Resume' : allWatched ? 'Watch again' : 'Play'}
+                {item.kind === 'SHOW' && next.video.label && <span className="font-normal opacity-60">{next.video.label}</span>}
+                {next.resuming && (
+                  <span className="font-normal opacity-60">{remaining(next.video.position, next.video.duration)}</span>
+                )}
               </Button>
-              {can?.editMetadata && (
+            </Link>
+          )}
+          {can?.watchTogether && togetherVideo !== undefined && (
+            <Button size="lg" onClick={() => together.mutate(togetherVideo)} disabled={together.isPending}>
+              <Users className="size-4.5" /> Watch together
+            </Button>
+          )}
+          <TitleMenu
+            item={item}
+            watched={allWatched}
+            canEdit={!!can?.editMetadata}
+            onWatched={toggleWatched}
+            onMatch={() => setMatching(true)}
+            onRefresh={() => refresh.mutate()}
+          />
+        </div>
+
+        {item.kind === 'SHOW' ? (
+          <div className="mt-12 grid gap-x-14 gap-y-10 lg:grid-cols-[minmax(0,1fr)_18.75rem]">
+            <div className="min-w-0">
+              <div style={refreshing(4, 6)} className="refreshable mb-5 flex flex-wrap items-center gap-1">
+                {seasonTabs.length > 1 &&
+                  seasonTabs.map((s) => {
+                    const done = s.done && !s.upcoming
+                    return (
+                      <Squircle
+                        key={s.number}
+                        as="button"
+                        radius={9}
+                        onClick={() => setSeason(s.number)}
+                        className={`flex h-8 items-center gap-1.5 px-3 text-sm transition-colors ${season === s.number ? 'bg-press text-ink' : 'text-ink-2 hover:bg-hover hover:text-ink'}`}
+                      >
+                        {s.name}
+                        {done && <Check className="size-3.5 text-ink-3" />}
+                        {s.upcoming > 0 && (
+                          <Tip
+                            label={`${s.upcoming} episode${s.upcoming === 1 ? '' : 's'} yet to air`}
+                            className="size-1.5 rounded-full bg-warn"
+                          />
+                        )}
+                      </Squircle>
+                    )
+                  })}
+                {season === 0 && seasonTabs.length === 1 && (
+                  <h2 className="text-[15px] font-semibold">{current?.name ?? 'Specials'}</h2>
+                )}
+                {regular.length > 0 && (
+                  <button className="ml-auto h-8 px-3 text-[13px] text-ink-3 transition-colors hover:text-ink" onClick={toggleSeason}>
+                    {seasonDone ? 'Mark season not watched' : 'Mark season watched'}
+                  </button>
+                )}
+              </div>
+              {current?.title && current.title !== item.name && (
+                <p style={refreshing(4)} className="refreshable mb-4 text-sm text-ink-3">{current.title}</p>
+              )}
+              <div className="-mx-3 space-y-0.5">
+                {[
+                  ...regular.map((e, i, list) => ({ n: e.episode ?? Number.MAX_SAFE_INTEGER, row: (
+                    <EpisodeRow
+                      key={e.id}
+                      e={e}
+                      canEditArtwork={!!can?.editMetadata}
+                      order={5 + i}
+                      next={!allWatched && next?.video.id === e.id}
+                      scrollTo={!allWatched && next?.video.id === e.id && i > 4}
+                      onWatched={(w) => setEpisodes.mutate({ ids: [e.id], watched: w })}
+                      onWatchedUpTo={
+                        list.slice(0, i).some((x) => !x.finished) || !e.finished
+                          ? () => {
+                              const ids = list.slice(0, i + 1).filter((x) => !x.finished).map((x) => x.id)
+                              setEpisodes.mutate(
+                                { ids, watched: true },
+                                {
+                                  onSuccess: () =>
+                                    toast({
+                                      title: `Marked ${ids.length} episode${ids.length === 1 ? '' : 's'} watched`,
+                                      action: { label: 'Undo', run: () => setEpisodes.mutate({ ids, watched: false }) },
+                                    }),
+                                },
+                              )
+                            }
+                          : undefined
+                      }
+                      onUnwatchedFrom={
+                        watchedFrom(e).length > 0
+                          ? () => {
+                              const ids = watchedFrom(e)
+                              setEpisodes.mutate(
+                                { ids, watched: false },
+                                {
+                                  onSuccess: () =>
+                                    toast({
+                                      title: `Marked ${ids.length} episode${ids.length === 1 ? '' : 's'} not watched`,
+                                      action: { label: 'Undo', run: () => setEpisodes.mutate({ ids, watched: true }) },
+                                    }),
+                                },
+                              )
+                            }
+                          : undefined
+                      }
+                    />
+                  ) })),
+                  ...ghosts
+                    .filter((g) => !current?.episodes.some((e) => e.episode === g.episode))
+                    .map((g) => ({ n: g.episode, row: (
+                      <GhostRow
+                        key={`g${g.episode}`}
+                        e={g}
+                        admin={!!can?.manageShows}
+                        download={downloads?.find((d) => d.state === 'DOWNLOADING' && d.seriesId === series?.id && d.episodes.some((x) => x.season === g.season && x.episode === g.episode))}
+                        onSearch={() => setSearchEpisode(g)}
+                        onLookAgain={() => series && lookAgain.mutate({ seriesId: series.id, season: g.season, episode: g.episode })}
+                      />
+                    ) })),
+                ]
+                  .sort((a, b) => a.n - b.n)
+                  .map((x) => x.row)}
+              </div>
+              {extras.length > 0 && (
                 <>
-                  <IconButton label="Fix match" className="size-11" onClick={() => setMatching(true)}>
-                    <Wand2 className="size-4.5" />
-                  </IconButton>
-                  <IconButton
-                    label="Refresh details"
-                    className="size-11"
-                    onClick={() => refresh.mutate()}
-                    disabled={refresh.isPending}
-                  >
-                    <RefreshCw className={`size-4.5 ${refresh.isPending || fetching ? 'animate-spin' : ''}`} />
-                  </IconButton>
+                  <h2 className="mt-8 mb-4 text-[15px] font-semibold">Extras</h2>
+                  <div className="-mx-3 space-y-0.5">
+                    {extras.map((e, i) => (
+                      <EpisodeRow key={e.id} e={e} order={5 + regular.length + i} next={next?.video.id === e.id}
+                        canEditArtwork={!!can?.editMetadata} scrollTo={false} onWatched={(w) => setEpisodes.mutate({ ids: [e.id], watched: w })} />
+                    ))}
+                  </div>
                 </>
               )}
             </div>
+            <aside className="order-first space-y-7 lg:order-none lg:pt-13">{side}</aside>
           </div>
-        </div>
-
-        {can?.editMetadata && (
-          <div className="mt-5 flex flex-wrap gap-3">
-            <ArtworkEditor target={{ titleId: item.id, kind: 'POSTER' }} custom={item.customPoster} label="thumbnail" />
-            <ArtworkEditor target={{ titleId: item.id, kind: 'BACKDROP' }} custom={item.customBackdrop} label="banner" />
-            {item.movie && <ArtworkEditor target={{ videoId: item.movie.id }} custom={item.movie.customStill} label="video thumbnail" />}
-          </div>
-        )}
-        {item.overview && <Overview text={item.overview} style={refreshing(3)} />}
-        {can?.manageShows && features && item.kind === 'SHOW' && series !== undefined && (
-          <SeriesPanel item={item} series={series && 'counts' in series ? series : null} season={season} />
-        )}
-        {can?.editMetadata && item.matchState === 'UNMATCHED' && (
-          <p className="mt-4 text-sm text-ink-3">
-            No {item.libraryProvider === 'TMDB' ? 'TMDB' : 'AniList'} match was found for this folder.{' '}
-            <button className="text-ink-2 underline underline-offset-4 hover:text-ink" onClick={() => setMatching(true)}>
-              Pick one
-            </button>
-          </p>
-        )}
-
-        {item.kind === 'SHOW' && (
-          <div className="mt-12">
-            {seasonTabs.length > 1 && (
-              <div style={refreshing(4, 6)} className="refreshable mb-5 flex flex-wrap gap-1">
-                {seasonTabs.map((s) => {
-                  const done = s.done && !s.upcoming
-                  return (
-                    <Squircle
-                      key={s.number}
-                      as="button"
-                      radius={9}
-                      onClick={() => setSeason(s.number)}
-                      className={`flex h-8 items-center gap-1.5 px-3 text-sm transition-colors ${season === s.number ? 'bg-press text-ink' : 'text-ink-2 hover:bg-hover hover:text-ink'}`}
-                    >
-                      {s.name}
-                      {done && <Check className="size-3.5 text-ink-3" />}
-                      {s.upcoming > 0 && (
-                        <Tip
-                          label={`${s.upcoming} episode${s.upcoming === 1 ? '' : 's'} yet to air`}
-                          className="size-1.5 rounded-full bg-warn"
-                        />
-                      )}
-                    </Squircle>
-                  )
-                })}
-              </div>
-            )}
-            {season === 0 && seasonTabs.length === 1 && (
-              <h2 className="mb-4 text-[15px] font-semibold">{current?.name ?? 'Specials'}</h2>
-            )}
-            {current?.title && current.title !== item.name && (
-              <p style={refreshing(4)} className="refreshable mb-4 text-sm text-ink-3">{current.title}</p>
-            )}
-            <div className="-mx-3 space-y-0.5">
-              {[
-                ...regular.map((e, i, list) => ({ n: e.episode ?? Number.MAX_SAFE_INTEGER, row: (
-                  <EpisodeRow
-                    key={e.id}
-                    e={e}
-                    canEditArtwork={!!can?.editMetadata}
-                    order={5 + i}
-                    next={!allWatched && next?.video.id === e.id}
-                    scrollTo={!allWatched && next?.video.id === e.id && i > 4}
-                    onWatched={(w) => setEpisodes.mutate({ ids: [e.id], watched: w })}
-                    onWatchedUpTo={
-                      list.slice(0, i).some((x) => !x.finished) || !e.finished
-                        ? () => {
-                            const ids = list.slice(0, i + 1).filter((x) => !x.finished).map((x) => x.id)
-                            setEpisodes.mutate(
-                              { ids, watched: true },
-                              {
-                                onSuccess: () =>
-                                  toast({
-                                    title: `Marked ${ids.length} episode${ids.length === 1 ? '' : 's'} watched`,
-                                    action: { label: 'Undo', run: () => setEpisodes.mutate({ ids, watched: false }) },
-                                  }),
-                              },
-                            )
-                          }
-                        : undefined
-                    }
-                    onUnwatchedFrom={
-                      watchedFrom(e).length > 0
-                        ? () => {
-                            const ids = watchedFrom(e)
-                            setEpisodes.mutate(
-                              { ids, watched: false },
-                              {
-                                onSuccess: () =>
-                                  toast({
-                                    title: `Marked ${ids.length} episode${ids.length === 1 ? '' : 's'} not watched`,
-                                    action: { label: 'Undo', run: () => setEpisodes.mutate({ ids, watched: true }) },
-                                  }),
-                              },
-                            )
-                          }
-                        : undefined
-                    }
-                  />
-                ) })),
-                ...ghosts
-                  .filter((g) => !current?.episodes.some((e) => e.episode === g.episode))
-                  .map((g) => ({ n: g.episode, row: (
-                    <GhostRow
-                      key={`g${g.episode}`}
-                      e={g}
-                      admin={!!can?.manageShows}
-                      download={downloads?.find((d) => d.state === 'DOWNLOADING' && d.seriesId === series?.id && d.episodes.some((x) => x.season === g.season && x.episode === g.episode))}
-                      onSearch={() => setSearchEpisode(g)}
-                      onLookAgain={() => series && lookAgain.mutate({ seriesId: series.id, season: g.season, episode: g.episode })}
-                    />
-                  ) })),
-              ]
-                .sort((a, b) => a.n - b.n)
-                .map((x) => x.row)}
-            </div>
-            {extras.length > 0 && (
-              <>
-                <h2 className="mt-8 mb-4 text-[15px] font-semibold">Extras</h2>
-                <div className="-mx-3 space-y-0.5">
-                  {extras.map((e, i) => (
-                    <EpisodeRow key={e.id} e={e} order={5 + regular.length + i} next={next?.video.id === e.id}
-                      canEditArtwork={!!can?.editMetadata} scrollTo={false} onWatched={(w) => setEpisodes.mutate({ ids: [e.id], watched: w })} />
-                  ))}
-                </div>
-              </>
-            )}
-          </div>
+        ) : (
+          <div className="mt-10 max-w-3xl space-y-7">{side}</div>
         )}
 
         <MoreLikeThis item={item} actionable={!!features && item.kind === 'SHOW'} />
@@ -573,6 +608,67 @@ function TitleBar({ item }: { item: Item }) {
         </button>
       </div>
     </div>
+  )
+}
+
+/** What's done to a title less often: marking all of it watched, its artwork and its details. */
+function TitleMenu({ item, watched, canEdit, onWatched, onMatch, onRefresh }: {
+  item: Item
+  watched: boolean
+  canEdit: boolean
+  onWatched: () => void
+  onMatch: () => void
+  onRefresh: () => void
+}) {
+  const poster = useArtwork({ titleId: item.id, kind: 'POSTER' })
+  const backdrop = useArtwork({ titleId: item.id, kind: 'BACKDROP' })
+  const still = useArtwork({ videoId: item.movie?.id ?? 0 })
+  const artwork = [
+    { label: 'thumbnail', edit: poster, custom: item.customPoster },
+    { label: 'banner', edit: backdrop, custom: item.customBackdrop },
+    ...(item.movie ? [{ label: 'video thumbnail', edit: still, custom: item.movie.customStill }] : []),
+  ]
+  const entry = (icon: React.ReactNode, label: string, run: () => void, close: () => void) => (
+    <MenuItem onClick={() => (close(), run())}>
+      <span className="flex items-center gap-2">
+        {icon} {label}
+      </span>
+    </MenuItem>
+  )
+  return (
+    <>
+      <Popover
+        align="start"
+        trigger={({ toggle }) => (
+          <Button size="square" aria-label="More" onClick={toggle}>
+            <Ellipsis className="size-4.5" />
+          </Button>
+        )}
+      >
+        {(close) => (
+          <Panel className="w-60 p-1.5">
+            {watched
+              ? entry(<Undo2 className="size-3.5 shrink-0" />, 'Mark not watched', onWatched, close)
+              : entry(<Check className="size-3.5 shrink-0" />, 'Mark watched', onWatched, close)}
+            {canEdit && (
+              <>
+                <div className="my-1 h-px bg-line" />
+                {artwork.map(({ label, edit, custom }) => (
+                  <Fragment key={label}>
+                    {entry(<ImageUp className="size-3.5 shrink-0" />, `Change ${label}`, edit.pick, close)}
+                    {custom && entry(<RotateCcw className="size-3.5 shrink-0" />, `Reset ${label}`, edit.reset, close)}
+                  </Fragment>
+                ))}
+                <div className="my-1 h-px bg-line" />
+                {entry(<Wand2 className="size-3.5 shrink-0" />, 'Fix match', onMatch, close)}
+                {entry(<RefreshCw className="size-3.5 shrink-0" />, 'Refresh details', onRefresh, close)}
+              </>
+            )}
+          </Panel>
+        )}
+      </Popover>
+      {canEdit && artwork.map(({ label, edit }) => <Fragment key={label}>{edit.input}</Fragment>)}
+    </>
   )
 }
 
@@ -682,7 +778,7 @@ function EpisodeRow({
       </Link>
       {canEditArtwork && (
         <div className="absolute right-3 bottom-3">
-          <ArtworkEditor target={{ videoId: e.id }} custom={e.customStill} label="episode thumbnail" compact />
+          <ArtworkEditor target={{ videoId: e.id }} custom={e.customStill} label="episode thumbnail" />
         </div>
       )}
       <div className="absolute top-3 right-3 flex gap-0.5">

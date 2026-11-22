@@ -2,11 +2,18 @@
 
 import { type CSSProperties, useLayoutEffect, useRef, useState } from 'react'
 
-export function Overview({ text, style }: { text: string; style?: CSSProperties }) {
+export function Overview({ text, style, lines = 4, long: after = 420, className = 'mt-8 max-w-[68ch]' }: {
+  text: string
+  style?: CSSProperties
+  lines?: number
+  /** How many characters it takes before it might need clamping. */
+  long?: number
+  className?: string
+}) {
   const [open, setOpen] = useState(false)
   const [preview, setPreview] = useState<{ source: string; value: string } | null>(null)
   const paragraph = useRef<HTMLParagraphElement>(null)
-  const long = text.length > 420
+  const long = text.length > after
 
   useLayoutEffect(() => {
     const el = paragraph.current
@@ -25,7 +32,7 @@ export function Overview({ text, style }: { text: string; style?: CSSProperties 
       })
       el.parentElement!.appendChild(probe)
       try {
-        const maxHeight = Math.ceil(parseFloat(css.lineHeight) * 4)
+        const maxHeight = Math.ceil(parseFloat(css.lineHeight) * lines)
         const fits = (value: string) => {
           probe.textContent = value
           return probe.scrollHeight <= maxHeight && probe.scrollWidth <= el.clientWidth
@@ -61,14 +68,14 @@ export function Overview({ text, style }: { text: string; style?: CSSProperties 
       observer.disconnect()
       document.fonts.removeEventListener('loadingdone', measure)
     }
-  }, [text, long])
+  }, [text, long, lines])
 
   return (
-    <div style={style} className="refreshable mt-8 max-w-[68ch]">
+    <div style={style} className={`refreshable ${className}`}>
       <p ref={paragraph} className="text-[15px] leading-relaxed whitespace-pre-line wrap-break-word hyphens-auto text-ink-2">
         {open || !long || preview?.source !== text ? text : preview.value}
       </p>
-      {long && (
+      {long && (open || (preview?.source === text && preview.value !== text)) && (
         <button className="mt-1.5 text-sm text-ink-3 hover:text-ink" onClick={() => setOpen((o) => !o)}>
           {open ? 'Less' : 'More'}
         </button>

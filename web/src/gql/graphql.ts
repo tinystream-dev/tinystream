@@ -1970,6 +1970,13 @@ export type RefreshTitleMutationVariables = Exact<{
 
 export type RefreshTitleMutation = { refreshTitle: { id: number } };
 
+export type StartTitleRoomMutationVariables = Exact<{
+  input: NewRoom;
+}>;
+
+
+export type StartTitleRoomMutation = { startRoom: { code: string } };
+
 export type MatchTitleMutationVariables = Exact<{
   id: number;
   provider: Provider;
@@ -7407,6 +7414,13 @@ export const RefreshTitleDocument = new TypedDocumentString(`
   }
 }
     `) as unknown as TypedDocumentString<RefreshTitleMutation, RefreshTitleMutationVariables>;
+export const StartTitleRoomDocument = new TypedDocumentString(`
+    mutation StartTitleRoom($input: NewRoom!) {
+  startRoom(input: $input) {
+    code
+  }
+}
+    `) as unknown as TypedDocumentString<StartTitleRoomMutation, StartTitleRoomMutationVariables>;
 export const MatchTitleDocument = new TypedDocumentString(`
     mutation MatchTitle($id: Int!, $provider: Provider!, $providerId: String!) {
   matchTitle(id: $id, provider: $provider, providerId: $providerId) {
