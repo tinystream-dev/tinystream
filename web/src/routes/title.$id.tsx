@@ -17,7 +17,7 @@ import { Poster, morphFrom } from '../components/Poster'
 import { Row } from '../components/Row'
 import { TitleSkeleton } from '../components/Skeleton'
 import { Squircle } from '../components/Squircle'
-import { Button, IconButton, Input, MenuItem, Panel, Popover, Spinner, Tip } from '../components/ui'
+import { Button, IconButton, Input, MenuItem, Panel, Popover, Segmented, Spinner } from '../components/ui'
 import { graphql } from '../gql'
 import { type Download, type Episode, type Item, type Provider, type SeriesEpisode, request } from '../lib/api'
 import { airs, duration, shortDate, speed, useFeatures } from '../lib/downloads'
@@ -404,34 +404,31 @@ function TitlePage() {
         {item.kind === 'SHOW' ? (
           <div className="mt-12 grid gap-x-14 gap-y-10 lg:grid-cols-[minmax(0,1fr)_18.75rem]">
             <div className="min-w-0">
-              <div style={refreshing(4, 6)} className="refreshable mb-5 flex flex-wrap items-center gap-1">
-                {seasonTabs.length > 1 &&
-                  seasonTabs.map((s) => {
-                    const done = s.done && !s.upcoming
-                    return (
-                      <Squircle
-                        key={s.number}
-                        as="button"
-                        radius={9}
-                        onClick={() => setSeason(s.number)}
-                        className={`flex h-8 items-center gap-1.5 px-3 text-sm transition-colors ${season === s.number ? 'bg-press text-ink' : 'text-ink-2 hover:bg-hover hover:text-ink'}`}
-                      >
-                        {s.name}
-                        {done && <Check className="size-3.5 text-ink-3" />}
-                        {s.upcoming > 0 && (
-                          <Tip
-                            label={`${s.upcoming} episode${s.upcoming === 1 ? '' : 's'} yet to air`}
-                            className="size-1.5 rounded-full bg-warn"
-                          />
-                        )}
-                      </Squircle>
-                    )
-                  })}
+              <div style={refreshing(4, 6)} className="refreshable mb-5 flex items-center gap-3">
+                {seasonTabs.length > 1 && (
+                  <div className="min-w-0 overflow-x-auto">
+                    <Segmented
+                      value={String(season)}
+                      onChange={(n) => setSeason(Number(n))}
+                      options={seasonTabs.map((s) => ({
+                        value: String(s.number),
+                        title: s.upcoming > 0 ? `${s.upcoming} episode${s.upcoming === 1 ? '' : 's'} yet to air` : undefined,
+                        label: (
+                          <>
+                            {s.name}
+                            {s.done && !s.upcoming && <Check className="size-3.5 text-ink-3" />}
+                            {s.upcoming > 0 && <span className="size-1.5 rounded-full bg-warn" />}
+                          </>
+                        ),
+                      }))}
+                    />
+                  </div>
+                )}
                 {season === 0 && seasonTabs.length === 1 && (
                   <h2 className="text-[15px] font-semibold">{current?.name ?? 'Specials'}</h2>
                 )}
                 {regular.length > 0 && (
-                  <button className="ml-auto h-8 px-3 text-[13px] text-ink-3 transition-colors hover:text-ink" onClick={toggleSeason}>
+                  <button className="ml-auto h-8 shrink-0 px-3 text-[13px] text-ink-3 transition-colors hover:text-ink" onClick={toggleSeason}>
                     {seasonDone ? 'Mark season not watched' : 'Mark season watched'}
                   </button>
                 )}
@@ -514,7 +511,7 @@ function TitlePage() {
                 </>
               )}
             </div>
-            <aside className="order-first space-y-7 lg:order-none lg:pt-13">{side}</aside>
+            <aside className="order-first space-y-7 lg:order-none lg:pt-14">{side}</aside>
           </div>
         ) : (
           <div className="mt-10 max-w-3xl space-y-7">{side}</div>

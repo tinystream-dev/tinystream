@@ -168,9 +168,7 @@ pub(super) fn title<'a>(b: &'a Browsing, id: i64, look: &Look) -> View<'a> {
         let mut episodes = Column::<View<'a>>::new().spacing(8).width(Fill);
         let mut bar = Row::<View<'a>>::new().spacing(4).align_y(Alignment::Center);
         if tabs.len() > 1 {
-            for (n, label) in &tabs {
-                bar = bar.push(chip(label.clone(), *n == season, msg(b, Message::Season(*n)), look));
-            }
+            bar = bar.push(segmented(season, &tabs, move |n| msg(b, Message::Season(n)), look));
         } else if let Some(s) = current.filter(|_| season == 0) {
             bar = bar.push(text(&s.name, ty::S15, look.ink).font(SEMIBOLD).boxed());
         }
@@ -186,7 +184,7 @@ pub(super) fn title<'a>(b: &'a Browsing, id: i64, look: &Look) -> View<'a> {
                     .boxed(),
             );
         }
-        episodes = episodes.push(container(bar).height(32).align_y(Alignment::Center).boxed());
+        episodes = episodes.push(container(bar).height(36).align_y(Alignment::Center).boxed());
         if let Some(title) = current.and_then(|s| s.title.as_deref()).filter(|title| *title != c.name) {
             episodes = episodes.push(text(title, ty::SM, look.ink_3).boxed());
         }
@@ -206,7 +204,7 @@ pub(super) fn title<'a>(b: &'a Browsing, id: i64, look: &Look) -> View<'a> {
         }
         page = page.push(
             container(
-                row![episodes, container(side).width(300).padding(Padding { top: 40.0, ..Padding::ZERO })].spacing(56),
+                row![episodes, container(side).width(300).padding(Padding { top: 44.0, ..Padding::ZERO })].spacing(56),
             )
             .padding(Padding { top: 28.0, ..Padding::ZERO })
             .boxed(),
