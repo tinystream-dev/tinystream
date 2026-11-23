@@ -270,7 +270,7 @@ function Hero({ entry: e }: { entry: ContinueEntry }) {
         />
         <div className="absolute inset-0 bg-linear-to-r from-canvas via-canvas/65 to-transparent" />
         <div className="relative flex h-full min-h-64 flex-col justify-end p-6 md:p-9">
-          <p className="flex items-center gap-2 text-xs font-medium tracking-wide text-ink-2 uppercase">
+          <p className="flex items-center gap-2 text-[13px] font-medium text-ink-2">
             {e.newEpisode ? <Radio className="size-3.5 text-warn" /> : <RotateCcw className="size-3.5" />}
             {label}
           </p>
@@ -279,16 +279,18 @@ function Hero({ entry: e }: { entry: ContinueEntry }) {
             {[v.label, v.name].filter(Boolean).join(' · ')}
           </p>
           <div className="mt-5 flex flex-wrap items-end gap-x-6 gap-y-4">
-            <div>
-              <span className="block text-[32px] leading-none font-semibold tracking-tight whitespace-nowrap md:text-[40px]">
-                {resuming && left ? <Ticker value={left} /> : (v.label ?? 'Play')}
-              </span>
-              {progress > 0 && (
-                <div className="mt-3 h-1 w-56 overflow-hidden rounded-full bg-media-ink/15">
-                  <div className="h-full rounded-full bg-media-ink" style={{ width: `${progress * 100}%` }} />
-                </div>
-              )}
-            </div>
+            {resuming && left && (
+              <div>
+                <span className="block text-[32px] leading-none font-semibold tracking-tight whitespace-nowrap md:text-[40px]">
+                  <Ticker value={left} />
+                </span>
+                {progress > 0 && (
+                  <div className="mt-3 h-1 w-56 overflow-hidden rounded-full bg-media-ink/15">
+                    <div className="h-full rounded-full bg-media-ink" style={{ width: `${progress * 100}%` }} />
+                  </div>
+                )}
+              </div>
+            )}
             <Squircle
               radius={14}
               className="inline-flex h-11 items-center gap-2.5 bg-accent px-5 text-[15px] font-medium text-on-accent transition-colors group-hover:bg-accent-hover"

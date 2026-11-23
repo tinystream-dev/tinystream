@@ -403,7 +403,7 @@ fn hero<'a>(b: &'a Browsing, props: Hero<'a>, look: &Look) -> View<'a> {
     let Hero { name, label, mark, detail, image, tint, route, height, name_size, padding, body, aside, bar } = props;
     let l = *look;
     let content = column![
-        row![mark, text(label.to_uppercase(), ty::XS, look.ink_2).font(MEDIUM)].spacing(8).align_y(Alignment::Center),
+        row![mark, text(label, ty::S13, look.ink_2).font(MEDIUM)].spacing(8).align_y(Alignment::Center),
         container(text(name.to_owned(), ty::Size { px: name_size, line: name_size * 1.25 }, look.ink).font(SEMIBOLD))
             .padding(Padding { top: 8.0, ..Padding::ZERO }),
         container(truncate(detail, ty::SM, look.ink_2)).padding(Padding { top: 4.0, ..Padding::ZERO }),

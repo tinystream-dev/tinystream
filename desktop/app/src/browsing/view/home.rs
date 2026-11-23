@@ -13,11 +13,10 @@ pub(super) fn home<'a>(b: &'a Browsing, look: &Look) -> View<'a> {
         let detail = [v.label.clone(), v.name.clone()].into_iter().flatten().collect::<Vec<_>>().join(" · ");
         let resuming = !e.up_next;
         let left = remaining(e.position, v.duration);
-        let mut metric = column![if resuming && !left.is_empty() {
-            crate::ui::numbers::styled_ticker(&left, BIG, SEMIBOLD, None, look)
-        } else {
-            text(v.label.clone().unwrap_or("Play".into()), BIG, look.ink).font(SEMIBOLD).boxed()
-        }];
+        let mut metric = Column::<View<'a>>::new();
+        if resuming && !left.is_empty() {
+            metric = metric.push(crate::ui::numbers::styled_ticker(&left, BIG, SEMIBOLD, None, look));
+        }
         if let Some(value) = v.duration.filter(|d| resuming && *d > 0.0 && e.position > 0.0) {
             metric = metric.push(
                 container(container(progress(Some((e.position / value) as f32), look.media_ink, look)).width(224))
