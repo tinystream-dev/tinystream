@@ -10,8 +10,9 @@ pub(super) fn home<'a>(b: &'a Browsing, look: &Look) -> View<'a> {
     let featured = h.continue_watching.iter().find(|e| e.new_episode).or_else(|| h.continue_watching.first());
     if let Some(e) = featured {
         let v = &e.video;
-        let detail = [v.label.clone(), v.name.clone()].into_iter().flatten().collect::<Vec<_>>().join(" · ");
         let resuming = !e.up_next;
+        let runtime = v.duration.filter(|d| !resuming && *d >= 60.0).map(|d| duration(d as i64));
+        let detail = [v.label.clone(), v.name.clone(), runtime].into_iter().flatten().collect::<Vec<_>>().join(" · ");
         let left = remaining(e.position, v.duration);
         let mut metric = Column::<View<'a>>::new();
         if resuming && !left.is_empty() {
@@ -30,6 +31,11 @@ pub(super) fn home<'a>(b: &'a Browsing, look: &Look) -> View<'a> {
             .large()
             .icon(Icon::Play)
             .on_press(AppMessage::Navigate(route.clone()));
+        let show = button("Go to show", look)
+            .large()
+            .icon(Icon::Tv)
+            .on_press(AppMessage::Navigate(Route::Title(v.title.id as u64)));
+        let actions = row![play.boxed(), show.boxed()].spacing(10);
         page = page.push(
             (container(hero(
                 b,
@@ -48,6 +54,7 @@ pub(super) fn home<'a>(b: &'a Browsing, look: &Look) -> View<'a> {
                         crate::ui::icon::icon(Icon::RotateCcw, 14.0).color(look.ink_2)
                     },
                     detail,
+                    summary: v.overview.as_deref().filter(|o| !o.is_empty()),
                     image: v.title.backdrop.as_deref().or(v.still.as_deref()),
                     tint: v.title.backdrop_tint.as_deref().or(v.title.poster_tint.as_deref()),
                     route: Some(route),
@@ -55,9 +62,9 @@ pub(super) fn home<'a>(b: &'a Browsing, look: &Look) -> View<'a> {
                     name_size: 38.0,
                     padding: 36.0,
                     body: if resuming && !left.is_empty() {
-                        row![metric, play.boxed()].spacing(24).align_y(Alignment::End).wrap().boxed()
+                        row![metric, actions].spacing(24).align_y(Alignment::End).wrap().boxed()
                     } else {
-                        play.boxed()
+                        actions.boxed()
                     },
                     aside: None,
                     bar: None,

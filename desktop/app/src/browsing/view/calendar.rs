@@ -236,6 +236,7 @@ fn up_next<'a>(
             label,
             mark,
             detail,
+            summary: None,
             image: e.backdrop.as_deref().or(e.poster.as_deref()),
             tint: e.backdrop_tint.as_deref(),
             route: entry_route(e),

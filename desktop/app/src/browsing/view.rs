@@ -387,6 +387,8 @@ struct Hero<'a> {
     label: &'a str,
     mark: crate::ui::icon::Glyph,
     detail: String,
+    /// Two lines under the detail line, cut off after that.
+    summary: Option<&'a str>,
     image: Option<&'a str>,
     tint: Option<&'a str>,
     route: Option<Route>,
@@ -400,16 +402,31 @@ struct Hero<'a> {
     bar: Option<Option<f32>>,
 }
 fn hero<'a>(b: &'a Browsing, props: Hero<'a>, look: &Look) -> View<'a> {
-    let Hero { name, label, mark, detail, image, tint, route, height, name_size, padding, body, aside, bar } = props;
+    let Hero { name, label, mark, detail, summary, image, tint, route, height, name_size, padding, body, aside, bar } =
+        props;
     let l = *look;
     let content = column![
         row![mark, text(label, ty::S13, look.ink_2).font(MEDIUM)].spacing(8).align_y(Alignment::Center),
         container(text(name.to_owned(), ty::Size { px: name_size, line: name_size * 1.25 }, look.ink).font(SEMIBOLD))
             .padding(Padding { top: 8.0, ..Padding::ZERO }),
-        container(truncate(detail, ty::SM, look.ink_2)).padding(Padding { top: 4.0, ..Padding::ZERO }),
-        container(body).padding(Padding { top: 20.0, ..Padding::ZERO })
+        container(truncate(detail, ty::SM, look.ink_2)).padding(Padding { top: 4.0, ..Padding::ZERO })
     ]
     .width(Fill);
+    let content = match summary {
+        Some(summary) => content.push(
+            container(
+                text(summary.to_owned(), ty::SM, look.ink_2)
+                    .line_height(iced_core::text::LineHeight::Relative(1.5))
+                    .height(ty::SM.px * 1.5 * 2.0)
+                    .ellipsis(iced_core::text::Ellipsis::End),
+            )
+            .width(Fill.max(560))
+            .padding(Padding { top: 12.0, ..Padding::ZERO })
+            .boxed(),
+        ),
+        None => content,
+    };
+    let content = content.push(container(body).padding(Padding { top: 24.0, ..Padding::ZERO }).boxed());
     let mut layers = vec![art(b, image, 22.0, look)];
     layers.push(crate::ui::squircle::gradient(
         22.0,
