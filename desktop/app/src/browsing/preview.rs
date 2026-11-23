@@ -74,10 +74,10 @@ pub fn prepare(app: &mut App, scene: &str, style: crate::ui::Style, custom: bool
         b.put(key, json!({"calendar":[entry]}));
     }
     b.put(Key::Wanted,json!({"wanted":[
-        {"seriesId":5,"title":{"id":1,"poster":"poster"},"show":"The quiet orbit","season":1,"episode":3,"name":"Low tide","airAt":now()-86400*9,"aired":true,"state":"WANTED","searchedAt":now()-5400,"nextSearch":now()+720},
-        {"seriesId":5,"title":{"id":1,"poster":"poster"},"show":"The quiet orbit","season":1,"episode":4,"name":"Signal","airAt":now()-86400*2,"aired":true,"state":"GRABBED","searchedAt":now()-600},
-        {"seriesId":5,"title":{"id":1,"poster":"poster"},"show":"The quiet orbit","season":1,"episode":5,"name":"The other side","airAt":now()+3600,"aired":false,"state":"WANTED"},
-        {"seriesId":6,"title":{"id":2,"poster":"poster"},"show":"Paper skies","season":2,"episode":1,"name":"Fold","airAt":now()-86400*40,"aired":true,"state":"MISSING","searchedAt":now()-86400}
+        {"seriesId":5,"title":{"id":1,"poster":"poster","backdrop":"poster"},"show":"The quiet orbit","season":1,"episode":3,"name":"Low tide","airAt":now()-86400*9,"aired":true,"state":"WANTED","searchedAt":now()-5400,"nextSearch":now()+720},
+        {"seriesId":5,"title":{"id":1,"poster":"poster","backdrop":"poster"},"show":"The quiet orbit","season":1,"episode":4,"name":"Signal","airAt":now()-86400*2,"aired":true,"state":"GRABBED","searchedAt":now()-600},
+        {"seriesId":5,"title":{"id":1,"poster":"poster","backdrop":"poster"},"show":"The quiet orbit","season":1,"episode":5,"name":"The other side","airAt":now()+3600,"aired":false,"state":"WANTED"},
+        {"seriesId":6,"title":{"id":2,"poster":"poster","backdrop":"poster"},"show":"Paper skies","season":2,"episode":1,"name":"Fold","airAt":now()-86400*40,"aired":true,"state":"MISSING","searchedAt":now()-86400}
     ]}));
     b.put(Key::Requests,json!({"requests":[{"id":1,"user":{"id":2,"username":"Mira"},"name":"Paper skies","year":2026,"poster":"poster","library":"Shows","state":"PENDING","createdAt":now()-3600,"note":"Dubbed if there is one, please"}]}));
     b.put(Key::Downloads,json!({"downloads":[{"id":1,"name":"The quiet orbit - S01E04","source":"A configured source","size":1280000000i64,"poster":"poster","state":"DOWNLOADING","importState":"PENDING","live":{"stage":"DOWNLOADING","progress":0.42,"downloadRate":4200000,"uploadRate":128000,"peers":12,"seeds":21,"ratio":0.1,"eta":180}}]}));
