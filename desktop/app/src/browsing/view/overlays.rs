@@ -308,6 +308,7 @@ pub fn dialog<'a>(app: &'a App, look: &Look) -> Option<View<'a>> {
     let dialog = b.dialog.as_ref()?;
     let close = msg(b, Message::Dialog(None));
     let mut content = Column::<View<'a>>::new().spacing(16).width(Fill);
+    let mut footer = Vec::new();
     match dialog {
         Dialog::Confirm { title, body, action } => {
             return Some(crate::ui::overlay::confirm(
@@ -399,7 +400,7 @@ pub fn dialog<'a>(app: &'a App, look: &Look) -> Option<View<'a>> {
                 {
                     content=content.push((text(format!("{} has {aired} aired episodes, and all of them will be downloaded. Pick Future to only get new ones.",r.name),ty::XS,look.warn)).boxed());
                 }
-                content = content.push(
+                footer.push(
                     (button("Add show", look)
                         .primary()
                         .on_press_maybe((!b.busy && options.is_some() && !b.pick_library.is_empty()).then(|| {
@@ -417,30 +418,28 @@ pub fn dialog<'a>(app: &'a App, look: &Look) -> Option<View<'a>> {
                     .boxed(),
                 );
             } else {
-                content = content
-                    .push(
-                        (field(
-                            "A note for the admin (optional)",
-                            input(
-                                "request-note",
-                                &b.note,
-                                "Dubbed if there is one, please",
-                                move |n| msg(b, Message::Note(n)),
-                                look,
-                            )
-                            .boxed(),
-                            None,
+                content = content.push(
+                    (field(
+                        "A note for the admin (optional)",
+                        input(
+                            "request-note",
+                            &b.note,
+                            "Dubbed if there is one, please",
+                            move |n| msg(b, Message::Note(n)),
                             look,
-                        ))
+                        )
                         .boxed(),
-                    )
-                    .push(
-                        (button("Request", look)
-                            .primary()
-                            .on_press_maybe((!b.busy).then(|| act(b, Action::Request(r.clone(), b.note.clone()))))
-                            .boxed())
+                        None,
+                        look,
+                    ))
+                    .boxed(),
+                );
+                footer.push(
+                    button("Request", look)
+                        .primary()
+                        .on_press_maybe((!b.busy).then(|| act(b, Action::Request(r.clone(), b.note.clone()))))
                         .boxed(),
-                    );
+                );
             }
         },
         Dialog::Releases { series, season, episodes, name } => {
@@ -455,10 +454,8 @@ pub fn dialog<'a>(app: &'a App, look: &Look) -> Option<View<'a>> {
                         look.ink
                     )
                     .font(MEDIUM)
-                    .width(Fill),
-                    button("Search again", look).plain().small().on_press(msg(b, Message::ReleaseSubmit)).boxed()
+                    .width(Fill)
                 ]
-                .spacing(8)
                 .boxed(),
             );
             content = content.push(
@@ -535,8 +532,17 @@ pub fn dialog<'a>(app: &'a App, look: &Look) -> Option<View<'a>> {
                 let accepted = s.releases.iter().filter(|r| r.verdict.accepted && !r.episodes.is_empty()).count();
                 let rejected = s.releases.iter().filter(|r| !r.verdict.accepted).count();
                 content = content.push(
-                    text(format!("{accepted} good matches out of {} results", s.releases.len()), ty::SM, look.ink_3)
-                        .boxed(),
+                    text(
+                        format!(
+                            "{accepted} good match{} out of {} result{}",
+                            if accepted == 1 { "" } else { "es" },
+                            s.releases.len(),
+                            if s.releases.len() == 1 { "" } else { "s" }
+                        ),
+                        ty::SM,
+                        look.ink_3,
+                    )
+                    .boxed(),
                 );
                 let mut list = Column::<View<'a>>::new().spacing(4);
                 for (i, r) in s
@@ -714,7 +720,12 @@ pub fn dialog<'a>(app: &'a App, look: &Look) -> Option<View<'a>> {
                 .map(|(v, l)| chip(l, draft.seeding == v, msg(b, Message::Draft("seeding", v.into())), look))
                 .collect(),
             ));
-            content = content.push(scrollable(form).height(iced_core::Length::Shrink.max(440)).boxed()).push(
+            content = content.push(
+                scrollable(form.padding(Padding { right: 16.0, ..Padding::ZERO }))
+                    .height(iced_core::Length::Shrink.max(440))
+                    .boxed(),
+            );
+            footer.push(
                 button("Save", look)
                     .primary()
                     .on_press_maybe((!b.busy).then(|| act(b, Action::UpdateSeries(s.id, draft.patch()))))
@@ -778,7 +789,10 @@ pub fn dialog<'a>(app: &'a App, look: &Look) -> Option<View<'a>> {
     if b.busy {
         content = content.push((spinner(20.0, look)).boxed());
     }
-    content = content.push((button("Close", look).plain().on_press(close.clone()).boxed()).boxed());
+    let cancel = if footer.is_empty() { "Close" } else { "Cancel" };
+    footer.insert(0, button(cancel, look).plain().on_press(close.clone()).boxed());
+    footer.insert(0, space().width(Fill).boxed());
+    content = content.push(Row::with_children(footer).spacing(8).align_y(Alignment::Center).boxed());
     Some(crate::ui::overlay::dialog(content, 640.0, close, look))
 }
 
