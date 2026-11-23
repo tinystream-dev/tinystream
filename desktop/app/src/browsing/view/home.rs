@@ -31,7 +31,7 @@ pub(super) fn home<'a>(b: &'a Browsing, look: &Look) -> View<'a> {
             .large()
             .icon(Icon::Play)
             .on_press(AppMessage::Navigate(route.clone()));
-        let show = button("Go to show", look)
+        let show = button(if v.label.is_some() { "Go to show" } else { "Go to movie" }, look)
             .large()
             .icon(Icon::Tv)
             .on_press(AppMessage::Navigate(Route::Title(v.title.id as u64)));
