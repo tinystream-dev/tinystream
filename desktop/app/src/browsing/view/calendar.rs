@@ -102,24 +102,22 @@ pub(super) fn calendar<'a>(b: &'a Browsing, look: &Look) -> View<'a> {
         } else {
             container(number).center(24).boxed()
         };
-        let mut column = squircle(entries, 16.0, look)
-            .fill(if is_today { look.raised } else { look.raised.scale_alpha(0.5) })
+        let column = squircle(entries, 16.0, look)
+            .fill(if count == 0 {
+                look.raised.scale_alpha(0.22)
+            } else if is_today {
+                look.raised
+            } else {
+                look.raised.scale_alpha(0.5)
+            })
             .padding(6)
             .height(416.0f32.max(count as f32 * 190.0))
             .width(Fill);
-        if is_today {
-            column = column.paint(crate::ui::squircle::Paint {
-                fill: Some(look.raised),
-                ring: Some(look.line_strong),
-                ..crate::ui::squircle::Paint::NONE
-            });
-        }
         days = days.push(
             column![
                 container(
                     row![
-                        text(weekday(day)[..3].to_uppercase(), ty::XS, if is_today { look.ink } else { look.ink_3 })
-                            .font(MEDIUM),
+                        text(&weekday(day)[..3], ty::S13, if is_today { look.ink } else { look.ink_3 }).font(MEDIUM),
                         number
                     ]
                     .spacing(8)

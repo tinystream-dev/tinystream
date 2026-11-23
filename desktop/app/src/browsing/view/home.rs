@@ -54,7 +54,11 @@ pub(super) fn home<'a>(b: &'a Browsing, look: &Look) -> View<'a> {
                     height: 304.0,
                     name_size: 38.0,
                     padding: 36.0,
-                    body: row![metric, play.boxed()].spacing(24).align_y(Alignment::End).wrap().boxed(),
+                    body: if resuming && !left.is_empty() {
+                        row![metric, play.boxed()].spacing(24).align_y(Alignment::End).wrap().boxed()
+                    } else {
+                        play.boxed()
+                    },
                     aside: None,
                     bar: None,
                 },
