@@ -164,6 +164,18 @@ fn title_link<'a>(name: &'a str, route: Option<Route>, look: &Look) -> View<'a> 
         truncate(name, ty::SM, look.ink).font(MEDIUM).boxed()
     }
 }
+/// A ⋯ that opens a menu of `choices`, each a label and what picking it does.
+fn more<'a>(choices: Vec<(String, AppMessage)>, look: &Look) -> View<'a> {
+    let (labels, messages): (Vec<_>, Vec<_>) = choices.into_iter().unzip();
+    crate::ui::select::menu(
+        container(crate::ui::icon::icon(Icon::Ellipsis, 16.0)).center(32).boxed(),
+        (0..labels.len()).collect::<Vec<_>>(),
+        |i| labels[*i].clone(),
+        move |i| messages[i].clone(),
+        240.0,
+        look,
+    )
+}
 fn raised<'a>(content: View<'a>, look: &Look) -> View<'a> {
     squircle(content, 16.0, look).fill(look.raised).edge().padding(12).width(Fill).boxed()
 }

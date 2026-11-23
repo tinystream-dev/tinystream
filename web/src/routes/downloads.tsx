@@ -146,28 +146,25 @@ function DownloadsPage() {
     <Page arrive={arrived}>
       <PageTitle
         aside={
-          (running.length > 0 || paused.length > 0) && (
-            <div className="flex gap-1.5 pb-0.5">
-              {running.length > 0 && (
-                <Button size="sm" variant="plain" onClick={() => bulk.mutate('pause')} disabled={bulk.isPending}>
-                  <Pause className="size-3.5" /> Pause all
-                </Button>
-              )}
-              {paused.length > 0 && (
-                <Button size="sm" variant="plain" onClick={() => bulk.mutate('resume')} disabled={bulk.isPending}>
-                  <Play className="size-3.5" /> Resume all
-                </Button>
-              )}
+          <div className="flex items-center gap-1.5 pb-0.5">
+            <div className="w-48">
+              <Select value={category} options={mediaOptions} onChange={setCategory} />
             </div>
-          )
+            {running.length > 0 && (
+              <Button size="sm" variant="plain" onClick={() => bulk.mutate('pause')} disabled={bulk.isPending}>
+                <Pause className="size-3.5" /> Pause all
+              </Button>
+            )}
+            {paused.length > 0 && (
+              <Button size="sm" variant="plain" onClick={() => bulk.mutate('resume')} disabled={bulk.isPending}>
+                <Play className="size-3.5" /> Resume all
+              </Button>
+            )}
+          </div>
         }
       >
         Downloads
       </PageTitle>
-
-      <div className="mb-6 max-w-56">
-        <Select value={category} options={mediaOptions} onChange={setCategory} />
-      </div>
 
       {engine?.killSwitch && (
         <Squircle radius={14} edge className="mb-6 flex items-start gap-3 bg-danger/10 p-4">

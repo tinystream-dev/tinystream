@@ -41,16 +41,15 @@ pub(super) fn downloads<'a>(b: &'a Browsing, look: &Look) -> View<'a> {
                 .boxed(),
         );
     }
-    let aside = (!bulk.is_empty()).then(|| {
-        container(Row::with_children(bulk).spacing(6)).padding(Padding { bottom: 2.0, ..Padding::ZERO }).boxed()
-    });
-    let title = page_title("Downloads", aside, look);
-    let mut page = column![
+    bulk.insert(
+        0,
         container(media_select(&b.download_category, move |v| msg(b, Message::DownloadCategory(v)), look))
-            .width(224)
-            .padding(Padding { bottom: 8.0, ..Padding::ZERO })
-    ]
-    .width(Fill);
+            .width(200)
+            .boxed(),
+    );
+    let aside = Some(Row::with_children(bulk).spacing(8).align_y(Alignment::Center).boxed());
+    let title = page_title("Downloads", aside, look);
+    let mut page = Column::<View<'a>>::new().width(Fill);
     if let Some(e) = b.data(&Key::Engine).and_then(|d| d.download_engine.as_ref()) {
         if let Some(interface) = &e.kill_switch {
             page = page.push(
@@ -88,34 +87,23 @@ pub(super) fn downloads<'a>(b: &'a Browsing, look: &Look) -> View<'a> {
         let peers =
             d.downloads.iter().filter_map(|d| d.live.as_ref()).filter(|l| !l.paused).map(|l| l.peers).sum::<i64>();
         let shared = d.downloads.iter().filter_map(|d| d.live.as_ref()).map(|l| l.uploaded).sum::<i64>();
-        let stats = line(vec![
+        let stat = |label: &'static str, value: String| {
             column![
-                text("Download", ty::XS, look.ink_3),
-                crate::ui::numbers::ticker(
-                    &format!("{}/s", bytes(e.download_rate)),
-                    ty::Size { px: 32.0, line: 40.0 },
-                    look
-                )
+                text(label, ty::XS, look.ink_3),
+                crate::ui::numbers::ticker(&value, ty::Size { px: 24.0, line: 30.0 }, look)
             ]
             .spacing(4)
-            .boxed(),
-            column![
-                text("Upload", ty::XS, look.ink_3),
-                crate::ui::numbers::ticker(
-                    &format!("{}/s", bytes(e.upload_rate)),
-                    ty::Size { px: 32.0, line: 40.0 },
-                    look
-                )
-            ]
-            .spacing(4)
-            .boxed(),
-            text(
-                format!("{peers} peers · {} shared{}", bytes(shared), if e.slow_hours { " · slow hours" } else { "" }),
-                ty::XS,
-                look.ink_3,
-            )
-            .boxed(),
-        ]);
+            .boxed()
+        };
+        let mut stats = Row::<View<'a>>::new()
+            .spacing(40)
+            .push(stat("Download", format!("{}/s", bytes(e.download_rate))))
+            .push(stat("Upload", format!("{}/s", bytes(e.upload_rate))))
+            .push(stat("Peers", peers.to_string()))
+            .push(stat("Shared", bytes(shared)));
+        if e.slow_hours {
+            stats = stats.push(stat("Limits", "Slow hours".into()));
+        }
         let chart = iced_widget::stack![
             container(crate::ui::numbers::sparkline(
                 down,
@@ -128,9 +116,13 @@ pub(super) fn downloads<'a>(b: &'a Browsing, look: &Look) -> View<'a> {
             .align_bottom(Fill),
             container(crate::ui::numbers::sparkline(up, look.ok, Fill, 80, std::time::Duration::from_secs(2), look))
                 .align_bottom(Fill),
-            container(stats).padding(20)
+            container(stats).padding([16, 20])
         ];
-        page = page.push(squircle(chart, 18.0, look).fill(look.raised).edge().width(Fill).height(140).boxed());
+        page = page.push(
+            container(squircle(chart, 18.0, look).fill(look.raised).edge().width(Fill).height(104))
+                .padding(Padding { bottom: 12.0, ..Padding::ZERO })
+                .boxed(),
+        );
     }
     let mine =
         d.downloads.iter().filter(|dl| b.download_category.is_empty() || dl.category == b.download_category).count();
@@ -171,14 +163,8 @@ pub(super) fn downloads<'a>(b: &'a Browsing, look: &Look) -> View<'a> {
                 })
                 .sum::<i64>();
             let rate = items.iter().filter_map(|d| d.live.as_ref()).map(|l| l.download_rate).sum::<i64>();
-            let mut actions = vec![
-                button(if open { "Collapse" } else { "Expand" }, look)
-                    .plain()
-                    .small()
-                    .on_press(msg(b, Message::DownloadGroup(key)))
-                    .boxed(),
-            ];
-            for (label, pause) in [("Pause", true), ("Resume", false)] {
+            let mut actions = Row::<View<'a>>::new().spacing(2).align_y(Alignment::Center);
+            for (label, pause) in [("Pause all", true), ("Resume all", false)] {
                 let ids = items
                     .iter()
                     .filter(|d| {
@@ -187,28 +173,34 @@ pub(super) fn downloads<'a>(b: &'a Browsing, look: &Look) -> View<'a> {
                     .map(|d| d.id)
                     .collect::<Vec<_>>();
                 if !ids.is_empty() {
-                    actions.push(
-                        button(label, look)
-                            .small()
-                            .on_press(act(b, if pause { Action::Pause(ids) } else { Action::Resume(ids) }))
-                            .boxed(),
-                    );
+                    actions = actions.push(icon_button(
+                        if pause { Icon::Pause } else { Icon::Play },
+                        label,
+                        Some(act(b, if pause { Action::Pause(ids) } else { Action::Resume(ids) })),
+                        look,
+                    ));
                 }
             }
             if let Some(series) = lead.series_id {
-                actions.push(
-                    button("Delete season", look)
-                        .danger()
-                        .small()
-                        .on_press(confirm(
+                actions = actions.push(more(
+                    vec![(
+                        "Delete the downloaded season".into(),
+                        confirm(
                             b,
                             "Delete downloaded season?",
                             "Files downloaded by tinystream will be deleted. Files you added yourself stay.",
                             Action::DeleteDownloaded(series, Some(season)),
-                        ))
-                        .boxed(),
-                );
+                        ),
+                    )],
+                    look,
+                ));
             }
+            actions = actions.push(icon_button(
+                if open { Icon::ChevronDown } else { Icon::ChevronRight },
+                if open { "Collapse" } else { "Expand" },
+                Some(msg(b, Message::DownloadGroup(key))),
+                look,
+            ));
             let mut content = column![
                 row![
                     picture(b, lead.poster.as_deref(), 40.0, 60.0, 7.0, look),
@@ -230,11 +222,11 @@ pub(super) fn downloads<'a>(b: &'a Browsing, look: &Look) -> View<'a> {
                         )
                     ]
                     .spacing(6)
-                    .width(Fill)
+                    .width(Fill),
+                    actions
                 ]
                 .spacing(14),
-                progress(if size > 0 { Some(done as f32 / size as f32) } else { None }, look.info, look),
-                line(actions)
+                progress(if size > 0 { Some(done as f32 / size as f32) } else { None }, look.info, look)
             ]
             .spacing(10);
             if open {
@@ -354,23 +346,25 @@ fn download_row<'a>(b: &'a Browsing, dl: &'a Download, nested: bool, look: &Look
                 look,
             ));
         }
-        details = details.push(
-            text(
-                format!(
-                    "{:.1}% · ↓ {}/s · ↑ {}/s · {} peers · {} seeds · ratio {:.2}{}",
-                    l.progress * 100.0,
-                    bytes(l.download_rate),
-                    bytes(l.upload_rate),
-                    l.peers,
-                    l.seeds,
-                    l.ratio,
-                    l.eta.map(|t| format!(" · {} left", runtime(t as f64))).unwrap_or_default()
-                ),
-                ty::XS,
-                look.ink_3,
-            )
-            .boxed(),
-        );
+        let words = if dl.state == "DOWNLOADING" {
+            let mut words = vec![
+                format!("{:.1}%", l.progress * 100.0),
+                format!("{} of {}", bytes(l.done), bytes(dl.size.unwrap_or(0))),
+            ];
+            if l.download_rate > 0 {
+                words.push(format!("↓ {}/s", bytes(l.download_rate)));
+            }
+            words.extend(l.eta.map(|t| format!("{} left", runtime(t as f64))));
+            words.push(format!("{} seeds, {} peers", l.seeds, l.peers));
+            words
+        } else {
+            let mut words = vec![format!("ratio {:.2}", l.ratio), format!("{} shared", bytes(l.uploaded))];
+            if l.upload_rate > 0 && !paused {
+                words.push(format!("↑ {}/s", bytes(l.upload_rate)));
+            }
+            words
+        };
+        details = details.push(text(words.join(" · "), ty::XS, look.ink_3).boxed());
         if let Some(ratio) = dl.seed_goal.ratio {
             details = details.push(text(format!("Seeding to ratio {ratio:.1}"), ty::XS, look.ink_3).boxed());
         }
@@ -388,45 +382,47 @@ fn download_row<'a>(b: &'a Browsing, dl: &'a Download, nested: bool, look: &Look
     if let Some(error) = dl.error.as_ref().or(dl.import_error.as_ref()) {
         details = details.push(text(error, ty::S13, look.danger).boxed());
     }
-    let mut actions = Vec::new();
+    let mut actions = Row::<View<'a>>::new().spacing(2).align_y(Alignment::Center);
     let mut menu = Vec::new();
     if live_state {
         let action = if paused { Action::Resume(vec![dl.id]) } else { Action::Pause(vec![dl.id]) };
-        actions.push(
-            button(if paused { "Resume" } else { "Pause" }, look)
-                .small()
-                .on_press_maybe((!b.busy).then(|| act(b, action.clone())))
-                .boxed(),
-        );
-        menu.push((if paused { "Resume" } else { "Pause" }.into(), act(b, action)));
-        menu.push(("Recheck".into(), act(b, Action::Recheck(vec![dl.id]))));
+        actions = actions.push(icon_button(
+            if paused { Icon::Play } else { Icon::Pause },
+            if paused { "Resume" } else { "Pause" },
+            (!b.busy).then(|| act(b, action.clone())),
+            look,
+        ));
+        menu.push(("Check files again".into(), act(b, Action::Recheck(vec![dl.id]))));
     }
     if dl.finished_at.is_some() && dl.import_state != "DONE" && dl.state != "REMOVED" {
-        actions.push(
+        actions = actions.push(
             button("Import", look).small().on_press_maybe((!b.busy).then(|| act(b, Action::Import(dl.id)))).boxed(),
         );
     }
     if !matches!(dl.state.as_str(), "REMOVED" | "DONE") {
-        actions.push(button("Recheck", look).plain().small().on_press(act(b, Action::Recheck(vec![dl.id]))).boxed());
-        for (label, delete) in [("Remove", false), ("Delete files", true)] {
-            let message = confirm(
-                b,
-                if delete { "Delete download and files?" } else { "Remove download?" },
-                if delete {
-                    "This permanently deletes the downloaded files."
-                } else {
-                    "The downloaded files will stay on disk."
-                },
-                Action::Remove(vec![dl.id], delete),
-            );
-            menu.push((label.into(), message.clone()));
-            actions.push(button(label, look).danger().small().on_press(message).boxed());
+        for (label, delete) in [("Remove, keep its files", false), ("Remove and delete its files", true)] {
+            menu.push((
+                label.into(),
+                confirm(
+                    b,
+                    if delete { "Delete download and files?" } else { "Remove download?" },
+                    if delete {
+                        "This permanently deletes the downloaded files."
+                    } else {
+                        "The downloaded files will stay on disk."
+                    },
+                    Action::Remove(vec![dl.id], delete),
+                ),
+            ));
         }
     }
-    details = details.push(line(actions));
+    if !menu.is_empty() {
+        actions = actions.push(more(menu.clone(), look));
+    }
     let row = row![
         if nested { space().width(0).boxed() } else { picture(b, dl.poster.as_deref(), 40.0, 60.0, 7.0, look) },
-        details
+        details,
+        actions
     ]
     .spacing(14)
     .boxed();
