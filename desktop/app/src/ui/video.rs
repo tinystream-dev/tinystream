@@ -625,18 +625,24 @@ mod tests {
                 std::thread::sleep(Duration::from_millis(5));
             }
         };
+        let render = |time| Overlay::default().render(Some(document.clone()), [800, 450, 320, 180, 0, 0, 0, 0], time);
         let first = wait(0, true);
+        let before = render(mpv.get_property::<f64>("time-pos").unwrap()).unwrap();
+        // An exact seek lands on the first frame at or after its target, which mpv reports as the
+        // time until that frame is up.
+        let fps = mpv.get_property::<f64>("container-fps").unwrap();
+        let time = (0.3 * fps).ceil() / fps;
+        let expected = render(time).unwrap();
+        assert_ne!(before.pixels, expected.pixels);
+        assert_ne!(render(0.3).unwrap().pixels, expected.pixels);
         mpv.command(&["seek", "0.3", "absolute+exact"]).unwrap();
-        let mut sought = wait(first.id, true);
-        let deadline = Instant::now() + Duration::from_secs(5);
-        while (mpv.get_property::<f64>("time-pos").unwrap() - 0.3).abs() > 0.05 {
+        let mut sought = first;
+        while sought.subtitles.as_ref().unwrap().pixels != expected.pixels {
             sought = wait(sought.id, true);
-            assert!(Instant::now() < deadline);
+            let pixels = &sought.subtitles.as_ref().unwrap().pixels;
+            assert!(*pixels == before.pixels || *pixels == expected.pixels, "subtitles drawn for another frame's time");
         }
-        let time = mpv.get_property::<f64>("time-pos").unwrap();
-        let expected =
-            Overlay::default().render(Some(document.clone()), [800, 450, 320, 180, 0, 0, 0, 0], time).unwrap();
-        assert_eq!(sought.subtitles.as_ref().unwrap().pixels, expected.pixels);
+        assert!((mpv.get_property::<f64>("time-pos").unwrap() - time).abs() < 1e-6);
         mpv.set_property("speed", 2.0).unwrap();
         assert!(mpv.get_property::<bool>("pause").unwrap());
 
