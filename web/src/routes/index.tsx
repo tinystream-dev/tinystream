@@ -2,7 +2,7 @@
 
 import { useQuery } from '@tanstack/react-query'
 import { Link, createFileRoute } from '@tanstack/react-router'
-import { Play, Radio, RotateCcw } from 'lucide-react'
+import { Play, Radio, RotateCcw, Tv } from 'lucide-react'
 import { type CSSProperties, useState } from 'react'
 import { remaining } from '@tinystream/shared/format'
 import { Empty, Page, PageTitle, Section } from '../components/Page'
@@ -19,7 +19,7 @@ import type { AlbumCard } from '../music/api'
 import { AlbumTile } from '../music/components'
 import type { HomeQuery } from '../gql/graphql'
 import { type CalendarEntry, librariesQuery, request } from '../lib/api'
-import { airs, countdown, episodeCode, useFeatures, useNow } from '../lib/downloads'
+import { airs, countdown, duration, episodeCode, useFeatures, useNow } from '../lib/downloads'
 import { useMe } from '../lib/hooks'
 import { useTilt } from '../lib/tilt'
 import { useTitle } from '../lib/title'
@@ -40,6 +40,7 @@ const HomeQueryDoc = graphql(`
           id
           label
           name
+          overview
           still
           duration
           title {
@@ -251,8 +252,9 @@ function Hero({ entry: e }: { entry: ContinueEntry }) {
   const progress = resuming && v.duration ? e.position / v.duration : 0
   const left = remaining(e.position, v.duration)
   const label = e.newEpisode ? 'New episode' : resuming ? 'Continue watching' : 'Up next'
+  const runtime = !resuming && v.duration && v.duration >= 60 ? duration(v.duration) : null
   return (
-    <Link to="/watch/$id" params={{ id: String(v.id) }} className="group mb-11 block rounded-[23px] outline-offset-3 outline-none focus-visible:outline-2 focus-visible:outline-glow/70">
+    <div className="group relative mb-11 rounded-[23px] outline-offset-3 has-[.cover:focus-visible]:outline-2 has-[.cover:focus-visible]:outline-glow/70">
       <Squircle radius={22} edge className="relative min-h-64 overflow-hidden bg-raised md:h-76">
         {image && !broken && (
           <Img
@@ -269,16 +271,18 @@ function Hero({ entry: e }: { entry: ContinueEntry }) {
           } as CSSProperties}
         />
         <div className="absolute inset-0 bg-linear-to-r from-canvas via-canvas/65 to-transparent" />
-        <div className="relative flex h-full min-h-64 flex-col justify-end p-6 md:p-9">
+        <Link to="/watch/$id" params={{ id: String(v.id) }} aria-label={`${resuming ? 'Resume' : 'Play'} ${v.title.name}`} className="cover absolute inset-0 outline-none" />
+        <div className="pointer-events-none relative flex h-full min-h-64 flex-col justify-end p-6 md:p-9">
           <p className="flex items-center gap-2 text-[13px] font-medium text-ink-2">
             {e.newEpisode ? <Radio className="size-3.5 text-warn" /> : <RotateCcw className="size-3.5" />}
             {label}
           </p>
           <p className="mt-2 max-w-2xl text-[28px] leading-tight font-semibold tracking-[-0.02em] text-balance md:text-[38px]">{v.title.name}</p>
           <p className="mt-1 truncate text-sm text-ink-2">
-            {[v.label, v.name].filter(Boolean).join(' · ')}
+            {[v.label, v.name, runtime].filter(Boolean).join(' · ')}
           </p>
-          <div className="mt-5 flex flex-wrap items-end gap-x-6 gap-y-4">
+          {v.overview && <p className="mt-3 line-clamp-2 max-w-[560px] text-sm leading-normal text-ink-2">{v.overview}</p>}
+          <div className="mt-6 flex flex-wrap items-end gap-x-6 gap-y-4">
             {resuming && left && (
               <div>
                 <span className="block text-[32px] leading-none font-semibold tracking-tight whitespace-nowrap md:text-[40px]">
@@ -291,17 +295,28 @@ function Hero({ entry: e }: { entry: ContinueEntry }) {
                 )}
               </div>
             )}
-            <Squircle
-              radius={14}
-              className="inline-flex h-11 items-center gap-2.5 bg-accent px-5 text-[15px] font-medium text-on-accent transition-colors group-hover:bg-accent-hover"
-            >
-              <Play className="size-4.5 fill-current" />
-              {resuming ? 'Resume' : 'Play'}
-            </Squircle>
+            <div className="flex gap-2.5">
+              <Squircle
+                radius={14}
+                className="inline-flex h-11 items-center gap-2.5 bg-accent px-5 text-[15px] font-medium text-on-accent transition-colors group-hover:bg-accent-hover"
+              >
+                <Play className="size-4.5 fill-current" />
+                {resuming ? 'Resume' : 'Play'}
+              </Squircle>
+              <Link
+                to="/title/$id"
+                params={{ id: String(v.title.id) }}
+                className="pointer-events-auto rounded-[15px] outline-none focus-visible:outline-2 focus-visible:outline-glow/70"
+              >
+                <Squircle radius={14} edge className="inline-flex h-11 items-center gap-2.5 bg-panel px-5 text-[15px] font-medium text-ink transition-colors hover:bg-float">
+                  <Tv className="size-4.5" /> {v.label ? 'Go to show' : 'Go to movie'}
+                </Squircle>
+              </Link>
+            </div>
           </div>
         </div>
       </Squircle>
-    </Link>
+    </div>
   )
 }
 
