@@ -205,6 +205,7 @@ fn render(
     let mut redraw = false;
     let mut overlay = Overlay::default();
     let mut subtitle_revision = 0;
+    let mut time = None;
     loop {
         let (wanted, swaps, frame, target, document) = {
             let mut state = shared.state.lock().unwrap();
@@ -287,11 +288,15 @@ fn render(
             .map_err(|error| error.to_string())?;
         unsafe { (gl.finish)() };
 
+        // While seeking, mpv redraws the picture it had but reports the seek's target.
+        if !mpv.get_property::<bool>("seeking").unwrap_or(false) {
+            time = mpv.get_property::<f64>("time-pos").ok().filter(|time| time.is_finite());
+        }
         let subtitles = if document.is_none() {
             overlay.clear();
             None
         } else {
-            mpv.get_property::<f64>("time-pos").ok().filter(|time| time.is_finite()).and_then(|time| {
+            time.and_then(|time| {
                 let params = mpv.get_property::<mpv::Node>("video-params").ok();
                 let dimensions = mpv.get_property::<mpv::Node>("osd-dimensions").ok();
                 let value = |node: &Option<mpv::Node>, key: &str, fallback: i32| {
