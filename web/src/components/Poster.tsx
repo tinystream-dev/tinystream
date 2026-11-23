@@ -132,7 +132,7 @@ export function Poster({ card, caption }: { card: Card; caption?: string }) {
             ? 'Watched'
             : card.kind === 'SHOW'
               ? card.watchedCount > 0
-                ? `${card.watchedCount} of ${card.videoCount} watched`
+                ? (card.year ?? '')
                 : `${card.videoCount} episode${card.videoCount === 1 ? '' : 's'}`
               : (card.year ?? 'Movie'))}
       </p>

@@ -224,7 +224,7 @@ fn poster<'a>(b: &'a Browsing, c: &'a Card, caption: Option<String>, look: &Look
         if done {
             "Watched".into()
         } else if c.kind == "SHOW" && c.watched_count > 0 {
-            format!("{} of {} watched", c.watched_count, c.video_count)
+            c.year.map(|y| y.to_string()).unwrap_or_default()
         } else if c.kind == "SHOW" {
             format!("{} episode{}", c.video_count, if c.video_count == 1 { "" } else { "s" })
         } else {

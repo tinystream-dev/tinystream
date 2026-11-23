@@ -7,7 +7,7 @@ import { Empty, Page, PageTitle } from '../components/Page'
 import { Poster } from '../components/Poster'
 import { PosterGrid } from '../components/PosterGrid'
 import { PosterGridSkeleton } from '../components/Skeleton'
-import { Chip } from '../components/ui'
+import { Segmented } from '../components/ui'
 import { graphql } from '../gql'
 import { type Card, librariesQuery, request } from '../lib/api'
 import { BookLibrary } from '../books/Library'
@@ -75,19 +75,9 @@ function VideoLibrary({ name }: { name: string }) {
       >
         {name}
       </PageTitle>
-      <div className="mb-7 flex flex-wrap items-center gap-1">
-        {filters.map((f) => (
-          <Chip key={f.value} active={filter === f.value} onClick={() => setFilter(f.value)}>
-            {f.label}
-          </Chip>
-        ))}
-        <div className="flex-1" />
-        <Chip active={sort === 'title'} onClick={() => setSort('title')}>
-          A–Z
-        </Chip>
-        <Chip active={sort === 'year'} onClick={() => setSort('year')}>
-          Newest
-        </Chip>
+      <div className="mb-7 flex flex-wrap items-center justify-between gap-3">
+        <Segmented value={filter} onChange={setFilter} options={filters} />
+        <Segmented value={sort} onChange={setSort} options={[{ value: 'title', label: 'A–Z' }, { value: 'year', label: 'Newest' }]} />
       </div>
       {data && cards.length === 0 && (
         <Empty title={data.length ? 'Nothing matches this filter' : 'This library is empty'} />

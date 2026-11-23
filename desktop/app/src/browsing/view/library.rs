@@ -32,17 +32,16 @@ pub(super) fn library<'a>(b: &'a Browsing, route: &Route, name: &'a str, look: &
         list.sort_by_key(|c| c.name.to_lowercase());
     }
     let count = list.len();
-    let filters = Row::with_children(
-        [("all", "All"), ("watching", "Watching"), ("unwatched", "Not started"), ("watched", "Watched")]
-            .into_iter()
-            .map(|(v, l)| chip(l, filter == v, msg(b, Message::Filter(v.into())), look))
-            .chain([
-                space().width(Fill).boxed(),
-                chip("A–Z", !newest, msg(b, Message::Sort(false)), look),
-                chip("Newest", newest, msg(b, Message::Sort(true)), look),
-            ]),
-    )
-    .spacing(4)
+    let filters = row![
+        segmented(
+            filter,
+            &[("all", "All"), ("watching", "Watching"), ("unwatched", "Not started"), ("watched", "Watched")],
+            move |v| msg(b, Message::Filter(v.into())),
+            look
+        ),
+        space().width(Fill),
+        segmented(newest, &[(false, "A–Z"), (true, "Newest")], move |v| msg(b, Message::Sort(v)), look)
+    ]
     .align_y(Alignment::Center);
     column![
         page_title(
@@ -156,17 +155,25 @@ pub(super) fn books<'a>(b: &'a Browsing, name: &str, series: Option<&str>, look:
     }
     let mut page = column![heading(series.unwrap_or(name).to_owned(), look)].width(Fill).spacing(16);
     if series.is_none() {
-        page = page.push(line(
-            [("all", "All"), ("reading", "Reading"), ("unread", "Not started"), ("read", "Read")]
-                .into_iter()
-                .map(|(v, l)| chip(l, filter == v, msg(b, Message::Filter(v.into())), look))
-                .chain(
-                    [("title", "A–Z"), ("author", "Author"), ("added", "Newest")]
-                        .into_iter()
-                        .map(|(v, l)| chip(l, sort == v, msg(b, Message::BookSort(v.into())), look)),
+        page = page.push(
+            row![
+                segmented(
+                    filter,
+                    &[("all", "All"), ("reading", "Reading"), ("unread", "Not started"), ("read", "Read")],
+                    move |v| msg(b, Message::Filter(v.into())),
+                    look
+                ),
+                space().width(Fill),
+                segmented(
+                    sort,
+                    &[("title", "A–Z"), ("author", "Author"), ("added", "Newest")],
+                    move |v| msg(b, Message::BookSort(v.into())),
+                    look
                 )
-                .collect(),
-        ));
+            ]
+            .align_y(Alignment::Center)
+            .boxed(),
+        );
     }
     if books.is_empty() {
         return page
