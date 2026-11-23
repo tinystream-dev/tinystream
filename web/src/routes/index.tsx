@@ -254,7 +254,7 @@ function Hero({ entry: e }: { entry: ContinueEntry }) {
   const runtime = !resuming && v.duration && v.duration >= 60 ? duration(v.duration) : null
   return (
     <div className="group relative mb-11 rounded-[23px] outline-offset-3 has-[.cover:focus-visible]:outline-2 has-[.cover:focus-visible]:outline-glow/70">
-      <Squircle radius={22} edge className="relative min-h-64 overflow-hidden bg-raised md:h-76">
+      <Squircle radius={22} edge className="relative overflow-hidden bg-raised">
         {image && !broken && (
           <Img
             src={image}
@@ -271,7 +271,7 @@ function Hero({ entry: e }: { entry: ContinueEntry }) {
         />
         <div className="absolute inset-0 bg-linear-to-r from-canvas via-canvas/65 to-transparent" />
         <Link to="/watch/$id" params={{ id: String(v.id) }} aria-label={`${resuming ? 'Resume' : 'Play'} ${v.title.name}`} className="cover absolute inset-0 outline-none" />
-        <div className="pointer-events-none relative flex h-full min-h-64 flex-col justify-end p-6 md:p-9">
+        <div className="pointer-events-none relative p-6 md:p-9">
           <p className="flex items-center gap-2 text-[13px] font-medium text-ink-2">
             {e.newEpisode ? <Radio className="size-3.5 text-warn" /> : <RotateCcw className="size-3.5" />}
             {label}

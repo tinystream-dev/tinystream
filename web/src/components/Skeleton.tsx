@@ -48,7 +48,7 @@ export function RowSkeleton({ wide = false }: { wide?: boolean }) {
 export function HomeSkeleton() {
   return (
     <Page>
-      <Bone className="mb-11 h-60 rounded-[22px] md:h-72" />
+      <Bone className="mb-11 h-50 rounded-[22px] md:h-59" />
       <RowSkeleton wide />
       <RowSkeleton />
     </Page>
