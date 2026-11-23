@@ -54,7 +54,6 @@ pub(super) fn home<'a>(b: &'a Browsing, look: &Look) -> View<'a> {
                         crate::ui::icon::icon(Icon::RotateCcw, 14.0).color(look.ink_2)
                     },
                     detail,
-                    summary: v.overview.as_deref().filter(|o| !o.is_empty()),
                     image: v.title.backdrop.as_deref().or(v.still.as_deref()),
                     tint: v.title.backdrop_tint.as_deref().or(v.title.poster_tint.as_deref()),
                     route: Some(route),
