@@ -239,7 +239,7 @@ fn up_next<'a>(
             image: e.backdrop.as_deref().or(e.poster.as_deref()),
             tint: e.backdrop_tint.as_deref(),
             route: entry_route(e),
-            height: 240.0,
+            height: Some(240.0),
             name_size: 34.0,
             padding: 32.0,
             body: container(body).height(48).align_y(Alignment::Center).boxed(),

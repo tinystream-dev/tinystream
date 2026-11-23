@@ -57,7 +57,7 @@ pub(super) fn home<'a>(b: &'a Browsing, look: &Look) -> View<'a> {
                     image: v.title.backdrop.as_deref().or(v.still.as_deref()),
                     tint: v.title.backdrop_tint.as_deref().or(v.title.poster_tint.as_deref()),
                     route: Some(route),
-                    height: 304.0,
+                    height: None,
                     name_size: 38.0,
                     padding: 36.0,
                     body: if resuming && !left.is_empty() {

@@ -390,7 +390,8 @@ struct Hero<'a> {
     image: Option<&'a str>,
     tint: Option<&'a str>,
     route: Option<Route>,
-    height: f32,
+    /// `None` fits the content, with `padding` all around it.
+    height: Option<f32>,
     name_size: f32,
     padding: f32,
     /// What sits under the detail line: the big number and the button.
@@ -427,15 +428,23 @@ fn hero<'a>(b: &'a Browsing, props: Hero<'a>, look: &Look) -> View<'a> {
         Some(aside) => row![content, container(aside).width(256)].spacing(32).align_y(Alignment::End).boxed(),
         None => content.boxed(),
     };
-    layers.push(container(content).align_bottom(Fill).padding(padding).boxed());
+    let content = container(content).align_bottom(Fill).padding(padding);
+    let stack = match height {
+        Some(height) => {
+            layers.push(content.boxed());
+            iced_widget::Stack::with_children(layers).height(height)
+        },
+        None => {
+            let mut stack = iced_widget::Stack::with_children([content.boxed()]);
+            for layer in layers.into_iter().rev() {
+                stack = stack.push_under(layer);
+            }
+            stack
+        },
+    };
     let destination = route;
     card_button(look)
-        .content(crate::ui::tilt::card(
-            iced_widget::Stack::with_children(layers).height(height).width(Fill),
-            22.0,
-            0.0,
-            look,
-        ))
+        .content(crate::ui::tilt::card(stack.width(Fill), 22.0, 0.0, look))
         .on_press_maybe(destination.map(AppMessage::Navigate))
         .boxed()
 }
