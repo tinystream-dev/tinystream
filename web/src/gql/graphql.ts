@@ -1694,7 +1694,7 @@ export type RemoveDownloadsMutation = { removeDownloads: Array<number> };
 export type HomeQueryVariables = Exact<{ [key: string]: never; }>;
 
 
-export type HomeQuery = { home: { continueWatching: Array<{ position: number, upNext: boolean, newEpisode: boolean, watchedAt: number | null, video: { id: number, label: string | null, name: string | null, overview: string | null, still: string, duration: number | null, title: { id: number, name: string, poster: string | null, backdrop: string | null, posterTint: string | null, backdropTint: string | null } } }>, recentlyAdded: Array<{ library: string, titles: Array<{ id: number, kind: TitleKind, library: string, name: string, year: number | null, poster: string | null, backdrop: string | null, watchedCount: number, videoCount: number, progress: number | null, freshCount: number }> }>, popularHere: Array<{ people: number, title: { id: number, kind: TitleKind, library: string, name: string, year: number | null, poster: string | null, backdrop: string | null, watchedCount: number, videoCount: number, progress: number | null, freshCount: number } }> } };
+export type HomeQuery = { home: { continueWatching: Array<{ position: number, upNext: boolean, newEpisode: boolean, watchedAt: number | null, video: { id: number, label: string | null, name: string | null, still: string, duration: number | null, title: { id: number, name: string, poster: string | null, backdrop: string | null, posterTint: string | null, backdropTint: string | null } } }>, recentlyAdded: Array<{ library: string, titles: Array<{ id: number, kind: TitleKind, library: string, name: string, year: number | null, poster: string | null, backdrop: string | null, watchedCount: number, videoCount: number, progress: number | null, freshCount: number }> }>, popularHere: Array<{ people: number, title: { id: number, kind: TitleKind, library: string, name: string, year: number | null, poster: string | null, backdrop: string | null, watchedCount: number, videoCount: number, progress: number | null, freshCount: number } }> } };
 
 export type ComingUpQueryVariables = Exact<{
   from: number;
@@ -6766,7 +6766,6 @@ export const HomeDocument = new TypedDocumentString(`
         id
         label
         name
-        overview
         still
         duration
         title {

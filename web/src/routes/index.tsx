@@ -40,7 +40,6 @@ const HomeQueryDoc = graphql(`
           id
           label
           name
-          overview
           still
           duration
           title {
@@ -281,8 +280,7 @@ function Hero({ entry: e }: { entry: ContinueEntry }) {
           <p className="mt-1 truncate text-sm text-ink-2">
             {[v.label, v.name, runtime].filter(Boolean).join(' · ')}
           </p>
-          {v.overview && <p className="mt-3 line-clamp-2 max-w-[560px] text-sm leading-normal text-ink-2">{v.overview}</p>}
-          <div className="mt-6 flex flex-wrap items-end gap-x-6 gap-y-4">
+          <div className="mt-5 flex flex-wrap items-end gap-x-6 gap-y-4">
             {resuming && left && (
               <div>
                 <span className="block text-[32px] leading-none font-semibold tracking-tight whitespace-nowrap md:text-[40px]">
