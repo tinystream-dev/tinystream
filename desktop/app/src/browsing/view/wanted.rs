@@ -86,21 +86,35 @@ pub(super) fn wanted<'a>(b: &'a Browsing, route: &Route, look: &Look) -> View<'a
         if !menu.is_empty() {
             actions = actions.push(more(menu.clone(), look));
         }
+        let backdrop = first.title.as_ref().and_then(|t| t.backdrop.as_deref().or(t.poster.as_deref()));
+        let name = text(first.show.clone(), ty::XL, look.ink).font(SEMIBOLD);
+        let name = match first.title.as_ref() {
+            Some(t) => {
+                let ink = look.ink;
+                crate::ui::pressable::pressable(name, 6.0, look, move |_| crate::ui::pressable::Appearance {
+                    paint: crate::ui::squircle::Paint::NONE,
+                    ink,
+                })
+                .on_press(AppMessage::Navigate(Route::Title(t.id as u64)))
+                .boxed()
+            },
+            None => name.boxed(),
+        };
         let header = row![
-            picture(b, first.title.as_ref().and_then(|t| t.poster.as_deref()), 40.0, 60.0, 7.0, look),
+            picture(b, first.title.as_ref().and_then(|t| t.poster.as_deref()), 64.0, 96.0, 10.0, look),
             column![
-                title_link(&first.show, first.title.as_ref().map(|t| Route::Title(t.id as u64)), look),
+                name,
                 text(
                     format!("Season {season} · {count} episode{}", if count == 1 { "" } else { "s" }),
-                    ty::XS,
-                    look.ink_3
+                    ty::S13,
+                    look.ink_2
                 )
             ]
-            .spacing(6)
+            .spacing(2)
             .width(Fill),
             actions
         ]
-        .spacing(14)
+        .spacing(18)
         .align_y(Alignment::Center);
         let mut list = Column::<View<'a>>::new();
         for (i, e) in episodes.into_iter().enumerate() {
@@ -118,9 +132,20 @@ pub(super) fn wanted<'a>(b: &'a Browsing, route: &Route, look: &Look) -> View<'a
             } else {
                 e.next_search
                     .filter(|_| e.state == "WANTED")
-                    .map(|t| format!("Next look {}", countdown(t).replace("airing now", "now")))
+                    .map(|t| match t - now() {
+                        s if s <= 0 => "Looking now".to_owned(),
+                        s => format!("Next look in {}", duration(if s >= 60 { (s + 59) / 60 * 60 } else { s })),
+                    })
                     .or_else(|| e.searched_at.map(|t| format!("Looked {}", relative(t))))
                     .unwrap_or_default()
+            };
+            let (word, tone) = match (upcoming, e.state.as_str()) {
+                (true, _) => ("Upcoming", look.ink_3),
+                (_, "WANTED") => ("Searching", look.warn),
+                (_, "GRABBED") => ("Downloading", look.info),
+                (_, "MISSING") => ("Missing", look.danger),
+                (_, "SKIPPED") => ("Skipped", look.ink_3),
+                _ => ("Waiting", look.ink_3),
             };
             if i > 0 {
                 list = list.push(divider(look));
@@ -131,20 +156,53 @@ pub(super) fn wanted<'a>(b: &'a Browsing, route: &Route, look: &Look) -> View<'a
                     text(e.name.clone().unwrap_or_else(|| format!("Episode {}", e.episode)), ty::SM, look.ink)
                         .width(Fill),
                     text(when, ty::XS, look.ink_3),
-                    container(if upcoming { badge("Upcoming", Tone::Quiet, look) } else { state(&e.state, look) })
-                        .width(96)
-                        .align_x(Alignment::End)
+                    row![
+                        squircle(space().width(7).height(7), 3.5, look).fill(tone),
+                        text(word, ty::S13, if upcoming { look.ink_2 } else { tone })
+                    ]
+                    .spacing(8)
+                    .align_y(Alignment::Center)
+                    .width(112)
                 ]
-                .spacing(12)
+                .spacing(16)
                 .align_y(Alignment::Center)
-                .padding([10, 0])
+                .padding([11, 0])
                 .boxed(),
             );
         }
-        let content = column![header, container(list).padding(Padding { left: 54.0, right: 4.0, ..Padding::ZERO })]
-            .spacing(6)
-            .boxed();
-        page = page.push(crate::ui::context_menu::context_menu(raised(content, look), menu, look));
+        let raised = look.raised;
+        let band = 156.0;
+        let content = column![
+            container(header).padding(Padding { top: 20.0, right: 20.0, bottom: 0.0, left: 20.0 }),
+            container(list).padding(Padding { top: 8.0, right: 20.0, bottom: 8.0, left: 102.0 })
+        ];
+        let layers = [
+            container(art(b, backdrop, 20.0, look)).width(Fill).height(band).boxed(),
+            container(crate::ui::squircle::gradient(
+                20.0,
+                std::f32::consts::FRAC_PI_2,
+                vec![(0.0, raised), (0.35, raised), (0.85, raised.scale_alpha(0.45))],
+                look,
+            ))
+            .width(Fill)
+            .height(band)
+            .boxed(),
+            container(crate::ui::squircle::gradient(
+                20.0,
+                std::f32::consts::PI,
+                vec![(0.0, raised.scale_alpha(0.2)), (0.5, raised.scale_alpha(0.45)), (1.0, raised)],
+                look,
+            ))
+            .width(Fill)
+            .height(band)
+            .boxed(),
+        ];
+        let mut card = iced_widget::Stack::with_children([content.width(Fill).boxed()]).width(Fill);
+        for layer in layers.into_iter().rev() {
+            card = card.push_under(layer);
+        }
+        let card = squircle(card.boxed(), 20.0, look).fill(raised).edge().width(Fill).boxed();
+        page = page.push(crate::ui::context_menu::context_menu(card, menu, look));
     }
     page.spacing(16).boxed()
 }
