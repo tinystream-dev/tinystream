@@ -156,10 +156,12 @@ fn shelf<'a>(b: &'a Browsing, id: impl Into<String>, children: Vec<View<'a>>, lo
 }
 fn title_link<'a>(name: &'a str, route: Option<Route>, look: &Look) -> View<'a> {
     if let Some(route) = route {
-        card_button(look)
-            .content(truncate(name, ty::SM, look.ink).font(MEDIUM))
-            .on_press(AppMessage::Navigate(route))
-            .boxed()
+        let ink = look.ink;
+        crate::ui::pressable::pressable(truncate(name, ty::SM, look.ink).font(MEDIUM), 6.0, look, move |_| {
+            crate::ui::pressable::Appearance { paint: crate::ui::squircle::Paint::NONE, ink }
+        })
+        .on_press(AppMessage::Navigate(route))
+        .boxed()
     } else {
         truncate(name, ty::SM, look.ink).font(MEDIUM).boxed()
     }

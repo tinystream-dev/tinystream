@@ -77,7 +77,7 @@ function WantedPage() {
             size="sm"
             value={filter}
             onChange={setFilter}
-            options={FILTERS.map((f) => ({ value: f, label: `${FILTER_LABELS[f]} ${count(f)}` }))}
+            options={FILTERS.map((f) => ({ value: f, label: count(f) > 0 ? `${FILTER_LABELS[f]} ${count(f)}` : FILTER_LABELS[f] }))}
           />
         }
       >
