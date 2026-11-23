@@ -1989,7 +1989,7 @@ export type MatchTitleMutation = { matchTitle: { id: number } };
 export type WantedQueryVariables = Exact<{ [key: string]: never; }>;
 
 
-export type WantedQuery = { wanted: Array<{ seriesId: number, show: string, season: number, episode: number, name: string | null, airAt: number | null, aired: boolean, state: EpisodeState, attempts: number, searchedAt: number | null, nextSearch: number | null, title: { id: number } | null }> };
+export type WantedQuery = { wanted: Array<{ seriesId: number, show: string, season: number, episode: number, name: string | null, airAt: number | null, aired: boolean, state: EpisodeState, attempts: number, searchedAt: number | null, nextSearch: number | null, title: { id: number, poster: string | null } | null }> };
 
 export class TypedDocumentString<TResult, TVariables>
   extends String
@@ -7434,6 +7434,7 @@ export const WantedDocument = new TypedDocumentString(`
     seriesId
     title {
       id
+      poster
     }
     show
     season

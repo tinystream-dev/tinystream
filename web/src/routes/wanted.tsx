@@ -19,6 +19,7 @@ const WantedQueryDoc = graphql(`
       seriesId
       title {
         id
+        poster
       }
       show
       season
@@ -47,6 +48,25 @@ const FILTER_LABELS: Record<Filter, string> = { all: 'All', wanted: 'Searching',
 
 /** Wanted episodes that haven't aired aren't being searched for yet. */
 const filterOf = (e: WantedEntry): Filter => (e.state === 'WANTED' && !e.aired ? 'upcoming' : (e.state.toLowerCase() as Filter))
+
+function when(e: WantedEntry, now: number) {
+  if (filterOf(e) === 'upcoming') {
+    if (!e.airAt) return ''
+    const at = airs(e.airAt, now)
+    return `Airs ${/^(Today|Tomorrow) /.test(at) ? at[0].toLowerCase() + at.slice(1) : at}`
+  }
+  if (e.state === 'WANTED' && e.nextSearch) return `Next look ${countdown(e.nextSearch, now).replace('airing now', 'now')}`
+  return e.searchedAt ? `Looked ${relative(e.searchedAt, now)}` : ''
+}
+
+function Poster({ src }: { src?: string | null }) {
+  const [broken, setBroken] = useState(false)
+  return (
+    <Squircle radius={7} className="aspect-[2/3] w-10 shrink-0 bg-panel">
+      {src && !broken && <img src={src} alt="" loading="lazy" onError={() => setBroken(true)} className="size-full object-cover" />}
+    </Squircle>
+  )
+}
 
 function WantedPage() {
   const now = useNow(1000)
@@ -90,7 +110,8 @@ function WantedPage() {
             const first = list[0]
             return (
               <Squircle key={`${first.seriesId}:${first.season}`} radius={16} edge className="bg-raised p-4">
-                <div className="mb-3 flex items-center gap-3">
+                <div className="flex items-center gap-3.5">
+                  <Poster src={first.title?.poster} />
                   <div className="min-w-0 flex-1">
                     {first.title ? (
                       <Link to="/title/$id" params={{ id: String(first.title.id) }} className="text-[15px] font-semibold tracking-tight hover:underline">
@@ -99,7 +120,9 @@ function WantedPage() {
                     ) : (
                       <span className="text-[15px] font-semibold tracking-tight">{first.show}</span>
                     )}
-                    <span className="ml-2 text-sm text-ink-3">Season {first.season}</span>
+                    <div className="mt-1 text-xs text-ink-3">
+                      Season {first.season} · {list.length} {list.length === 1 ? 'episode' : 'episodes'}
+                    </div>
                   </div>
                   <Button
                     size="sm"
@@ -135,22 +158,15 @@ function WantedPage() {
                     </Popover>
                   )}
                 </div>
-                <div className="-mx-2 divide-y divide-line">
+                <div className="mt-1.5 divide-y divide-line sm:ml-[3.375rem] sm:mr-1">
                   {list.map((e) => (
-                    <div key={e.episode} className="flex items-center gap-3 px-2 py-2">
+                    <div key={e.episode} className="flex items-center gap-3 py-2.5">
                       <span className="w-16 shrink-0 text-xs text-ink-3 tabular">{episodeCode(e.season, e.episode)}</span>
                       <span className="min-w-0 flex-1 truncate text-sm">{e.name ?? `Episode ${e.episode}`}</span>
-                      <span className="hidden shrink-0 text-xs text-ink-3 sm:block">{e.airAt ? airs(e.airAt, now) : ''}</span>
-                      <span className="w-36 shrink-0 text-right text-xs text-ink-3 tabular">
-                        {filterOf(e) === 'upcoming'
-                          ? ''
-                          : e.state === 'WANTED' && e.nextSearch
-                            ? `next look ${countdown(e.nextSearch, now).replace('airing now', 'now')}`
-                            : e.searchedAt
-                              ? `looked ${relative(e.searchedAt, now)}`
-                              : ''}
+                      <span className="hidden shrink-0 text-xs text-ink-3 tabular sm:block">{when(e, now)}</span>
+                      <span className="flex w-24 shrink-0 justify-end">
+                        {filterOf(e) === 'upcoming' ? <Badge>Upcoming</Badge> : <StateBadge state={e.state} />}
                       </span>
-                      {filterOf(e) === 'upcoming' ? <Badge>Not aired</Badge> : <StateBadge state={e.state} />}
                     </div>
                   ))}
                 </div>

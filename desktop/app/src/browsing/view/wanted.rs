@@ -41,14 +41,8 @@ pub(super) fn wanted<'a>(b: &'a Browsing, route: &Route, look: &Look) -> View<'a
     for ((series, season), mut episodes) in groups {
         episodes.sort_by_key(|e| e.episode);
         let first = episodes[0];
-        let mut header = row![
-            row![
-                title_link(&first.show, first.title.as_ref().map(|t| Route::Title(t.id as u64)), look),
-                text(format!("Season {season}"), ty::SM, look.ink_3)
-            ]
-            .spacing(8)
-            .align_y(Alignment::Center)
-            .width(Fill),
+        let count = episodes.len();
+        let mut actions = row![
             button("Search", look)
                 .small()
                 .icon(Icon::Search)
@@ -57,13 +51,13 @@ pub(super) fn wanted<'a>(b: &'a Browsing, route: &Route, look: &Look) -> View<'a
                     Message::Dialog(Some(Dialog::Releases {
                         series,
                         season,
-                        episodes: if episodes.len() == 1 { vec![first.episode] } else { vec![] },
+                        episodes: if count == 1 { vec![first.episode] } else { vec![] },
                         name: first.show.clone()
                     }))
                 ))
                 .boxed()
         ]
-        .spacing(12)
+        .spacing(4)
         .align_y(Alignment::Center);
         let menu = if b.can().downloads {
             vec![
@@ -90,38 +84,67 @@ pub(super) fn wanted<'a>(b: &'a Browsing, route: &Route, look: &Look) -> View<'a
             vec![]
         };
         if !menu.is_empty() {
-            header = header.push(more(menu.clone(), look));
+            actions = actions.push(more(menu.clone(), look));
         }
-        let mut content = Column::<View<'a>>::new().push((header).boxed()).spacing(12);
-        for e in episodes {
-            let looked = if filter_of(e) == "upcoming" {
-                String::new()
+        let header = row![
+            picture(b, first.title.as_ref().and_then(|t| t.poster.as_deref()), 40.0, 60.0, 7.0, look),
+            column![
+                title_link(&first.show, first.title.as_ref().map(|t| Route::Title(t.id as u64)), look),
+                text(
+                    format!("Season {season} · {count} episode{}", if count == 1 { "" } else { "s" }),
+                    ty::XS,
+                    look.ink_3
+                )
+            ]
+            .spacing(6)
+            .width(Fill),
+            actions
+        ]
+        .spacing(14)
+        .align_y(Alignment::Center);
+        let mut list = Column::<View<'a>>::new();
+        for (i, e) in episodes.into_iter().enumerate() {
+            let upcoming = filter_of(e) == "upcoming";
+            let when = if upcoming {
+                e.air_at
+                    .map(|t| {
+                        let at = airs(t);
+                        match at.split_once(' ') {
+                            Some((day @ ("Today" | "Tomorrow"), rest)) => format!("Airs {} {rest}", day.to_lowercase()),
+                            _ => format!("Airs {at}"),
+                        }
+                    })
+                    .unwrap_or_default()
             } else {
                 e.next_search
                     .filter(|_| e.state == "WANTED")
-                    .map(|t| format!("next look {}", countdown(t).replace("airing now", "now")))
-                    .or_else(|| e.searched_at.map(|t| format!("looked {}", relative(t))))
+                    .map(|t| format!("Next look {}", countdown(t).replace("airing now", "now")))
+                    .or_else(|| e.searched_at.map(|t| format!("Looked {}", relative(t))))
                     .unwrap_or_default()
             };
-            let mut line = row![
-                text(code(e.season, e.episode), ty::XS, look.ink_3).width(70),
-                text(e.name.clone().unwrap_or_else(|| format!("Episode {}", e.episode)), ty::SM, look.ink).width(Fill),
-                text(e.air_at.map(airs).unwrap_or_default(), ty::XS, look.ink_3)
-            ]
-            .spacing(12)
-            .align_y(Alignment::Center);
-            if !looked.is_empty() {
-                line = line.push(text(looked, ty::XS, look.ink_3).width(144).align_x(Alignment::End).boxed());
+            if i > 0 {
+                list = list.push(divider(look));
             }
-            line = line.push(if filter_of(e) == "upcoming" {
-                badge("Not aired", Tone::Quiet, look)
-            } else {
-                state(&e.state, look)
-            });
-            content = content.push(line.boxed());
+            list = list.push(
+                row![
+                    text(code(e.season, e.episode), ty::XS, look.ink_3).width(64),
+                    text(e.name.clone().unwrap_or_else(|| format!("Episode {}", e.episode)), ty::SM, look.ink)
+                        .width(Fill),
+                    text(when, ty::XS, look.ink_3),
+                    container(if upcoming { badge("Upcoming", Tone::Quiet, look) } else { state(&e.state, look) })
+                        .width(96)
+                        .align_x(Alignment::End)
+                ]
+                .spacing(12)
+                .align_y(Alignment::Center)
+                .padding([10, 0])
+                .boxed(),
+            );
         }
-        let card = raised(content.boxed(), look);
-        page = page.push(crate::ui::context_menu::context_menu(card, menu, look));
+        let content = column![header, container(list).padding(Padding { left: 54.0, right: 4.0, ..Padding::ZERO })]
+            .spacing(6)
+            .boxed();
+        page = page.push(crate::ui::context_menu::context_menu(raised(content, look), menu, look));
     }
     page.spacing(16).boxed()
 }

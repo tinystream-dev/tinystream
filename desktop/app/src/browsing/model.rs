@@ -299,10 +299,15 @@ pub struct Id {
     pub id: i64,
 }
 #[derive(Debug, Clone, Default, Deserialize)]
+pub struct TitleArt {
+    pub id: i64,
+    pub poster: Option<String>,
+}
+#[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Wanted {
     pub series_id: i64,
-    pub title: Option<Id>,
+    pub title: Option<TitleArt>,
     pub show: String,
     pub season: i64,
     pub episode: i64,
