@@ -302,6 +302,7 @@ pub struct Id {
 pub struct TitleArt {
     pub id: i64,
     pub poster: Option<String>,
+    pub backdrop: Option<String>,
 }
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase", default)]

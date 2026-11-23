@@ -211,6 +211,7 @@
       title {
         id
         poster
+        backdrop
       }
       show
       season
