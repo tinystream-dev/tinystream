@@ -20,6 +20,10 @@ case "$app" in
     desktop) manifest=desktop/Cargo.toml; assets=desktop/THIRD_PARTY_LICENSES ;;
     *) echo "unknown application: $app" >&2; exit 1 ;;
 esac
+if [ ! -d "$native/licenses" ]; then
+    echo "$native/licenses doesn't exist; build first, with the same native directory" >&2
+    exit 1
+fi
 
 part() {
     printf '\n\n'
