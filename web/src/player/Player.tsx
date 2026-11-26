@@ -648,6 +648,7 @@ export function Player({ mediaId, room, editClip, startAt }: { mediaId: number; 
         handled()
         const x = Math.max(0, v.volume - 0.05)
         setVolume(x)
+        setMuted(false)
         flash({ kind: 'volume', amount: x })
       } else if (k === 'm') (handled(), setMuted((x) => !x), flash({ kind: 'volume', amount: v.muted ? v.volume : 0 }))
       else if (e.key === '?') (handled(), setHelp((h) => !h))
