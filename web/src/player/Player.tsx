@@ -457,16 +457,17 @@ export function Player({ mediaId, room, editClip, startAt }: { mediaId: number; 
   const seek = useCallback(
     (t: number) => {
       const v = videoRef.current
-      if (!v) return
+      if (!v) return false
       const to = Math.max(0, Math.min(duration || Infinity, t))
       if (room) {
         const s = room.client.getSnapshot()
-        if (!s.room || !canControl(s.room, s.you)) return
+        if (!s.room || !canControl(s.room, s.you)) return false
         room.client.seek(to)
       }
       v.currentTime = to
       setTime(to)
       poke()
+      return true
     },
     [duration, poke, room],
   )
@@ -474,8 +475,7 @@ export function Player({ mediaId, room, editClip, startAt }: { mediaId: number; 
     (delta: number) => {
       const v = videoRef.current
       if (!v) return
-      seek(v.currentTime + delta)
-      flash({ kind: 'seek', amount: delta })
+      if (seek(v.currentTime + delta)) flash({ kind: 'seek', amount: delta })
     },
     [seek, flash],
   )
