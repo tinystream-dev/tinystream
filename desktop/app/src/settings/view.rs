@@ -277,6 +277,19 @@ fn view_inner<'a>(app: &'a App, look: &Look, width: f32) -> Element<'a, AppMessa
         row![nav, body].spacing(32).boxed()
     };
     let base = page(column![page_title("Settings", None, look), layout], false);
+    if let Some((_, ceremony)) = &state.passkey {
+        return crate::ui::modal::modal(
+            base,
+            crate::passkeys::view::prompt(
+                ceremony,
+                |pin| msg(Message::PasskeyPin(pin)),
+                msg(Message::PasskeySubmit),
+                msg(Message::PasskeyClose),
+                look,
+            ),
+            msg(Message::PasskeyClose),
+        );
+    }
     if let Some(confirm) = &state.confirm {
         return crate::ui::modal::modal(
             base,
@@ -817,25 +830,57 @@ fn account<'a>(app: &'a App, look: &Look) -> Element<'a, AppMessage> {
             .boxed(),
         );
     }
-    let mut keys = Column::new().spacing(10);
+    let mut keys = Column::new().spacing(12);
     if let Some(data) = s.data("Passkeys") {
-        for k in array(&data["viewer"], "passkeys") {
+        let list = array(&data["viewer"], "passkeys");
+        if list.is_empty() {
+            keys = keys.push((text("No passkeys yet.", type_::SM, look.ink_3)).boxed());
+        }
+        for k in list {
+            let date = |v: &Value| v.as_i64().map(crate::browsing::medium_date);
+            let mut when = format!("Added {}", date(&k["createdAt"]).unwrap_or_default());
+            if let Some(used) = date(&k["lastUsed"]) {
+                when.push_str(&format!(", last used {used}"));
+            }
             keys = keys.push(
-                (column![
-                    text(name(k), type_::SM, look.ink),
-                    text(
-                        format!("Added {} · last used {}", scalar(&k["createdAt"]), scalar(&k["lastUsed"])),
-                        type_::XS,
-                        look.ink_3
+                (row![
+                    crate::ui::icon::icon(crate::ui::icon::Icon::KeyRound, 16.0).color(look.ink_3),
+                    column![text(name(k), type_::SM, look.ink), text(when, type_::XS, look.ink_3)]
+                        .spacing(4)
+                        .width(Length::Fill),
+                    action(
+                        "Remove",
+                        Action::new("DeletePasskey", json!({"id":k["id"]}))
+                            .confirm(format!("Remove {}? It won’t sign you in anymore.", name(k))),
+                        s.busy,
+                        look
                     )
                 ]
-                .spacing(4))
+                .spacing(12)
+                .align_y(Alignment::Center))
                 .boxed(),
             );
         }
     }
-    keys = keys
-        .push((text("Passkeys are read-only. Adding keys comes in a later version.", type_::SM, look.ink_3)).boxed());
+    let mut add = button("Add passkey", look).primary();
+    if !s.busy {
+        add = add.on_press(msg(Message::AddPasskey));
+    }
+    keys = keys.push(
+        (row![
+            container(
+                owned_input("settings:passkey-name", s.passkey_name.clone(), |v| msg(Message::PasskeyName(v)), look)
+                    .placeholder("Name, e.g. YubiKey")
+                    .on_submit(msg(Message::AddPasskey))
+                    .boxed()
+            )
+            .width(Length::Fill),
+            add.boxed()
+        ]
+        .spacing(8)
+        .align_y(Alignment::Center))
+        .boxed(),
+    );
     cards = cards.push((card("Passkeys", keys, look)).boxed());
     let mut passwords = Column::new().spacing(12);
     if let Some(data) = s.data("AppPasswords") {

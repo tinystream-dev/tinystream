@@ -9,6 +9,7 @@ use serde_json::{Value, json};
 
 use crate::api::{self, Api};
 use crate::app::{Effect, Message as AppMessage};
+use crate::passkeys::{self, Ceremony};
 
 mod fields;
 mod requests;
@@ -195,6 +196,13 @@ pub enum Message {
     SelectRename(i64),
     SelectAllRenames,
     ShowLow(bool),
+    PasskeyName(String),
+    AddPasskey,
+    PasskeyEvent(u64, passkeys::Event),
+    PasskeyPin(String),
+    PasskeySubmit,
+    PasskeyClose,
+    PasskeyDone(u64, Result<(), passkeys::Error>),
 }
 
 impl std::fmt::Debug for Message {
@@ -224,6 +232,10 @@ pub struct Settings {
     pub raw: iced_widget::text_editor::Content,
     pub selected_renames: std::collections::BTreeSet<i64>,
     pub show_low: bool,
+    /// The name for the next passkey, and the one being added with its number.
+    pub passkey_name: String,
+    pub passkey: Option<(u64, Ceremony)>,
+    passkeys: u64,
     downloads: bool,
     generation: u64,
     revision: u64,
@@ -243,6 +255,9 @@ impl Default for Settings {
             raw: iced_widget::text_editor::Content::new(),
             selected_renames: Default::default(),
             show_low: false,
+            passkey_name: String::new(),
+            passkey: None,
+            passkeys: 0,
             downloads: false,
             generation: 0,
             revision: 0,
@@ -591,7 +606,89 @@ impl Settings {
                 effects.push(Effect::Copy(value));
                 self.notice = Some("Copied".into());
             },
+            Message::PasskeyName(name) => self.passkey_name = name,
+            Message::AddPasskey => {
+                if !self.busy {
+                    self.add_passkey(api, effects);
+                }
+            },
+            Message::PasskeyEvent(serial, event) => {
+                if let Some((current, ceremony)) = &mut self.passkey
+                    && *current == serial
+                {
+                    ceremony.event(event);
+                }
+            },
+            Message::PasskeyPin(pin) => {
+                if let Some((_, ceremony)) = &mut self.passkey {
+                    ceremony.pin = pin;
+                }
+            },
+            Message::PasskeySubmit => {
+                if let Some((_, ceremony)) = &mut self.passkey {
+                    ceremony.submit();
+                }
+            },
+            Message::PasskeyClose => {
+                if self.passkey.take().is_some() {
+                    self.busy = false;
+                    self.error = Some("The passkey prompt was closed.".into());
+                }
+            },
+            Message::PasskeyDone(serial, result) => {
+                if self.passkey.as_ref().is_none_or(|(current, _)| *current != serial) {
+                    return;
+                }
+                self.passkey = None;
+                self.busy = false;
+                match result {
+                    Ok(()) => {
+                        self.passkey_name.clear();
+                        self.error = None;
+                        self.notice = Some("Passkey added".into());
+                        self.invalidate();
+                    },
+                    Err(passkeys::Error::Cancelled) => self.error = Some("The passkey prompt was closed.".into()),
+                    Err(passkeys::Error::Failed(message)) => self.error = Some(message),
+                }
+            },
         }
+    }
+
+    /// Makes a passkey on a security key and saves it as `name`, as the web's Account page does.
+    fn add_passkey(&mut self, api: &Api, effects: &mut Vec<Effect>) {
+        let name = Some(self.passkey_name.trim().to_owned()).filter(|n| !n.is_empty());
+        self.passkeys += 1;
+        let serial = self.passkeys;
+        let (ceremony, bridge) = Ceremony::start();
+        self.passkey = Some((serial, ceremony));
+        self.busy = true;
+        self.error = None;
+        self.notice = None;
+        let api = api.clone();
+        effects.push(Effect::Listen(Box::new(move |send| {
+            let events = send.clone();
+            let bridge =
+                bridge.sending(move |event| events(AppMessage::Settings(Message::PasskeyEvent(serial, event))));
+            tokio::spawn(async move {
+                let result = async {
+                    let start = api
+                        .passkey::<api::SettingsStartPasskeyRegistration>(
+                            api::settings_start_passkey_registration::Variables { name },
+                        )
+                        .await?
+                        .start_passkey_registration;
+                    let credential = passkeys::create(start.options, api.origin.clone(), bridge).await?;
+                    api.passkey::<api::SettingsFinishPasskeyRegistration>(
+                        api::settings_finish_passkey_registration::Variables { challenge: start.challenge, credential },
+                    )
+                    .await?;
+                    Ok(())
+                }
+                .await;
+                send(AppMessage::Settings(Message::PasskeyDone(serial, result)));
+            });
+        })));
     }
 }
 

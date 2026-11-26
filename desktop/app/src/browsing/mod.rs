@@ -23,6 +23,7 @@ pub mod preview;
 mod view;
 
 use model::*;
+pub(crate) use view::medium_date;
 pub use view::{allowed, art, dialog, notifications, palette, search, view, watch_image};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
