@@ -16,6 +16,7 @@ use url::Url;
 #[allow(unused_imports, non_camel_case_types, clippy::all)]
 mod generated {
     type Duration = String;
+    type JSON = serde_json::Value;
     type Upload = serde_json::Value;
     include!(concat!(env!("OUT_DIR"), "/graphql.rs"));
 }
@@ -146,16 +147,33 @@ impl Api {
         self.request_data::<Q, Q::ResponseData>(variables).await
     }
 
+    /// Like [`Api::request`], from the server's own page: the server makes passkeys for the
+    /// request's `Origin`, as it would for a browser there.
+    pub async fn passkey<Q: GraphQLQuery>(&self, variables: Q::Variables) -> Result<Q::ResponseData, Error> {
+        self.send::<Q, Q::ResponseData>(variables, true).await
+    }
+
     /// Uses a shared view model for selections appearing in several generated operations.
     pub async fn request_data<Q: GraphQLQuery, T: serde::de::DeserializeOwned>(
         &self,
         variables: Q::Variables,
+    ) -> Result<T, Error> {
+        self.send::<Q, T>(variables, false).await
+    }
+
+    async fn send<Q: GraphQLQuery, T: serde::de::DeserializeOwned>(
+        &self,
+        variables: Q::Variables,
+        page: bool,
     ) -> Result<T, Error> {
         let body = Q::build_query(variables);
         let operation = body.operation_name;
         let mut request = self.http.post(self.origin.join("api/graphql").expect("validated origin")).json(&body);
         if let Some(token) = &self.token {
             request = request.bearer_auth(&token.0);
+        }
+        if page {
+            request = request.header(reqwest::header::ORIGIN, self.origin.origin().ascii_serialization());
         }
         let response = request
             .send()

@@ -84,6 +84,31 @@
 
 
 
+  mutation SettingsStartPasskeyRegistration($name: String) {
+    startPasskeyRegistration(name: $name) {
+      challenge
+      options
+    }
+  }
+
+
+
+  mutation SettingsFinishPasskeyRegistration($challenge: String!, $credential: JSON!) {
+    finishPasskeyRegistration(challenge: $challenge, credential: $credential) {
+      id
+    }
+  }
+
+
+
+  mutation SettingsDeletePasskey($id: Int!) {
+    deletePasskey(id: $id) {
+      id
+    }
+  }
+
+
+
   mutation SettingsChangePassword($current: String!, $new: String!) {
     changePassword(current: $current, new: $new)
   }

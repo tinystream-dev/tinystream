@@ -833,7 +833,7 @@ impl Session {
         self.connection = Some(serde_json::from_value(json!({
             "server": { "version": updates::VERSION, "signInStyle": "PROFILES", "setupRequired": false, "email": true },
             "appearance": { "mode": "SINGLE", "style": "LAYERED", "mediaTint": false, "light": { "palette": { "tokens": [] } }, "dark": { "palette": { "tokens": [] } } },
-            "signInProfiles": [ { "key": "one", "avatar": null }, { "key": "two", "avatar": null }, { "key": "three", "avatar": null } ],
+            "signInProfiles": [ { "key": "one", "avatar": null, "passkey": true }, { "key": "two", "avatar": null, "passkey": false }, { "key": "three", "avatar": null, "passkey": false } ],
             "viewer": null
         })).expect("preview connection"));
         self.screen = match scene {
