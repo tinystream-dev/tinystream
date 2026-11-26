@@ -313,8 +313,8 @@ a URL scene reads only the server's public connection query. Scenes never perfor
 credential or configuration writes. The gallery is available only in debug builds.
 
 Geist and Lucide notices are embedded in Settings → About → Licenses and collected in
-`THIRD_PARTY_LICENSES`. Native and Rust dependency notices are collected by release packaging
-(#96) alongside these asset notices.
+`THIRD_PARTY_LICENSES`. Native and Rust dependency notices are collected alongside these asset
+notices when the app is packaged (see Packaging).
 
 ## Desktop services
 
@@ -322,6 +322,38 @@ Linux provides MPRIS media controls, native Wayland idle inhibition (portal/X11 
 notifications, single-instance link routing and a StatusNotifierItem tray. Settings → Show tray
 icon controls close-to-tray. Ctrl+Q always quits. See [OS integration](docs/os-integration.md)
 for interfaces, packaging resources and focused validation commands.
+
+## Packaging
+
+Releases carry two downloads for x86_64 Linux, both made by `packaging/package.sh` from a built
+binary:
+
+- `tinystream-desktop-<version>-x86_64-linux.tar.gz`: the binary, the desktop entry and SVG icon
+  from `app/resources/` (rendered to the usual hicolor sizes), AppStream metainfo, `LICENSE`,
+  `THIRD_PARTY_LICENSES`, a README for users (`packaging/README.md`) and `install.sh`. That
+  installs into `~/.local` (or `--prefix`), registers `tinystream://` links through
+  `update-desktop-database`, and takes `--uninstall` and `DESTDIR`.
+- `tinystream-desktop-<version>-x86_64.AppImage`: the same files, installed into the AppImage's
+  `/usr`. appimagetool 1.9.1 and the AppImage runtime 20251108 are downloaded at those versions
+  and checked against the SHA-256s in `package.sh`.
+
+Neither brings libraries of its own. `packaging/check-libs.sh` fails unless everything the binary
+links is on its list of libraries every desktop has, with no RPATH and the standard interpreter,
+and prints the glibc it needs: built on Ubuntu 24.04, that's 2.39.
+
+`.github/workflows/desktop.yml` builds them with `cargo build --release --locked` on Ubuntu 24.04,
+checks the libraries, validates the metadata and checks that `install.sh` makes `xdg-open` send
+`tinystream://` to the app. Tags run it from `release.yml`, which attaches both to the release;
+pushes to `feat/desktop` and manual runs upload them as the `tinystream-desktop-x86_64-linux`
+artifact, versioned with the commit. To package by hand on a system like Ubuntu 24.04 (the build
+host's glibc is the oldest the result runs on), from the repository root:
+
+```sh
+(cd desktop && cargo build --release --locked)
+desktop/packaging/check-libs.sh desktop/target/release/tinystream-desktop
+licenses/collect.sh .native x86_64-unknown-linux-gnu desktop > THIRD_PARTY_LICENSES
+desktop/packaging/package.sh desktop/target/release/tinystream-desktop THIRD_PARTY_LICENSES 0.40.0-dev dist
+```
 
 ## Settings and administration
 
@@ -339,8 +371,8 @@ until #95. Profile pictures use the desktop image picker.
 The Desktop tab stores default playback quality, hardware decoding, motion, tray and update
 preferences on this machine. Auto quality means direct play; changes apply to newly opened
 videos. It also shows the mpv configuration path and token storage backend. Credits reads the
-generated `THIRD_PARTY_LICENSES` beside the packaged executable, with embedded asset notices
-as the development fallback.
+generated `THIRD_PARTY_LICENSES` beside the packaged executable or in `../share/doc/tinystream-desktop`
+from it, as installed, with embedded asset notices as the development fallback.
 
 Focused settings tests run with `cargo test --locked settings::`. The optional native rendering
 and input test needs Vulkan: `cargo test --locked settings_editor_renders_and_saves -- --ignored`.

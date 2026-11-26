@@ -7,8 +7,8 @@ this issue.
 
 The application ID is `dev.tinystream.app`. The old Secret Service attribute is retained so
 existing credentials remain accessible. The desktop entry and SVG icon under `app/resources/`
-are packaging inputs for #96. The tray also embeds a raster of the existing favicon, so it has
-an icon when running from the checkout.
+are inputs to `packaging/package.sh`, which builds the tarball and AppImage. The tray also embeds
+a raster of the existing favicon, so it has an icon when running from the checkout.
 
 ## Services
 
