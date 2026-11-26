@@ -265,7 +265,8 @@ pub fn notifications<'a>(app: &'a App, look: &Look) -> View<'a> {
                             .boxed(),
                         icon_button(Icon::X, "Remove", Some(act(b, Action::DeleteNotice(Some(n.id)))), look)
                     ]
-                    .align_y(Alignment::Start))
+                    .align_y(Alignment::Start)
+                    .padding(10))
                     .boxed(),
                 );
             }
@@ -291,14 +292,13 @@ pub fn notifications<'a>(app: &'a App, look: &Look) -> View<'a> {
                     .boxed()
             ]
             .spacing(8)
-            .padding([8, 10]),
+            .padding([8, 16]),
             divider(look),
-            scrollable(items).height(iced_core::Length::Shrink.max(544))
+            scrollable(items.padding(6)).height(iced_core::Length::Shrink.max(544))
         ],
         16.0,
         look,
     )
-    .padding(6)
     .width(384)
     .boxed()
 }
