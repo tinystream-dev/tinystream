@@ -50,6 +50,8 @@ const HUD: Duration = Duration::from_millis(700);
 const COUNTDOWN: u64 = 5;
 /// How often progress is saved while playing.
 const SAVE: Duration = Duration::from_secs(10);
+/// How long the volume stays put before it's remembered.
+const VOLUME_SAVE: Duration = Duration::from_millis(500);
 /// Tries at playing on from where it was after the stream breaks, waiting 1, 2, 4… seconds.
 const RETRIES: u32 = 5;
 /// The server's preview frames come in steps this long (`PREVIEW_STEP`).
@@ -259,6 +261,8 @@ pub struct Player {
     pub preview_shown: Option<u32>,
     previews_failed: bool,
     last_save: Instant,
+    /// When the volume last changed, while it isn't remembered yet.
+    volume_changed: Option<Instant>,
     discontinuities: u64,
 }
 
@@ -387,6 +391,7 @@ impl Player {
             preview_shown: None,
             previews_failed: false,
             last_save: Instant::now(),
+            volume_changed: None,
             discontinuities: 0,
         };
 
@@ -756,6 +761,7 @@ impl Player {
                 self.volume = volume.clamp(0.0, 1.0);
                 self.muted = false;
                 self.apply_volume();
+                self.volume_changed = Some(Instant::now());
             },
             Message::Mute => {
                 self.muted = !self.muted;
@@ -956,6 +962,7 @@ impl Player {
         if self.hud.as_ref().is_some_and(|hud| now.duration_since(hud.at) >= HUD) {
             self.hud = None;
         }
+        self.remember_volume(false);
         if let Some(shot) = &self.shot
             && let Some(done) = shot.done
             && now.duration_since(done) >= Duration::from_secs(if shot.error.is_some() { 6 } else { 4 })
@@ -1211,7 +1218,14 @@ impl Player {
         if let Some(engine) = &self.engine {
             engine.set("volume", volume);
         }
-        self.prefs.set("volume", self.volume.to_string());
+    }
+
+    /// Remembers the volume once it's been left alone a moment, or now with `now`.
+    fn remember_volume(&mut self, now: bool) {
+        if self.volume_changed.is_some_and(|at| now || at.elapsed() >= VOLUME_SAVE) {
+            self.volume_changed = None;
+            self.prefs.set("volume", self.volume.to_string());
+        }
     }
 
     pub fn poke(&mut self) {
@@ -1417,6 +1431,7 @@ impl Player {
 
     /// Saves where playback is, so pages behind the player and other devices pick it up.
     pub fn save(&mut self, effects: &mut Vec<Effect>) {
+        self.remember_volume(true);
         self.last_save = Instant::now();
         let duration = self.duration();
         if self.clipping.is_some()
@@ -1531,11 +1546,7 @@ impl Player {
             (Key::Named(key::Named::ArrowDown), _) => {
                 let volume = (self.volume - 0.05).max(0.0);
                 self.flash(HudKind::Volume(volume));
-                let muted = self.muted;
-                self.volume = volume;
-                self.muted = muted;
-                self.apply_volume();
-                return Some(Message::Poke);
+                Message::Volume(volume)
             },
             (Key::Character("m" | "M"), _) => {
                 self.flash(HudKind::Volume(if self.muted { self.volume } else { 0.0 }));
@@ -1855,6 +1866,23 @@ pub(crate) mod tests {
         ));
         player.pb.as_mut().unwrap().next = None;
         assert!(matches!(player.key(&character("n"), &character("n"), Modifiers::empty(), false), Some(Message::Poke)));
+    }
+
+    #[test]
+    fn volume_keys_unmute_and_are_remembered_once_left_alone() {
+        let mut player = player();
+        let mut effects = Vec::new();
+        let down = Key::Named(key::Named::ArrowDown);
+        player.update(Message::Mute, &mut effects);
+        let message = player.key(&down, &down, Modifiers::empty(), false).unwrap();
+        player.update(message, &mut effects);
+        assert!(!player.muted);
+        assert_eq!(player.volume, 0.95);
+        player.update(Message::Tick, &mut effects);
+        assert_eq!(player.prefs.get("volume"), None);
+        player.volume_changed = Some(Instant::now() - VOLUME_SAVE);
+        player.update(Message::Tick, &mut effects);
+        assert_eq!(player.prefs.get("volume"), Some("0.95"));
     }
 
     #[test]
