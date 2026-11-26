@@ -1272,7 +1272,8 @@ impl Player {
         want
     }
 
-    fn seek(&mut self, to: f64) {
+    /// Seeks to `to`; returns whether it did, as a room's controls may be someone else's.
+    fn seek(&mut self, to: f64) -> bool {
         let duration = self.duration();
         let to = to.max(0.0).min(if duration > 0.0 { duration } else { f64::INFINITY });
         self.poke();
@@ -1280,14 +1281,15 @@ impl Player {
             && self.clipping.is_none()
         {
             let client = room.client.clone();
-            if !self.held() {
-                self.time = to;
-                client.seek(to);
+            if self.held() {
+                return false;
             }
-            return;
+            self.time = to;
+            client.seek(to);
+            return true;
         }
         self.time = to;
-        let Some(engine) = &self.engine else { return };
+        let Some(engine) = &self.engine else { return true };
         match self.source {
             Source::Direct => engine.seek(to),
             // A transcode can't seek outside what's cached; a new one starts there instead.
@@ -1299,11 +1301,13 @@ impl Player {
                 }
             },
         }
+        true
     }
 
     fn seek_by(&mut self, by: f64) {
-        self.seek(self.time + by);
-        self.flash(HudKind::Seek(by));
+        if self.seek(self.time + by) {
+            self.flash(HudKind::Seek(by));
+        }
     }
 
     fn change_rate(&mut self, rate: f64) {
@@ -1883,6 +1887,44 @@ pub(crate) mod tests {
         player.volume_changed = Some(Instant::now() - VOLUME_SAVE);
         player.update(Message::Tick, &mut effects);
         assert_eq!(player.prefs.get("volume"), Some("0.95"));
+    }
+
+    #[test]
+    fn seeks_a_room_refuses_flash_why_instead_of_a_skip() {
+        let mut player = player();
+        player.time = 100.0;
+        let mut room = Room::new(
+            sync::SyncClient::new("test".into(), None),
+            String::new(),
+            String::new(),
+            true,
+            false,
+            false,
+            false,
+        );
+        room.snap = sync::Snapshot {
+            room: Some(
+                serde_json::from_value(serde_json::json!({
+                    "mediaId": 1, "host": {"id": 1, "name": "david"}, "public": false,
+                    "settings": {"control": "host", "waitForAll": true}, "tracks": {},
+                    "clock": {"paused": false, "running": true, "position": 100.0, "at": 0.0, "rate": 1.0},
+                    "members": [
+                        {"id": 1, "name": "david", "userId": 1, "avatar": null, "status": "ready"},
+                        {"id": 2, "name": "cranky", "userId": 2, "avatar": null, "status": "ready"},
+                    ],
+                    "action": null,
+                }))
+                .unwrap(),
+            ),
+            you: Some(2),
+            ..Default::default()
+        };
+        player.room = Some(room);
+        player.update(Message::SeekBy(5.0), &mut Vec::new());
+        assert_eq!(player.time, 100.0);
+        assert!(
+            matches!(&player.hud, Some(Hud { kind: HudKind::Notice(words), .. }) if words == "david controls playback")
+        );
     }
 
     #[test]
