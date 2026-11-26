@@ -35,6 +35,9 @@ fn main() {
         "--enable-libx264".into(),
         "--enable-libdav1d".into(),
         "--disable-libdrm".into(),
+        // Only for bzip2-compressed Matroska tracks, which nothing writes, and Debian's libbz2.so.1.0
+        // is libbz2.so.1 on Fedora, so binaries built on Ubuntu wouldn't start there.
+        "--disable-bzlib".into(),
         "--enable-libzimg".into(),
         "--enable-libopus".into(),
         "--enable-libmp3lame".into(),
