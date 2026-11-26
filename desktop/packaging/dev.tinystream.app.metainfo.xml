@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>dev.tinystream.app</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>AGPL-3.0-or-later</project_license>
+  <name>tinystream</name>
+  <summary>Watch and listen together on your own media server</summary>
+  <developer id="dev.tinystream">
+    <name>The tinystream developers</name>
+  </developer>
+  <description>
+    <p>
+      The desktop app for tinystream, a small self-hosted media server for your shows, movies,
+      music and books. Connect it to your server to browse your libraries and play them with
+      hardware decoding and the subtitles drawn right.
+    </p>
+    <ul>
+      <li>Shows and movies, with chapters, track choices and picture in picture</li>
+      <li>Music and books from the same libraries</li>
+      <li>Watch Together and Listen Together, joined from a tinystream:// link</li>
+      <li>Clips of any moment, made and shared from the player</li>
+      <li>Requests, a calendar and downloads, and the server's settings for admins</li>
+      <li>Media controls, notifications and a tray icon on your desktop</li>
+    </ul>
+  </description>
+  <launchable type="desktop-id">dev.tinystream.app.desktop</launchable>
+  <url type="homepage">https://github.com/tinystream-dev/tinystream</url>
+  <url type="bugtracker">https://github.com/tinystream-dev/tinystream/issues</url>
+  <url type="vcs-browser">https://github.com/tinystream-dev/tinystream</url>
+  <provides>
+    <binary>tinystream-desktop</binary>
+  </provides>
+  <supports>
+    <control>pointing</control>
+    <control>keyboard</control>
+  </supports>
+  <content_rating type="oars-1.1"/>
+  <releases>
+    <release version="@VERSION@" date="@DATE@" type="@TYPE@"/>
+  </releases>
+</component>
