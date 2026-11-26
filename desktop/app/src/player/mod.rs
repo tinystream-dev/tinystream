@@ -1548,21 +1548,24 @@ impl Player {
             (_, Key::Character(">")) => Message::Rate(self.rate + 0.25),
             (_, Key::Character("<")) => Message::Rate(self.rate - 0.25),
             (_, Key::Character("S")) if self.can_clip => Message::Screenshot,
+            (_, Key::Character("S")) => Message::Poke,
             (Key::Character("x" | "X"), _) if self.can_clip => Message::MakeClip,
             (Key::Character("p" | "P"), _) if self.room.is_none() => Message::PictureInPicture,
             (Key::Character("f" | "F"), _) => Message::Fullscreen,
-            (Key::Character("n" | "N"), _) if pb.is_some_and(|pb| pb.next.is_some()) => {
-                Message::Go(pb.and_then(|pb| pb.next.as_ref()).map(|next| next.id)?)
+            (Key::Character("n" | "N"), _) => match pb.and_then(|pb| pb.next.as_ref()) {
+                Some(next) => Message::Go(next.id),
+                None => Message::Poke,
             },
             (Key::Character("s"), _) if self.skippable().is_some() => Message::Skip,
             (Key::Character("c" | "C"), _) if pb.is_some() => Message::CycleSubtitles,
+            (Key::Character("s" | "c" | "C"), _) => Message::Poke,
             (Key::Named(key::Named::Escape), _) if self.pip => Message::PictureInPicture,
             (Key::Named(key::Named::Escape), _) if fullscreen => Message::Fullscreen,
             (Key::Named(key::Named::Escape), _) => return Some(Message::Back),
-            (Key::Character(digit), _) if digit.len() == 1 && digit.as_bytes()[0].is_ascii_digit() => {
+            (_, Key::Character(digit)) if digit.len() == 1 && digit.as_bytes()[0].is_ascii_digit() => {
                 let duration = self.duration();
                 if duration <= 0.0 {
-                    return None;
+                    return Some(Message::Poke);
                 }
                 Message::Seek(duration * f64::from(digit.as_bytes()[0] - b'0') / 10.0)
             },
@@ -1829,6 +1832,29 @@ pub(crate) mod tests {
             player.key(&Key::Named(key::Named::Escape), &Key::Named(key::Named::Escape), Modifiers::empty(), false),
             Some(Message::Menu(None))
         ));
+    }
+
+    #[test]
+    fn keys_that_dont_apply_stay_in_the_player() {
+        let character = |c: &str| Key::Character(c.into());
+        let mut player = player();
+        player.pb.as_mut().unwrap().media.chapters =
+            vec![playback::PlaybackMediaChapters { start: 0.0, end: 90.0, title: Some("Opening".into()) }];
+        player.time = 10.0;
+        let shift = Modifiers::SHIFT;
+        assert!(matches!(player.key(&character("s"), &character("S"), shift, false), Some(Message::Poke)));
+        assert!(matches!(player.key(&character("s"), &character("s"), Modifiers::empty(), false), Some(Message::Skip)));
+        assert!(player.key(&character("1"), &character("!"), shift, false).is_none());
+        assert!(matches!(
+            player.key(&character("1"), &character("1"), Modifiers::empty(), false),
+            Some(Message::Seek(180.0))
+        ));
+        assert!(matches!(
+            player.key(&character("n"), &character("n"), Modifiers::empty(), false),
+            Some(Message::Go(2))
+        ));
+        player.pb.as_mut().unwrap().next = None;
+        assert!(matches!(player.key(&character("n"), &character("n"), Modifiers::empty(), false), Some(Message::Poke)));
     }
 
     #[test]
