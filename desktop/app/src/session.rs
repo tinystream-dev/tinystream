@@ -6,6 +6,7 @@ use std::sync::Arc;
 use crate::api::{self, Api, Token};
 use crate::app::{Effect, Message as AppMessage};
 use crate::images::{self, Images};
+use crate::passkeys::{self, Ceremony};
 use crate::platform::{self, Desktop};
 use crate::servers::{Config, Release, Store, User};
 use crate::updates;
@@ -44,6 +45,9 @@ pub struct Session {
     pub images: Images,
     /// The server waiting for "Remove" to be confirmed.
     pub removing: Option<u64>,
+    /// The passkey sign-in under way, and its number.
+    pub passkey: Option<(u64, Ceremony)>,
+    passkeys: u64,
     username: String,
     password: String,
     profile: Option<String>,
@@ -74,6 +78,8 @@ impl Default for Session {
             reduce_motion: false,
             images: Images::default(),
             removing: None,
+            passkey: None,
+            passkeys: 0,
             username: String::new(),
             password: String::new(),
             profile: None,
@@ -100,6 +106,12 @@ pub enum Message {
     EnterLink,
     Cancel,
     Submit,
+    Passkey,
+    PasskeyEvent(u64, passkeys::Event),
+    PasskeyPin(String),
+    PasskeySubmit,
+    PasskeyClose,
+    PasskeyDone(u64, std::result::Result<Arc<Outcome>, passkeys::Error>),
     Switch(u64),
     SignOut(u64),
     Remove(u64),
@@ -174,9 +186,16 @@ impl Session {
             Message::Username(value) => self.username = value,
             Message::Password(value) => self.password = value,
             Message::Profile(key) if !self.busy => {
+                let passkey = self
+                    .connection
+                    .as_ref()
+                    .is_some_and(|c| c.sign_in_profiles.iter().any(|p| p.key == key && p.passkey));
                 self.profile = Some(key);
                 self.password.clear();
                 self.error = None;
+                if passkey {
+                    self.sign_in_with_passkey(effects);
+                }
             },
             Message::ByName if !self.busy => {
                 self.by_name = true;
@@ -235,12 +254,53 @@ impl Session {
                 self.update(Message::Link(self.address.clone()), effects);
             },
             Message::Submit if !self.busy => self.submit(effects),
+            Message::Passkey if !self.busy => self.sign_in_with_passkey(effects),
+            Message::PasskeyEvent(serial, event) => {
+                if let Some((current, ceremony)) = &mut self.passkey
+                    && *current == serial
+                {
+                    ceremony.event(event);
+                }
+            },
+            Message::PasskeyPin(pin) => {
+                if let Some((_, ceremony)) = &mut self.passkey {
+                    ceremony.pin = pin;
+                }
+            },
+            Message::PasskeySubmit => {
+                if let Some((_, ceremony)) = &mut self.passkey {
+                    ceremony.submit();
+                }
+            },
+            Message::PasskeyClose => {
+                if self.passkey.take().is_some() {
+                    self.busy = false;
+                    if self.profile.is_none() {
+                        self.error = Some("The passkey prompt was closed.".into());
+                    }
+                }
+            },
+            Message::PasskeyDone(serial, result) => {
+                if self.passkey.as_ref().is_none_or(|(current, _)| *current != serial) {
+                    return;
+                }
+                self.passkey = None;
+                self.busy = false;
+                match result {
+                    Ok(outcome) => self.completed(outcome.as_ref(), effects),
+                    Err(passkeys::Error::Cancelled) if self.profile.is_some() => {},
+                    Err(passkeys::Error::Cancelled) => self.error = Some("The passkey prompt was closed.".into()),
+                    Err(passkeys::Error::Failed(message)) => self.error = Some(message),
+                }
+            },
             Message::Reset if !self.busy => {
                 self.screen = Screen::Reset;
                 self.profile = None;
                 self.clear_form();
             },
-            Message::Login if !self.busy => {
+            Message::Login if !self.busy || self.passkey.is_some() => {
+                self.passkey = None;
+                self.busy = false;
                 self.screen = Screen::Login;
                 self.clear_form();
                 self.profile = None;
@@ -422,6 +482,7 @@ impl Session {
         self.revision += 1;
         effects.push(Effect::Live(None, self.generation));
         self.api = None;
+        self.passkey = None;
         self.last_event = None;
         self.screen = Screen::Login;
         self.connection = None;
@@ -660,6 +721,48 @@ impl Session {
         });
     }
 
+    /// Signs in with a passkey for the picked profile, or the typed username, as the web does.
+    fn sign_in_with_passkey(&mut self, effects: &mut Vec<Effect>) {
+        let (Some(api), Some(store), Some(id)) = (self.api.clone(), self.store.clone(), self.config.active) else {
+            return;
+        };
+        let profile = self.profile.clone();
+        let username = self.username.trim().to_owned();
+        if profile.is_none() && username.is_empty() {
+            self.error = Some("Type your username first, then use your passkey.".into());
+            return;
+        }
+        self.passkeys += 1;
+        let serial = self.passkeys;
+        let (ceremony, bridge) = Ceremony::start();
+        self.passkey = Some((serial, ceremony));
+        self.busy = true;
+        self.error = None;
+        effects.push(Effect::Listen(Box::new(move |send| {
+            let events = send.clone();
+            let bridge = bridge.sending(move |event| events(AppMessage::Session(Message::PasskeyEvent(serial, event))));
+            tokio::spawn(async move {
+                let result = async {
+                    let who = api::start_passkey_sign_in::Variables {
+                        username: profile.is_none().then_some(username),
+                        profile,
+                    };
+                    let start = api.passkey::<api::StartPasskeySignIn>(who).await?.start_passkey_sign_in;
+                    let credential = passkeys::get(start.options, api.origin.clone(), bridge).await?;
+                    let finish = api::finish_passkey_sign_in::Variables { challenge: start.challenge, credential };
+                    let signed = api.passkey::<api::FinishPasskeySignIn>(finish).await?.finish_passkey_sign_in;
+                    let token = Token(signed.token);
+                    let user = User { id: signed.user.id, username: signed.user.username, avatar: signed.user.avatar };
+                    let (config, fallback) = store.signed_in(id, token.clone(), user).await.map_err(storage_error)?;
+                    let api = Api::new(api.origin, Some(token))?;
+                    Ok(Outcome::SignedIn(config, api, fallback))
+                }
+                .await;
+                send(AppMessage::Session(Message::PasskeyDone(serial, result.map(Arc::new))));
+            });
+        })));
+    }
+
     /// #92 can dispatch incoming web and tinystream:// links through the same message.
     fn open_link(&mut self, link: &str, effects: &mut Vec<Effect>) {
         let Ok(url) = url::Url::parse(link) else {
@@ -749,6 +852,9 @@ impl Session {
     }
 
     pub fn focus_target(&self) -> Option<&'static str> {
+        if let Some((_, ceremony)) = &self.passkey {
+            return matches!(ceremony.stage, passkeys::Stage::Pin { .. }).then_some(passkeys::view::PIN);
+        }
         match self.screen {
             Screen::Connect if self.store.is_none() => None,
             Screen::Invite | Screen::NewPassword if !self.link_valid => None,
@@ -1018,5 +1124,31 @@ mod tests {
         session.update(Message::Live(0, api::Live::Connected), &mut effects);
         assert_eq!(session.revision, 2);
         assert_eq!(effects.iter().filter(|e| matches!(e, Effect::Request(_))).count(), 2);
+    }
+
+    #[test]
+    fn passkey_prompts_end_with_their_own_ceremony() {
+        let mut session = Session { busy: false, screen: Screen::Login, ..Session::default() };
+        let mut effects = vec![];
+        session.update(Message::Passkey, &mut effects);
+        assert!(session.passkey.is_none());
+
+        session.passkey = Some((2, Ceremony::start().0));
+        session.busy = true;
+        session.update(Message::PasskeyDone(1, Err(passkeys::Error::Failed("old".into()))), &mut effects);
+        assert!(session.passkey.is_some());
+        assert!(session.error.is_none());
+        session.update(Message::PasskeyClose, &mut effects);
+        assert!(session.passkey.is_none());
+        assert!(!session.busy);
+        assert_eq!(session.error.as_deref(), Some("The passkey prompt was closed."));
+
+        session.profile = Some("one".into());
+        session.error = None;
+        session.passkey = Some((3, Ceremony::start().0));
+        session.update(Message::PasskeyDone(3, Err(passkeys::Error::Cancelled)), &mut effects);
+        assert!(session.passkey.is_none());
+        assert!(session.error.is_none());
+        assert!(effects.is_empty());
     }
 }
