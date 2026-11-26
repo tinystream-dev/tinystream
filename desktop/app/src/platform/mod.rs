@@ -40,6 +40,11 @@ pub trait Desktop {
 
     fn secrets() -> crate::secrets::Store;
 
+    /// Reaches security keys for passkeys, or `None` where nothing can yet.
+    fn authenticator() -> Option<Box<dyn crate::passkeys::Authenticator>> {
+        None
+    }
+
     fn choose_image() -> BoxFuture<'static, Result<Option<std::path::PathBuf>, String>> {
         Box::pin(async { Err("Choosing artwork is not supported on this platform.".into()) })
     }

@@ -12,6 +12,7 @@ mod idle;
 mod integration;
 
 mod gpu;
+mod hidraw;
 mod pip;
 mod portal;
 mod secrets;
@@ -48,6 +49,10 @@ impl Desktop for Linux {
 
     fn secrets() -> crate::secrets::Store {
         std::sync::Arc::new(secrets::LinuxSecrets::default())
+    }
+
+    fn authenticator() -> Option<Box<dyn crate::passkeys::Authenticator>> {
+        Some(Box::new(crate::passkeys::Ctap2::new(hidraw::find)))
     }
 
     fn open_url(url: String) -> BoxFuture<'static, Result<(), String>> {

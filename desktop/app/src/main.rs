@@ -16,6 +16,7 @@ mod clips;
 mod images;
 mod keys;
 mod music;
+mod passkeys;
 mod paths;
 mod platform;
 mod player;
