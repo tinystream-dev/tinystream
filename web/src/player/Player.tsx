@@ -659,7 +659,7 @@ export function Player({ mediaId, room, editClip, startAt }: { mediaId: number; 
       else if (e.key === 'S' && canClip) (handled(), void takeScreenshot())
       else if (k === 'f') (handled(), toggleFullscreen())
       else if (k === 'n' && pb?.next) (handled(), goTo(pb.next.id))
-      else if (k === 's' && skippable) (handled(), seek(skippable.end))
+      else if (e.key === 's' && skippable) (handled(), seek(skippable.end))
       else if (k === 'c' && pb) {
         handled()
         const usable = pb.media.subtitles.filter((s) => s.supported)
