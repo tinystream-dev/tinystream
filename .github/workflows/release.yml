@@ -147,10 +147,14 @@ jobs:
             ${{ steps.package.outputs.apk }}
             ${{ steps.package.outputs.apk }}.sha256
 
+  desktop:
+    name: Build desktop app
+    uses: ./.github/workflows/desktop.yml
+
   # Publishes whatever got built after all targets finish or reach their timeout.
   release:
     name: Publish
-    needs: [build, android]
+    needs: [build, android, desktop]
     if: ${{ !cancelled() && startsWith(github.ref, 'refs/tags/v') }}
     runs-on: ubuntu-24.04
     permissions:
