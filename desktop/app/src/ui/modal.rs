@@ -4,7 +4,9 @@
 
 use iced_core::layout::{self, Layout};
 use iced_core::widget::{Operation, Tree, operation, tree};
-use iced_core::{Event, Length, Rectangle, Size, Theme, Vector, Widget, keyboard, mouse, overlay, renderer, window};
+use iced_core::{
+    Event, Length, Rectangle, Renderer as _, Size, Theme, Vector, Widget, keyboard, mouse, overlay, renderer, window,
+};
 use iced_widget::{Element, Renderer, Widget as _};
 
 pub fn modal<'a, Message: Clone + 'a>(
@@ -109,9 +111,13 @@ impl<Message: Clone> Widget<Message, Theme, Renderer> for Modal<'_, Message> {
         cursor: mouse::Cursor,
         viewport: &Rectangle,
     ) {
-        for (child, (layout, tree)) in self.children.iter().zip(layout.iter(&tree.children)) {
-            child.draw(tree, renderer, theme, style, layout, cursor, viewport);
-        }
+        let mut layouts = layout.iter(&tree.children);
+        let (base, base_tree) = layouts.next().expect("modal");
+        self.children[0].draw(base_tree, renderer, theme, style, base, cursor, viewport);
+        let (layer, layer_tree) = layouts.next().expect("modal");
+        renderer.with_layer(*viewport, |renderer| {
+            self.children[1].draw(layer_tree, renderer, theme, style, layer, cursor, viewport);
+        });
     }
 
     fn mouse_interaction(
