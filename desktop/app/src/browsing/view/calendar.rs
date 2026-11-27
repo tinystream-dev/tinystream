@@ -29,6 +29,11 @@ fn stage_of(e: &CalendarEntry) -> Stage {
     }
 }
 
+/// How narrow a day's column can get before the week becomes a list.
+const COLUMN_MIN: f32 = 112.0;
+/// The space between the days.
+const GAP: f32 = 12.0;
+
 /// Whether an entry still deserves the hero spot.
 fn hero_worthy(e: &CalendarEntry) -> bool {
     match stage_of(e) {
@@ -74,17 +79,34 @@ pub(super) fn calendar<'a>(b: &'a Browsing, look: &Look) -> View<'a> {
     if d.calendar.is_empty() && soon.is_some_and(<[_]>::is_empty) {
         return page.push((layout::empty("Nothing on the schedule", None, look)).boxed()).boxed();
     }
+    let l = *look;
+    page.push(
+        iced_widget::responsive(move |size| {
+            week(b, &d.calendar, start, size.width >= 7.0 * COLUMN_MIN + 6.0 * GAP, &l)
+        })
+        .height(Length::Shrink)
+        .boxed(),
+    )
+    .boxed()
+}
+
+/// The week's days: side by side when there's room for them, otherwise a list of the days with
+/// something on.
+fn week<'a>(b: &'a Browsing, calendar: &'a [CalendarEntry], start: i64, wide: bool, look: &Look) -> View<'a> {
     let today = shift_days(now(), 0);
-    let mut days = Row::<View<'a>>::new().spacing(12).width(Fill);
+    let mut days = Vec::new();
     for i in 0..7 {
         let day = shift_days(start, i);
         let end = shift_days(day, 1);
         let (is_today, past) = (day == today, day < today);
         let mut entries = Column::<View<'a>>::new().spacing(6).width(Fill);
         let mut count = 0;
-        for e in d.calendar.iter().filter(|e| e.air_at >= day && e.air_at < end) {
-            entries = entries.push(day_card(b, e, look));
+        for e in calendar.iter().filter(|e| e.air_at >= day && e.air_at < end) {
+            entries = entries.push(day_card(b, e, wide, look));
             count += 1;
+        }
+        if count == 0 && !wide {
+            continue;
         }
         let number = text(
             civil(day).2.to_string(),
@@ -111,9 +133,9 @@ pub(super) fn calendar<'a>(b: &'a Browsing, look: &Look) -> View<'a> {
                 look.raised.scale_alpha(0.5)
             })
             .padding(6)
-            .height(416.0f32.max(count as f32 * 190.0))
+            .height(if wide { Length::Fixed(416.0f32.max(count as f32 * 190.0)) } else { Length::Shrink })
             .width(Fill);
-        days = days.push(
+        days.push(
             column![
                 container(
                     row![
@@ -131,7 +153,11 @@ pub(super) fn calendar<'a>(b: &'a Browsing, look: &Look) -> View<'a> {
             .boxed(),
         );
     }
-    page.push(days.boxed()).boxed()
+    if wide {
+        Row::with_children(days).spacing(GAP).width(Fill).boxed()
+    } else {
+        Column::with_children(days).spacing(GAP).width(Fill).boxed()
+    }
 }
 
 fn up_next<'a>(
@@ -257,30 +283,35 @@ fn entry_route(e: &CalendarEntry) -> Option<Route> {
         .or_else(|| e.title.as_ref().map(|t| Route::Title(t.id as u64)))
 }
 
-fn day_card<'a>(b: &'a Browsing, e: &'a CalendarEntry, look: &Look) -> View<'a> {
+/// An episode on its day: a still with the time over it in a column, or a poster beside the
+/// details in the list.
+fn day_card<'a>(b: &'a Browsing, e: &'a CalendarEntry, wide: bool, look: &Look) -> View<'a> {
     let aired = e.air_at <= now();
     let soon = !aired && e.air_at - now() < 3600;
-    let image = e.backdrop.as_deref().or(e.poster.as_deref());
-    let thumb = iced_widget::Stack::with_children([
-        watch_image(
-            b,
-            image,
-            crate::ui::tilt::art(image.and_then(|p| b.images.get(p)).cloned(), 8.0, 9.0 / 16.0, look).boxed(),
-        ),
-        container(badge(clock_time(e.air_at), Tone::Media, look)).padding(6).boxed(),
-    ])
-    .width(Fill);
-    let mut content = column![
-        thumb,
-        column![
-            truncate(e.show.as_str(), ty::S13, look.ink).font(MEDIUM),
-            truncate(
-                [Some(code(e.season, e.episode)), e.name.clone()].into_iter().flatten().collect::<Vec<_>>().join(" · "),
-                ty::XS,
-                look.ink_3
-            )
-        ]
-    ]
+    let thumb = if wide {
+        let image = e.backdrop.as_deref().or(e.poster.as_deref());
+        iced_widget::Stack::with_children([
+            watch_image(
+                b,
+                image,
+                crate::ui::tilt::art(image.and_then(|p| b.images.get(p)).cloned(), 8.0, 9.0 / 16.0, look).boxed(),
+            ),
+            container(badge(clock_time(e.air_at), Tone::Media, look)).padding(6).boxed(),
+        ])
+        .width(Fill)
+        .boxed()
+    } else {
+        picture(b, e.poster.as_deref(), 44.0, 66.0, 8.0, look)
+    };
+    let detail = [Some(code(e.season, e.episode)), (!wide).then(|| clock_time(e.air_at)), e.name.clone()]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>()
+        .join(" · ");
+    let mut content = column![column![
+        truncate(e.show.as_str(), ty::S13, look.ink).font(MEDIUM),
+        truncate(detail, ty::XS, look.ink_3)
+    ]]
     .spacing(8)
     .width(Fill);
     if let Some(d) = &e.download {
@@ -304,6 +335,11 @@ fn day_card<'a>(b: &'a Browsing, e: &'a CalendarEntry, look: &Look) -> View<'a> 
     } else if (e.monitor != "NONE" || e.state == "DONE") && (aired || e.state == "DONE") {
         content = content.push(state(&e.state, look));
     }
+    let content: View<'a> = if wide {
+        column![thumb, content].spacing(8).width(Fill).boxed()
+    } else {
+        row![thumb, content].spacing(10).width(Fill).boxed()
+    };
     card_button(look)
         .hover(12.0)
         .content(container(content).padding(8))

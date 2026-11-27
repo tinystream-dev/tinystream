@@ -13,12 +13,15 @@ use super::icon::Icon;
 use super::text::{self as type_, MEDIUM, SEMIBOLD, text};
 use super::theme::Look;
 
+/// The space around a page's column.
+pub const PAGE_PADDING: f32 = 40.0;
+
 /// `<Page>`: the page's column, centred, at most 1400 wide (1600 for `wide` ones).
 pub fn page<'a, Message: 'a>(
     content: impl CoreWidget<Message, Theme, Renderer> + 'a,
     wide: bool,
 ) -> Element<'a, Message> {
-    container(container(content).width(Length::Fill.max(if wide { 1600 } else { 1400 })).padding([40, 40]))
+    container(container(content).width(Length::Fill.max(if wide { 1600 } else { 1400 })).padding(PAGE_PADDING))
         .center_x(Length::Fill)
         .boxed()
 }

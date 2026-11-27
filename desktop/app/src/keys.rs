@@ -112,6 +112,7 @@ pub const SHEET: &[(&str, &[(&str, &str)])] = &[
             ("G then H", "Home"),
             ("G then C", "Calendar"),
             ("G then A", "Add shows"),
+            ("G then R", "Requests"),
             ("G then D", "Downloads"),
             ("G then W", "Wanted"),
             ("G then X", "Clips"),

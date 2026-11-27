@@ -13,14 +13,14 @@ use iced_widget::{
 };
 
 use crate::app::{App, Message, Overlay, SCROLL};
-use crate::chrome::{DRAG_STRIP, Side};
+use crate::chrome::{DRAG_STRIP, PILL_BOTTOM, PILL_INSET, Side};
 use crate::keys;
 use crate::route::Route;
 use crate::ui::Look;
 use crate::ui::controls::{banner, divider, icon_button, menu_item, panel};
 use crate::ui::effects::{Entrance, enter, page_transition, veil};
 use crate::ui::icon::{Icon, icon};
-use crate::ui::layout::{empty, page as page_column};
+use crate::ui::layout::{PAGE_PADDING, empty, page as page_column};
 use crate::ui::logo::logo;
 use crate::ui::media::avatar;
 use crate::ui::pressable::{Appearance, Status, pressable};
@@ -31,6 +31,9 @@ pub const SEARCH: &str = "search";
 
 /// How wide the sidebar is (`w-60`).
 pub const SIDEBAR_WIDTH: f32 = 240.0;
+
+/// How far below the floating window controls a page's header starts.
+const CONTROLS_GAP: f32 = 10.0;
 
 /// The pages the sidebar and the command palette can go to before anything is loaded from a server.
 const PAGES: &[(&str, Route, &str, Icon)] = &[
@@ -184,7 +187,7 @@ fn chrome<'a>(app: &'a App, base: Element<'a, Message>, focus: bool, look: &Look
         layers.push(
             container(pill.map(Message::Chrome))
                 .align_right(Fill)
-                .padding(Padding { top: 8.0, right: 8.0, ..Padding::ZERO })
+                .padding(Padding { top: PILL_INSET, right: PILL_INSET, ..Padding::ZERO })
                 .boxed(),
         );
     }
@@ -193,7 +196,9 @@ fn chrome<'a>(app: &'a App, base: Element<'a, Message>, focus: bool, look: &Look
         && let Some(pill) = app.chrome.pill(Side::Left, look, alpha)
     {
         layers.push(
-            container(pill.map(Message::Chrome)).padding(Padding { top: 8.0, left: 8.0, ..Padding::ZERO }).boxed(),
+            container(pill.map(Message::Chrome))
+                .padding(Padding { top: PILL_INSET, left: PILL_INSET, ..Padding::ZERO })
+                .boxed(),
         );
     }
     layers.push(app.chrome.edges().map(Message::Chrome).boxed());
@@ -517,16 +522,13 @@ fn page<'a>(app: &'a App, look: &Look) -> Element<'a, Message> {
     let notices: Element<'a, Message> = if !any {
         space().boxed()
     } else {
-        center_x(container(notices).width(Fill.max(1400)).padding(Padding {
-            top: 40.0,
-            right: 40.0,
-            bottom: 0.0,
-            left: 40.0,
-        }))
-        .boxed()
+        center_x(container(notices).width(Fill.max(1400)).padding(Padding { bottom: 0.0, ..PAGE_PADDING.into() }))
+            .boxed()
     };
 
-    let scroll = scrollable(column![notices, content])
+    // Headers put their actions in the top-right corner, so they start below the controls there.
+    let clearance = if app.chrome.layout.right.is_empty() { 0.0 } else { PILL_BOTTOM + CONTROLS_GAP - PAGE_PADDING };
+    let scroll = scrollable(column![space().height(clearance), notices, content])
         .id(SCROLL)
         .direction(iced_widget::scrollable::Direction::Vertical(iced_widget::scrollable::Scrollbar::hidden()))
         .width(Fill)

@@ -1,10 +1,20 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+use iced_core::Length;
 use iced_widget::{column, row};
 
 use super::*;
 
+/// How wide the page has to be for an episode's title, when it's looked for and its state to fit
+/// on one line.
+const ROW_MIN: f32 = 640.0;
+
 pub(super) fn wanted<'a>(b: &'a Browsing, route: &Route, look: &Look) -> View<'a> {
+    let (route, l) = (route.clone(), *look);
+    iced_widget::responsive(move |size| page(b, &route, size.width >= ROW_MIN, &l)).height(Length::Shrink).boxed()
+}
+
+fn page<'a>(b: &'a Browsing, route: &Route, wide: bool, look: &Look) -> View<'a> {
     let Some(d) = b.data(&Key::Wanted) else {
         return column![heading("Wanted", look), pending(b, &Key::Wanted, look)].width(Fill).boxed();
     };
@@ -23,7 +33,14 @@ pub(super) fn wanted<'a>(b: &'a Browsing, route: &Route, look: &Look) -> View<'a
         (v, if n > 0 { format!("{l} {n}") } else { l.to_owned() })
     });
     let switcher = segmented(filter, &filters, move |v| msg(b, Message::Filter(v.into())), look);
-    let mut page = column![page_title("Wanted", Some(switcher), look)].width(Fill);
+    let title = if wide {
+        page_title("Wanted", Some(switcher), look)
+    } else {
+        container(column![truncate("Wanted", ty::TITLE, look.ink).font(SEMIBOLD), switcher].spacing(16))
+            .padding(Padding { bottom: 32.0, ..Padding::ZERO })
+            .boxed()
+    };
+    let mut page = column![title].width(Fill);
     let mut groups: std::collections::BTreeMap<(i64, i64), Vec<&Wanted>> = Default::default();
     for e in &d.wanted {
         if filter == "all" || filter_of(e) == filter {
@@ -150,12 +167,16 @@ pub(super) fn wanted<'a>(b: &'a Browsing, route: &Route, look: &Look) -> View<'a
             if i > 0 {
                 list = list.push(divider(look));
             }
+            let name = truncate(e.name.clone().unwrap_or_else(|| format!("Episode {}", e.episode)), ty::SM, look.ink);
+            let when = truncate(when, ty::XS, look.ink_3);
             list = list.push(
                 row![
                     text(code(e.season, e.episode), ty::XS, look.ink_3).width(64),
-                    text(e.name.clone().unwrap_or_else(|| format!("Episode {}", e.episode)), ty::SM, look.ink)
-                        .width(Fill),
-                    text(when, ty::XS, look.ink_3),
+                    if wide {
+                        row![name.width(Fill), when].spacing(16).width(Fill).align_y(Alignment::Center).boxed()
+                    } else {
+                        column![name, when].spacing(2).width(Fill).boxed()
+                    },
                     row![
                         squircle(space().width(7).height(7), 3.5, look).fill(tone),
                         text(word, ty::S13, if upcoming { look.ink_2 } else { tone })
@@ -171,15 +192,20 @@ pub(super) fn wanted<'a>(b: &'a Browsing, route: &Route, look: &Look) -> View<'a
             );
         }
         let raised = look.raised;
-        let band = 156.0;
+        let (band, radius) = (156.0, 20.0);
         let content = column![
             container(header).padding(Padding { top: 20.0, right: 20.0, bottom: 0.0, left: 20.0 }),
-            container(list).padding(Padding { top: 8.0, right: 20.0, bottom: 8.0, left: 102.0 })
+            container(list).padding(Padding {
+                top: 8.0,
+                right: 20.0,
+                bottom: 8.0,
+                left: if wide { 102.0 } else { 20.0 }
+            })
         ];
-        let layers = [
-            container(art(b, backdrop, 20.0, look)).width(Fill).height(band).boxed(),
+        let layers = iced_widget::Stack::with_children([
+            container(art(b, backdrop, radius, look)).width(Fill).height(band).boxed(),
             container(crate::ui::squircle::gradient(
-                20.0,
+                radius,
                 std::f32::consts::FRAC_PI_2,
                 vec![(0.0, raised), (0.35, raised), (0.85, raised.scale_alpha(0.45))],
                 look,
@@ -188,7 +214,7 @@ pub(super) fn wanted<'a>(b: &'a Browsing, route: &Route, look: &Look) -> View<'a
             .height(band)
             .boxed(),
             container(crate::ui::squircle::gradient(
-                20.0,
+                radius,
                 std::f32::consts::PI,
                 vec![(0.0, raised.scale_alpha(0.2)), (0.5, raised.scale_alpha(0.45)), (1.0, raised)],
                 look,
@@ -196,12 +222,23 @@ pub(super) fn wanted<'a>(b: &'a Browsing, route: &Route, look: &Look) -> View<'a
             .width(Fill)
             .height(band)
             .boxed(),
-        ];
-        let mut card = iced_widget::Stack::with_children([content.width(Fill).boxed()]).width(Fill);
-        for layer in layers.into_iter().rev() {
-            card = card.push_under(layer);
-        }
-        let card = squircle(card.boxed(), 20.0, look).fill(raised).edge().width(Fill).boxed();
+            // Squares off the bottom, where the round corners would leave a faint outline.
+            column![
+                space().height(band - 2.0 * radius),
+                container(crate::ui::squircle::gradient(
+                    0.0,
+                    std::f32::consts::PI,
+                    vec![(0.0, raised.scale_alpha(0.0)), (0.5, raised), (1.0, raised)],
+                    look
+                ))
+                .width(Fill)
+                .height(2.0 * radius)
+            ]
+            .boxed(),
+        ]);
+        let card =
+            iced_widget::Stack::with_children([content.width(Fill).boxed()]).width(Fill).push_under(layers.boxed());
+        let card = squircle(card.boxed(), radius, look).fill(raised).edge().width(Fill).boxed();
         page = page.push(crate::ui::context_menu::context_menu(card, menu, look));
     }
     page.spacing(16).boxed()

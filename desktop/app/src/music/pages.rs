@@ -357,7 +357,7 @@ fn artist<'a>(music: &'a Music, look: &Look) -> View<'a> {
             track_list(music, &popular[..shown], List { album: true, ..List::default() }, look),
             look,
         );
-        page = page.push(container(container(list).width(Fill.max(896))).center_x(Fill).padding(top(48.0)).boxed());
+        page = page.push(container(list).padding(top(48.0)).boxed());
     }
     let single =
         |a: &&Card| a.release_types.iter().any(|t| t.eq_ignore_ascii_case("single") || t.eq_ignore_ascii_case("ep"));
@@ -801,7 +801,7 @@ fn track_row<'a>(
         quality(track, look),
         star(track.starred, Message::Star(track.id, !track.starred), look),
         length(),
-        menu(std::slice::from_ref(track), Some((track, !list.numbers)), look),
+        container(menu(std::slice::from_ref(track), Some((track, !list.numbers)), look)).center_x(32),
     ]
     .spacing(12)
     .align_y(Alignment::Center);
@@ -822,7 +822,7 @@ fn track_row<'a>(
     .height(48)
     .padding([0, 8])
     .on_press(if here { Message::Toggle } else { Message::PlayFrom(index, end) });
-    crate::ui::reveal::reveal(container(rest).width(Fill).height(48).padding([0, 8]), hovered)
+    crate::ui::reveal::reveal(container(rest).width(Fill).center_y(48).padding([0, 8]), hovered)
 }
 
 /// `<Playing>`: three bars, for the track that's on.
@@ -857,7 +857,7 @@ fn kind(types: &[String], compilation: bool) -> &'static str {
     }
 }
 
-fn plural(n: i64) -> &'static str {
+pub(super) fn plural(n: i64) -> &'static str {
     if n == 1 { "" } else { "s" }
 }
 

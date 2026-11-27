@@ -4,6 +4,7 @@ use iced_core::{Alignment, Color};
 use iced_widget::{Column, Element, Widget, column, container, row, scrollable};
 
 use super::model::Gain;
+use super::pages::plural;
 use super::{Message, Music};
 use crate::ui::Look;
 use crate::ui::effects::{self, Ambient};
@@ -368,8 +369,9 @@ fn panel<'a>(music: &'a Music, look: &Look) -> Element<'a, Message> {
             body = body.push(
                 text(
                     format!(
-                        "{} tracks · {} left",
+                        "{} track{} · {} left",
                         music.player.queue.len(),
+                        plural(music.player.queue.len() as i64),
                         time(music.player.queue.iter().skip(music.player.index).map(|e| e.track.duration).sum())
                     ),
                     ty::XS,

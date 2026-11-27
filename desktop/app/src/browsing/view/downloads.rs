@@ -84,6 +84,7 @@ pub(super) fn downloads<'a>(b: &'a Browsing, look: &Look) -> View<'a> {
         }
         let down = b.rates.get("download").map_or(&[][..], Vec::as_slice);
         let up = b.rates.get("upload").map_or(&[][..], Vec::as_slice);
+        let max = down.iter().chain(up).copied().fold(1.0f32, f32::max);
         let peers =
             d.downloads.iter().filter_map(|d| d.live.as_ref()).filter(|l| !l.paused).map(|l| l.peers).sum::<i64>();
         let shared = d.downloads.iter().filter_map(|d| d.live.as_ref()).map(|l| l.uploaded).sum::<i64>();
@@ -104,22 +105,39 @@ pub(super) fn downloads<'a>(b: &'a Browsing, look: &Look) -> View<'a> {
         if e.slow_hours {
             stats = stats.push(stat("Limits", "Slow hours".into()));
         }
-        let chart = iced_widget::stack![
+        let chart = iced_widget::Stack::with_children([container(stats)
+            .width(Fill)
+            .padding(Padding { top: 20.0, right: 20.0, bottom: 32.0, left: 20.0 })
+            .boxed()])
+        .width(Fill)
+        .push_under(
+            container(crate::ui::numbers::sparkline(
+                up,
+                Some(max),
+                look.ok,
+                Fill,
+                80,
+                std::time::Duration::from_secs(2),
+                look,
+            ))
+            .align_bottom(Fill)
+            .boxed(),
+        )
+        .push_under(
             container(crate::ui::numbers::sparkline(
                 down,
+                Some(max),
                 look.info,
                 Fill,
                 80,
                 std::time::Duration::from_secs(2),
-                look
+                look,
             ))
-            .align_bottom(Fill),
-            container(crate::ui::numbers::sparkline(up, look.ok, Fill, 80, std::time::Duration::from_secs(2), look))
-                .align_bottom(Fill),
-            container(stats).padding([16, 20])
-        ];
+            .align_bottom(Fill)
+            .boxed(),
+        );
         page = page.push(
-            container(squircle(chart, 18.0, look).fill(look.raised).edge().width(Fill).height(104))
+            container(squircle(chart, 18.0, look).fill(look.raised).edge().width(Fill))
                 .padding(Padding { bottom: 12.0, ..Padding::ZERO })
                 .boxed(),
         );
@@ -371,6 +389,7 @@ fn download_row<'a>(b: &'a Browsing, dl: &'a Download, nested: bool, look: &Look
         if let Some(values) = b.rates.get(&format!("dl{}", dl.id)) {
             details = details.push(crate::ui::numbers::sparkline(
                 values,
+                None,
                 look.info,
                 Fill,
                 28,

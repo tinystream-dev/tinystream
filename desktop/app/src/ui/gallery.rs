@@ -605,7 +605,7 @@ impl Gallery {
                 spinner(20.0, l),
                 container(progress(None, l.info, l)).width(200),
                 container(progress(Some(0.62), l.ok, l)).width(200),
-                sparkline(&values, l.info, 160, 40, std::time::Duration::from_secs(1), l),
+                sparkline(&values, None, l.info, 160, 40, std::time::Duration::from_secs(1), l),
             ]
             .spacing(24)
             .align_y(Alignment::Center),
