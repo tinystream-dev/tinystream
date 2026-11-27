@@ -1441,6 +1441,20 @@ mod tests {
         let draw = |app: &mut crate::app::App, name: &str, cursor: Option<Point>| {
             crate::snapshot::snapshot(app, size, 1.0, cursor, &dir.join(name), &[]).unwrap();
         };
+        for card in &app.music.cards {
+            let pictures = <[_; 4]>::try_from(
+                card.covers
+                    .iter()
+                    .filter_map(|p| match app.music.images.picture(p) {
+                        Some(crate::images::Picture::Ready(handle, _)) => Some(handle.clone()),
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>(),
+            )
+            .unwrap();
+            let mosaic = crate::test_support::run(crate::images::mosaic(pictures, 256));
+            app.music.mosaics.insert(mosaic_key(&card.covers), mosaic);
+        }
         for tab in [Tab::Albums, Tab::Artists, Tab::Playlists] {
             app.music.tab = tab;
             draw(&mut app, &format!("library-{tab:?}.png"), Some(Point::new(400.0, 300.0)));
