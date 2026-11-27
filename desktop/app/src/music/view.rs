@@ -433,30 +433,63 @@ fn panel<'a>(music: &'a Music, look: &Look) -> Element<'a, Message> {
             }
         },
         _ => {
+            let direct = !current.fallback && super::player::DECODES.contains(&track.codec.as_str());
+            let khz = |rate: u32| format!("{}", rate as f64 / 1000.0);
+            let mut file = super::model::quality(track);
+            if super::model::hi_res(track) {
+                file.push_str(" · Hi-res");
+            }
+            if let Some(channels) = track.channels.filter(|&c| c != 2) {
+                file.push_str(&format!(" · {channels} channels"));
+            }
             for (label, value) in [
-                ("Format", track.codec.to_uppercase()),
-                ("Sample rate", track.sample_rate.map_or("—".into(), |n| format!("{} kHz", n as f64 / 1000.0))),
-                ("Bit depth", track.bit_depth.map_or("—".into(), |n| format!("{n} bit"))),
+                ("File", file),
                 ("Bitrate", track.bitrate.map_or("—".into(), |n| format!("{n} kbit/s"))),
                 ("Size", format!("{:.1} MB", track.size as f64 / 1048576.0)),
                 (
                     "Getting here",
-                    if current.fallback { "Converted to FLAC, losslessly" } else { "The original file, untouched" }
-                        .into(),
+                    if direct {
+                        "The original file, untouched".into()
+                    } else {
+                        format!("Converted to FLAC on the server, losslessly ({} can't be decoded here)", track.codec)
+                    },
                 ),
-                ("Output", format!("{} kHz", music.rate as f64 / 1000.0)),
+                ("Decoded", "On this computer, gaplessly".into()),
+                (
+                    "Output",
+                    match track.sample_rate.filter(|&r| r != music.rate) {
+                        Some(rate) => {
+                            format!("Resampled from {} kHz to your device's {} kHz", khz(rate), khz(music.rate))
+                        },
+                        None => format!("{} kHz, as recorded", khz(music.rate)),
+                    },
+                ),
             ] {
                 body = body.push(
                     row![text(label, ty::SM, look.ink_3).width(120), text(value, ty::SM, look.ink)].spacing(16).boxed(),
                 );
             }
             body = body.push(text("Volume levelling", ty::SM, look.ink_3).boxed());
-            body = body.push(crate::ui::controls::segmented(
+            let g = &track.gains;
+            let gain = match music.player.settings.gain {
+                Gain::Off => None,
+                Gain::Album => g.album_gain.or(g.track_gain),
+                _ => g.track_gain,
+            };
+            let mut levelling = row![crate::ui::controls::segmented(
                 music.player.settings.gain,
                 &[(Gain::Auto, "Auto"), (Gain::Track, "Track"), (Gain::Album, "Album"), (Gain::Off, "Off")],
                 Message::Gain,
                 look,
-            ));
+            )]
+            .spacing(8)
+            .align_y(Alignment::Center);
+            if let Some(gain) = gain {
+                let measuring = if g.pending { " (measuring)" } else { "" };
+                let sign = if gain > 0.0 { "+" } else { "" };
+                levelling = levelling.push(text(format!("{sign}{gain:.1} dB{measuring}"), ty::XS, look.ink_3).boxed());
+            }
+            body = body.push(levelling.boxed());
             body = body.push(text("Crossfade", ty::SM, look.ink_3).boxed());
             body = body.push(
                 row![
