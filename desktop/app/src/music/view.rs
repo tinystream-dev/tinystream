@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-use iced_core::Alignment;
 use iced_core::Length::Fill;
+use iced_core::{Alignment, Color};
 use iced_widget::{Column, Element, Widget, column, container, row, scrollable};
 
 use super::model::Gain;
 use super::{Message, Music};
 use crate::ui::Look;
+use crate::ui::effects::{self, Ambient};
 use crate::ui::icon::Icon;
 use crate::ui::text::{self as ty, text};
 
@@ -284,7 +285,34 @@ fn now_playing_at<'a>(music: &'a Music, look: &Look, size: iced_core::Size) -> E
         .spacing(if size.width < 1000.0 { 32 } else { 56 })
         .height(Fill)
         .width(Fill);
-    container(column![header, body].spacing(24).padding(32)).width(Fill).height(Fill).boxed()
+    let content = container(column![header, body].spacing(24).padding(32)).width(Fill).height(Fill);
+    let mut layers = iced_widget::Stack::new().width(Fill).height(Fill);
+    if let Some(crate::images::Picture::Ready(cover, _)) =
+        entry.track.cover.as_deref().and_then(|p| music.images.picture(p))
+    {
+        layers = layers.push(effects::smear(cover.clone(), 90.0, 1.5, look.canvas.scale_alpha(0.55)));
+    }
+    let tint = entry
+        .track
+        .cover_tint
+        .as_deref()
+        .and_then(crate::ui::media::parse_tint)
+        .unwrap_or(Color::from_rgb8(128, 128, 128));
+    let canvas = look.canvas.scale_alpha(0.55);
+    layers
+        .push(effects::ambient(Ambient {
+            color: tint.scale_alpha(0.25),
+            size: (0.9, 0.8),
+            center: (0.2, 0.3),
+            reach: 0.7,
+        }))
+        .push(
+            container(iced_widget::space().width(Fill).height(Fill))
+                .style(move |_| container::Style { background: Some(canvas.into()), ..container::Style::default() })
+                .boxed(),
+        )
+        .push(content.boxed())
+        .boxed()
 }
 fn panel<'a>(music: &'a Music, look: &Look) -> Element<'a, Message> {
     let mut body = Column::new().spacing(12).width(Fill);
