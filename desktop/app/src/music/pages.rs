@@ -609,6 +609,9 @@ fn mosaic<'a>(music: &'a Music, covers: &'a [String], radius: f32, look: &Look) 
     if covers.len() < 4 {
         return cover(music, covers.first().map(String::as_str), radius, 40.0, look);
     }
+    if let Some(Some(handle)) = music.mosaics.get(&super::mosaic_key(covers)) {
+        return media::img(Some(&Picture::Ready(handle.clone(), None)), radius, look);
+    }
     let cell = |i: usize| container(cover(music, Some(&covers[i]), 0.0, 24.0, look)).width(Fill).height(Fill);
     squircle(column![row![cell(0), cell(1)], row![cell(2), cell(3)]], radius, look)
         .fill(look.raised)

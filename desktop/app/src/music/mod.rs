@@ -103,6 +103,7 @@ pub enum Tab {
 #[derive(Clone)]
 pub enum Message {
     Picture(String, Option<iced_widget::image::Handle>),
+    Mosaic(String, Option<iced_widget::image::Handle>),
     RoomChanged,
     CopyRoom,
     Edited(Result<Value, api::Error>),
@@ -169,6 +170,8 @@ impl std::fmt::Debug for Message {
 
 pub struct Music {
     pub images: crate::images::Images,
+    /// Playlists' four covers made into one picture, by [`mosaic_key`].
+    pub mosaics: std::collections::HashMap<String, Option<iced_widget::image::Handle>>,
     pub player: Player,
     pub people: Vec<(i64, String)>,
     pub can_invite: bool,
@@ -228,6 +231,7 @@ impl Default for Music {
     fn default() -> Self {
         Self {
             images: crate::images::Images::default(),
+            mosaics: std::collections::HashMap::new(),
             player: Player::default(),
             people: vec![],
             can_invite: false,
@@ -566,6 +570,7 @@ impl Music {
         }
         self.run(effects);
         self.fetch_art(effects);
+        self.compose(effects);
         route
     }
 
@@ -672,6 +677,9 @@ impl Music {
             Message::Picture(path, handle) => {
                 self.images.arrived(path, handle, true);
                 self.images.limit_ready(256);
+            },
+            Message::Mosaic(key, handle) => {
+                self.mosaics.insert(key, handle);
             },
             Message::RoomMenu(action) => {
                 let command = match action {
@@ -1042,6 +1050,30 @@ impl Music {
         self.run(effects);
     }
 
+    /// Makes the mosaics whose covers have all arrived.
+    fn compose(&mut self, effects: &mut Vec<Effect>) {
+        let lists = self.cards.iter().chain(self.detail.as_ref()).filter(|c| c.covers.len() >= 4);
+        for list in lists {
+            let key = mosaic_key(&list.covers);
+            if self.mosaics.contains_key(&key) {
+                continue;
+            }
+            let pictures: Vec<_> = list.covers[..4]
+                .iter()
+                .map_while(|p| match self.images.picture(p) {
+                    Some(crate::images::Picture::Ready(handle, _)) => Some(handle.clone()),
+                    _ => None,
+                })
+                .collect();
+            let Ok(pictures) = <[_; 4]>::try_from(pictures) else { continue };
+            self.mosaics.insert(key.clone(), None);
+            let generation = self.generation;
+            effects.push(Effect::Request(Box::pin(async move {
+                AppMessage::Music(generation, Message::Mosaic(key, crate::images::mosaic(pictures, 256).await))
+            })));
+        }
+    }
+
     fn fetch_art(&mut self, effects: &mut Vec<Effect>) {
         let cards = self.cards.iter().chain(&self.more_by).chain(self.detail.iter().flat_map(|d| &d.appears_on));
         let queue = &self.player.queue;
@@ -1254,6 +1286,11 @@ impl Music {
             effects,
         );
     }
+}
+
+/// What a playlist's mosaic is kept under: its first four covers.
+pub fn mosaic_key(covers: &[String]) -> String {
+    covers.iter().take(4).map(String::as_str).collect::<Vec<_>>().join("\n")
 }
 
 impl Drop for Music {
