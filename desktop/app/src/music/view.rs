@@ -124,6 +124,19 @@ pub(super) fn transport<'a>(music: &Music, look: &Look) -> Element<'a, Message> 
     .align_y(Alignment::Center)
     .boxed()
 }
+/// `<Elsewhere>`: the other app this player is mirroring, if any.
+fn elsewhere<'a>(music: &Music, look: &Look) -> Option<Element<'a, Message>> {
+    let remote = music.player.remote.as_ref()?;
+    let what = format!("{} on {}", if remote.paused { "Paused" } else { "Playing" }, remote.client);
+    row![
+        crate::ui::icon::icon(Icon::MonitorSpeaker, 14.0).color(look.ink_3),
+        crate::ui::text::truncate(what, ty::XS, look.ink_3)
+    ]
+    .spacing(6)
+    .align_y(Alignment::Center)
+    .boxed()
+    .into()
+}
 pub(super) fn scrubber<'a>(music: &Music, look: &Look) -> Element<'a, Message> {
     let duration = music.current().map_or(0.0, |e| e.track.duration).max(0.0);
     column![
@@ -226,17 +239,17 @@ fn card_at<'a>(music: &'a Music, look: &Look, cover_size: f32) -> Element<'a, Me
     ]
     .align_y(Alignment::Center)
     .spacing(4);
-    let mut body = column![
-        header,
-        cover,
-        metadata(music, look, false),
-        scrubber(music, look),
-        container(transport(music, look)).center_x(Fill),
-        footer
-    ]
-    .spacing(12)
-    .padding(16)
-    .width(352);
+    let mut body = column![header, cover, metadata(music, look, false)];
+    if let Some(elsewhere) = elsewhere(music, look) {
+        body = body.push(elsewhere);
+    }
+    let mut body = body
+        .push(scrubber(music, look))
+        .push(container(transport(music, look)).center_x(Fill).boxed())
+        .push(footer.boxed())
+        .spacing(12)
+        .padding(16)
+        .width(352);
     if let Some(next) = music.player.queue.get(music.player.index + 1) {
         body = body.push(
             crate::ui::text::truncate(
@@ -271,16 +284,20 @@ fn now_playing_at<'a>(music: &'a Music, look: &Look, size: iced_core::Size) -> E
     ]
     .align_y(Alignment::Center)
     .padding([16, 0]);
-    let left = column![
+    let mut left = column![
         container(art(music, entry.track.cover.as_deref(), (size.height - 430.0).clamp(150.0, 320.0), look))
             .center_x(Fill),
-        metadata(music, look, true),
-        scrubber(music, look),
-        container(transport(music, look)).center_x(Fill),
-        container(volume(music, look)).center_x(Fill)
-    ]
-    .spacing(20)
-    .width((size.width * 0.38).clamp(260.0, 360.0));
+        metadata(music, look, true)
+    ];
+    if let Some(elsewhere) = elsewhere(music, look) {
+        left = left.push(elsewhere);
+    }
+    let left = left
+        .push(scrubber(music, look))
+        .push(container(transport(music, look)).center_x(Fill).boxed())
+        .push(container(volume(music, look)).center_x(Fill).boxed())
+        .spacing(20)
+        .width((size.width * 0.38).clamp(260.0, 360.0));
     let body = row![container(left).center_y(Fill), panel(music, look)]
         .spacing(if size.width < 1000.0 { 32 } else { 56 })
         .height(Fill)
