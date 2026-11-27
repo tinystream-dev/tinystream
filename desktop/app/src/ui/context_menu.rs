@@ -9,6 +9,7 @@ use iced_widget::{Column, Element, Renderer, Widget as _};
 
 use super::Look;
 use super::controls::{menu_item, panel};
+use super::overlay::fit;
 use super::text::{self as ty, text};
 
 pub fn context_menu<'a, Message: Clone + 'a>(
@@ -149,10 +150,8 @@ impl<Message: Clone> Widget<Message, Theme, Renderer> for Context<'_, Message> {
         let tree = &mut tree.children[1];
         tree.diff::<Message, Theme, Renderer>(&mut content);
         content.layout(tree, renderer, &layout::Limits::new(Size::ZERO, window));
-        let layout = Layout::new(tree.size).move_to(Point::new(
-            at.x.min(window.width - tree.size.width).max(0.0),
-            at.y.min(window.height - tree.size.height).max(0.0),
-        ));
+        let layout = Layout::new(tree.size)
+            .move_to(Point::new(fit(at.x, tree.size.width, window.width), fit(at.y, tree.size.height, window.height)));
         vec![overlay::Element::new(Box::new(Menu { content, tree, state, layout, window, items: &self.items }))]
     }
 }

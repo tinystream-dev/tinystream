@@ -12,6 +12,15 @@ use super::squircle::squircle;
 use super::text::{self as type_, MEDIUM, text, truncate};
 use super::theme::Look;
 
+/// How far menus keep from the window's edges.
+pub const EDGE: f32 = 8.0;
+
+/// Where something `size` long starts along a side of the window `room` long: at `at` if it fits,
+/// otherwise as near as it can while keeping `EDGE` from both ends.
+pub fn fit(at: f32, size: f32, room: f32) -> f32 {
+    at.min(room - size - EDGE).max(EDGE)
+}
+
 /// A centred floating panel over the dimmed page; a click outside closes it (`Dialog`).
 pub fn dialog<'a, Message: Clone + 'a>(
     content: impl CoreWidget<Message, Theme, Renderer> + 'a,

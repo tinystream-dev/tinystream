@@ -15,6 +15,7 @@ use iced_widget::{Column, Element, Renderer, Widget as _, container, row, scroll
 
 use super::controls::panel;
 use super::icon::{Icon, icon};
+use super::overlay::{EDGE, fit};
 use super::pressable::{Appearance, Status, pressable};
 use super::squircle::{Outline, Paint, draw_over, draw_under};
 use super::text::{self as type_, inherit};
@@ -353,7 +354,7 @@ impl<T: Clone, Message: Clone> Widget<Message, Theme, Renderer> for Select<'_, T
         });
         let anchor = layout.bounds();
         let position = anchor.position() + translation;
-        let menu_width = self.menu_width.unwrap_or(anchor.width).min(window.width);
+        let menu_width = self.menu_width.unwrap_or(anchor.width).min(window.width - 2.0 * EDGE);
         let below = (window.height - position.y - anchor.height - 8.0).max(0.0);
         let above = (position.y - 8.0).max(0.0);
         let height = (self.options.len() as f32 * 36.0 + 12.0).min(320.0).min(below.max(above));
@@ -369,8 +370,13 @@ impl<T: Clone, Message: Clone> Widget<Message, Theme, Renderer> for Select<'_, T
         popup.diff::<Message, Theme, Renderer>(&mut content);
         content.layout(popup, renderer, &layout::Limits::new(Size::ZERO, Size::new(menu_width, height)));
         let y = if below >= height { position.y + anchor.height + 8.0 } else { (position.y - height - 8.0).max(0.0) };
-        let placed = Layout::new(popup.size)
-            .move_to(iced_core::Point::new(position.x.min(window.width - menu_width).max(0.0), y));
+        // Starts under the anchor's left edge, or ends under its right one when there's no room.
+        let x = if position.x + menu_width + EDGE <= window.width {
+            position.x
+        } else {
+            position.x + anchor.width - menu_width
+        };
+        let placed = Layout::new(popup.size).move_to(iced_core::Point::new(fit(x, menu_width, window.width), y));
         vec![overlay::Element::new(Box::new(Menu {
             content,
             tree: popup,
