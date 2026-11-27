@@ -1513,8 +1513,16 @@ mod tests {
             artist: "The River Quartet".into(),
             ..Default::default()
         });
+        let pixels = (0..64 * 64).flat_map(|p| {
+            let (x, y) = ((p % 64) as u8, (p / 64) as u8);
+            [200u8.saturating_sub(y * 2), 40 + x * 2, 70 + y, 255]
+        });
+        let handle = iced_widget::image::Handle::from_rgba(64, 64, pixels.collect::<Vec<u8>>());
+        app.music.images.arrived("/c/now".into(), Some(handle), false);
         let mut songs = tracks();
         for t in &mut songs {
+            t.cover = Some("/c/now".into());
+            t.cover_tint = Some("200 40 70".into());
             t.artist = "The River Quartet".into();
             t.album = "A quiet afternoon".into();
             t.duration = 245.0;
