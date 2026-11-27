@@ -481,12 +481,27 @@ impl Session {
             .and_then(|u| u.avatar.as_deref())
             .filter(|_| active)
             .and_then(|path| self.images.get(path));
-        let face = avatar(name, picture, size, None, l);
+        let mut face = iced_widget::Stack::new().push(avatar(name, picture, size, None, l));
+        if active {
+            let (badge, ink, ring) = ((size * 0.4).round().max(14.0), l.ink, l.raised);
+            face = face.push(
+                container(container(icon(Icon::Check, badge * 0.6).stroke(2.4).color(l.canvas)).center(badge).style(
+                    move |_| iced_widget::container::Style {
+                        background: Some(ink.into()),
+                        border: iced_core::Border { color: ring, width: 2.0, radius: (badge / 2.0).into() },
+                        ..Default::default()
+                    },
+                ))
+                .align_right(size + 2.0)
+                .align_bottom(size + 2.0)
+                .boxed(),
+            );
+        }
         let status = match &server.user {
             Some(user) => format!("{} · signed in", user.username),
             None => "Signed out".to_owned(),
         };
-        let action_space = if signed_in { 76.0 } else { 42.0 } + 30.0;
+        let action_space = if signed_in { 76.0 } else { 42.0 };
         let mut details = column![
             truncate(host(&server.url), if size > 32.0 { type_::S15 } else { type_::S13 }, l.ink).font(MEDIUM),
             truncate(
@@ -510,18 +525,9 @@ impl Session {
                 .boxed(),
             );
         }
-        // Every row keeps room for the tick, so their buttons line up.
-        let line = Row::new()
-            .spacing(12)
-            .align_y(Alignment::Center)
-            .push(face)
-            .push(
-                container(details)
-                    .width(Length::Fill)
-                    .padding(Padding { right: action_space, ..Padding::ZERO })
-                    .boxed(),
-            )
-            .push(if active { icon(Icon::Check, 18.0).color(l.ink).boxed() } else { space().width(18).boxed() });
+        let line = Row::new().spacing(12).align_y(Alignment::Center).push(face.boxed()).push(
+            container(details).width(Length::Fill).padding(Padding { right: action_space, ..Padding::ZERO }).boxed(),
+        );
         let look = *l;
         let switch = (!active || !signed_in).then(|| session(Message::Switch(server.id))).filter(|_| !self.busy);
         let base = pressable(line, 16.0, l, move |status| Appearance {
@@ -558,7 +564,7 @@ impl Session {
         let floating = container(squircle(actions, 10.0, l).fill(l.float).edge().padding(2))
             .align_right(Length::Fill)
             .center_y(Length::Fill)
-            .padding(Padding { right: 40.0, ..Padding::ZERO });
+            .padding(Padding { right: 10.0, ..Padding::ZERO });
         iced_widget::stack![base, floating].boxed()
     }
 
