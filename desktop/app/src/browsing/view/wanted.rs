@@ -185,7 +185,7 @@ fn page<'a>(b: &'a Browsing, route: &Route, wide: bool, look: &Look) -> View<'a>
             );
         }
         let raised = look.raised;
-        let band = 156.0;
+        let (band, radius) = (156.0, 20.0);
         let content = column![
             container(header).padding(Padding { top: 20.0, right: 20.0, bottom: 0.0, left: 20.0 }),
             container(list).padding(Padding {
@@ -195,10 +195,10 @@ fn page<'a>(b: &'a Browsing, route: &Route, wide: bool, look: &Look) -> View<'a>
                 left: if wide { 102.0 } else { 20.0 }
             })
         ];
-        let layers = [
-            container(art(b, backdrop, 20.0, look)).width(Fill).height(band).boxed(),
+        let layers = iced_widget::Stack::with_children([
+            container(art(b, backdrop, radius, look)).width(Fill).height(band).boxed(),
             container(crate::ui::squircle::gradient(
-                20.0,
+                radius,
                 std::f32::consts::FRAC_PI_2,
                 vec![(0.0, raised), (0.35, raised), (0.85, raised.scale_alpha(0.45))],
                 look,
@@ -207,7 +207,7 @@ fn page<'a>(b: &'a Browsing, route: &Route, wide: bool, look: &Look) -> View<'a>
             .height(band)
             .boxed(),
             container(crate::ui::squircle::gradient(
-                20.0,
+                radius,
                 std::f32::consts::PI,
                 vec![(0.0, raised.scale_alpha(0.2)), (0.5, raised.scale_alpha(0.45)), (1.0, raised)],
                 look,
@@ -215,12 +215,23 @@ fn page<'a>(b: &'a Browsing, route: &Route, wide: bool, look: &Look) -> View<'a>
             .width(Fill)
             .height(band)
             .boxed(),
-        ];
-        let mut card = iced_widget::Stack::with_children([content.width(Fill).boxed()]).width(Fill);
-        for layer in layers.into_iter().rev() {
-            card = card.push_under(layer);
-        }
-        let card = squircle(card.boxed(), 20.0, look).fill(raised).edge().width(Fill).boxed();
+            // Squares off the bottom, where the round corners would leave a faint outline.
+            column![
+                space().height(band - 2.0 * radius),
+                container(crate::ui::squircle::gradient(
+                    0.0,
+                    std::f32::consts::PI,
+                    vec![(0.0, raised.scale_alpha(0.0)), (0.5, raised), (1.0, raised)],
+                    look
+                ))
+                .width(Fill)
+                .height(2.0 * radius)
+            ]
+            .boxed(),
+        ]);
+        let card =
+            iced_widget::Stack::with_children([content.width(Fill).boxed()]).width(Fill).push_under(layers.boxed());
+        let card = squircle(card.boxed(), radius, look).fill(raised).edge().width(Fill).boxed();
         page = page.push(crate::ui::context_menu::context_menu(card, menu, look));
     }
     page.spacing(16).boxed()
