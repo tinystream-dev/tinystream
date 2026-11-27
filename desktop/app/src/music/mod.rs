@@ -5,6 +5,7 @@ mod listen;
 pub mod model;
 pub(crate) mod output;
 mod pages;
+pub mod player;
 mod ring;
 mod room;
 mod view;

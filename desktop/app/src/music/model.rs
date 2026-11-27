@@ -109,7 +109,7 @@ pub enum Gain {
     Auto,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 #[serde(default)]
 pub struct Settings {
     pub volume: f32,
@@ -128,6 +128,20 @@ pub struct Entry {
     pub key: String,
     pub track: Track,
     pub fallback: bool,
+}
+
+/// Something for the decoder to play.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Item {
+    pub key: String,
+    pub path: String,
+    /// Bytes, or 0 to ask the server.
+    pub size: u64,
+    pub ext: String,
+    /// Linear; ReplayGain with clipping kept off.
+    pub gain: f32,
+    /// Seconds to overlap with the next track; 0 for none.
+    pub crossfade: f64,
 }
 
 pub fn gain(index: usize, queue: &[Entry], settings: &Settings, shuffled: bool) -> f32 {
