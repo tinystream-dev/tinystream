@@ -32,7 +32,7 @@ pub fn pill<'a>(music: &'a Music, look: &Look) -> Element<'a, Message> {
     ]
     .spacing(10)
     .align_y(Alignment::Center);
-    if music.room_code.is_none() {
+    if music.player.room.is_none() {
         line = line.push(control(Icon::X, "Close the player", Some(Message::Dismiss), false, false, 32.0, look));
     }
     let content = container(line).padding([7, 8]);
@@ -214,7 +214,7 @@ fn card_at<'a>(music: &'a Music, look: &Look, cover_size: f32) -> Element<'a, Me
         control(Icon::ChevronDown, "Collapse player", Some(Message::Collapse), false, false, 28.0, look),
         iced_widget::space().width(Fill)
     ];
-    if music.room_code.is_none() {
+    if music.player.room.is_none() {
         header = header.push(control(Icon::X, "Close the player", Some(Message::Dismiss), false, false, 28.0, look));
     }
     let footer = row![
