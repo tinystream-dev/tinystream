@@ -154,6 +154,12 @@ impl<Message> Widget<Message, Theme, Renderer> for Bar<Message> {
                 if let (Some(release), Some(position)) = (&self.release, cursor.position()) {
                     shell.publish(release(self.at(bounds, position.x)));
                 }
+                // Let go away from the bar, nothing else would take the preview down.
+                if !cursor.is_over(bounds)
+                    && let Some(hover) = &self.hover
+                {
+                    shell.publish(hover(None));
+                }
                 shell.capture_event();
             },
             _ => {},
