@@ -547,7 +547,7 @@ impl App {
             Message::CloseRequested
                 if self.tray_available
                     && self.session.config.show_tray
-                    && (self.together.is_some() || self.music.playing || self.music.room_code.is_some()) =>
+                    && (self.together.is_some() || self.music.player.playing || self.music.room_code.is_some()) =>
             {
                 self.hide(effects)
             },

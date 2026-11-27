@@ -1,21 +1,29 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 
 use anyhow::{Context, Result};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 
-use super::ring::Ring;
+use super::ring::{Ring, SECONDS};
+
+/// What the stream's callback and the decoder share.
+struct Shared {
+    ring: Ring,
+    volume: AtomicU32,
+    playing: AtomicBool,
+    starved: AtomicBool,
+    /// Frames between what's been taken from the ring and what's coming out of the speakers.
+    delay: AtomicU64,
+    failed: AtomicBool,
+}
 
 pub struct Output {
     _stream: cpal::Stream,
     pub rate: u32,
     pub device: String,
-    pub ring: Arc<Ring>,
-    volume: Arc<AtomicU32>,
-    playing: Arc<AtomicBool>,
-    pub failed: Arc<AtomicBool>,
+    shared: Arc<Shared>,
 }
 impl Output {
     pub fn open() -> Result<Self> {
@@ -25,13 +33,17 @@ impl Output {
         let supported = device.default_output_config()?;
         let format = supported.sample_format();
         let config: cpal::StreamConfig = supported.into();
-        let ring = Arc::new(Ring::new(config.sample_rate as usize / 2));
-        let volume = Arc::new(AtomicU32::new(1.0_f32.to_bits()));
-        let playing = Arc::new(AtomicBool::new(false));
-        let failed = Arc::new(AtomicBool::new(false));
+        let shared = Arc::new(Shared {
+            ring: Ring::new(config.sample_rate as usize * SECONDS),
+            volume: AtomicU32::new(1.0_f32.to_bits()),
+            playing: AtomicBool::new(false),
+            starved: AtomicBool::new(false),
+            delay: AtomicU64::new(0),
+            failed: AtomicBool::new(false),
+        });
         macro_rules! stream {
             ($type:ty) => {
-                build::<$type>(&device, &config, ring.clone(), volume.clone(), playing.clone(), failed.clone())?
+                build::<$type>(&device, &config, shared.clone())?
             };
         }
         let stream = match format {
@@ -49,15 +61,32 @@ impl Output {
             other => anyhow::bail!("Unsupported audio output format: {other}"),
         };
         stream.play()?;
-        Ok(Self { _stream: stream, rate: config.sample_rate, device: name, ring, volume, playing, failed })
+        Ok(Self { _stream: stream, rate: config.sample_rate, device: name, shared })
+    }
+
+    pub fn ring(&self) -> &Ring {
+        &self.shared.ring
+    }
+
+    /// The frame coming out of the speakers now.
+    pub fn heard(&self) -> u64 {
+        self.shared.ring.heard().saturating_sub(self.shared.delay.load(Ordering::Acquire))
     }
 
     pub fn playing(&self, value: bool) {
-        self.playing.store(value, Ordering::Release);
+        self.shared.playing.store(value, Ordering::Release);
     }
 
     pub fn volume(&self, value: f32) {
-        self.volume.store(value.clamp(0.0, 1.0).powi(2).to_bits(), Ordering::Release);
+        self.shared.volume.store(value.clamp(0.0, 1.0).powi(2).to_bits(), Ordering::Release);
+    }
+
+    pub fn starved(&self) -> bool {
+        self.shared.starved.load(Ordering::Acquire)
+    }
+
+    pub fn failed(&self) -> bool {
+        self.shared.failed.load(Ordering::Acquire)
     }
 
     pub fn device_changed(&self) -> bool {
@@ -71,20 +100,39 @@ impl Output {
 fn build<T: cpal::SizedSample + cpal::FromSample<f32>>(
     device: &cpal::Device,
     config: &cpal::StreamConfig,
-    ring: Arc<Ring>,
-    volume: Arc<AtomicU32>,
-    playing: Arc<AtomicBool>,
-    failed: Arc<AtomicBool>,
+    shared: Arc<Shared>,
 ) -> Result<cpal::Stream> {
     let channels = config.channels as usize;
     anyhow::ensure!(channels > 0, "Audio device has no output channels");
+    let rate = config.sample_rate as f32;
+    // How fast the level follows, about 8 ms to settle, so pausing never clicks.
+    let smooth = 1.0 / (0.008 * rate);
+    let mut level = 0.0_f32;
+    let mut seen = 0;
+    // Frames of music, not silence, still on their way to the speakers: it drains as they play.
+    let mut flight = 0_u64;
+    let failed = shared.clone();
     Ok(device.build_output_stream(
         config,
-        move |samples: &mut [T], _| {
-            let on = playing.load(Ordering::Acquire);
-            let volume = f32::from_bits(volume.load(Ordering::Acquire));
+        move |samples: &mut [T], info| {
+            let on = shared.playing.load(Ordering::Acquire);
+            let target = if on { f32::from_bits(shared.volume.load(Ordering::Acquire)) } else { 0.0 };
+            let mut starved = false;
+            let before = shared.ring.heard();
             for frame in samples.chunks_mut(channels) {
-                let stereo = if on { ring.frame().unwrap_or([0.0; 2]) } else { [0.0; 2] };
+                let stereo = if !on && level < 1e-4 {
+                    level = 0.0;
+                    [0.0; 2]
+                } else {
+                    level += (target - level) * smooth;
+                    match shared.ring.frame(&mut seen) {
+                        Some([l, r]) => [l * level, r * level],
+                        None => {
+                            starved |= on;
+                            [0.0; 2]
+                        },
+                    }
+                };
                 for (channel, sample) in frame.iter_mut().enumerate() {
                     let value = if channels == 1 {
                         (stereo[0] + stereo[1]) * 0.5
@@ -95,13 +143,20 @@ fn build<T: cpal::SizedSample + cpal::FromSample<f32>>(
                             _ => 0.0,
                         }
                     };
-                    *sample = T::from_sample((value * volume).clamp(-1.0, 1.0));
+                    *sample = T::from_sample(value.clamp(-1.0, 1.0));
                 }
             }
+            let timestamp = info.timestamp();
+            let ahead = timestamp.playback.duration_since(&timestamp.callback).map_or(0.0, |d| d.as_secs_f32());
+            let frames = (samples.len() / channels) as u64;
+            let taken = shared.ring.heard().saturating_sub(before);
+            flight = (flight.saturating_sub(frames) + taken).min((ahead * rate) as u64 + frames);
+            shared.delay.store(flight, Ordering::Release);
+            shared.starved.store(starved, Ordering::Release);
         },
         move |error| {
             tracing::warn!(%error, "music output failed");
-            failed.store(true, Ordering::Release);
+            failed.failed.store(true, Ordering::Release);
         },
         None,
     )?)

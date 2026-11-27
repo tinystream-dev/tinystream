@@ -213,7 +213,7 @@ fn album<'a>(music: &'a Music, look: &Look) -> View<'a> {
     }
     let actions = row![
         button(
-            if here && music.playing {
+            if here && music.player.playing {
                 "Pause"
             } else if here {
                 "Resume"
@@ -484,7 +484,7 @@ fn album_tile<'a>(music: &'a Music, album: &'a Card, caption: String, look: &Loo
     }
     let art = link(art.width(Fill), route.clone(), look);
     let here = music.current().is_some_and(|e| e.track.album_id == Some(album.id));
-    let playing = here && music.playing;
+    let playing = here && music.player.playing;
     let l = *look;
     let play = pressable(
         container(icon(if playing { Icon::Pause } else { Icon::Play }, 18.0).filled()).center(40),

@@ -633,13 +633,15 @@ impl Runner {
                     use crate::music::Message as M;
                     let music = &self.app.music;
                     let message = match command {
-                        Command::Play if !music.playing => M::Toggle,
-                        Command::Pause if music.playing => M::Pause,
+                        Command::Play if !music.player.playing => M::Toggle,
+                        Command::Pause if music.player.playing => M::Pause,
                         Command::Toggle => M::Toggle,
                         Command::Stop => M::Pause,
                         Command::Next => M::Next,
                         Command::Previous => M::Previous,
-                        Command::Seek(offset) if offset.is_finite() => M::Seek((music.position + offset).max(0.0)),
+                        Command::Seek(offset) if offset.is_finite() => {
+                            M::Seek((music.player.shown() + offset).max(0.0))
+                        },
                         Command::Position(track, time)
                             if track == music.desktop_media().track && time.is_finite() && time >= 0.0 =>
                         {

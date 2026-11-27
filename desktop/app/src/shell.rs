@@ -47,8 +47,8 @@ const PAGES: &[(&str, Route, &str, Icon)] = &[
 pub fn view(app: &App) -> Element<'_, Message> {
     let screen = screen(app);
     let screen = if app.music.current().is_some()
-        && !app.music.suspended
-        && !app.music.dismissed
+        && !app.music.player.suspended
+        && !app.music.player.dismissed
         && !app.music.fullscreen
         && !(matches!(app.history.current().route, Route::Listen(_)) && app.music.room_code.is_some())
     {
@@ -75,7 +75,7 @@ pub fn view(app: &App) -> Element<'_, Message> {
 }
 
 fn screen(app: &App) -> Element<'_, Message> {
-    if app.music.fullscreen && !app.music.suspended && !app.music.dismissed {
+    if app.music.fullscreen && !app.music.player.suspended && !app.music.player.dismissed {
         let look = app.session.look();
         let generation = app.session.generation;
         let content = crate::music::now_playing(&app.music, &look).map(move |m| Message::Music(generation, m)).boxed();
