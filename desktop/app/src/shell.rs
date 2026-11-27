@@ -13,7 +13,7 @@ use iced_widget::{
 };
 
 use crate::app::{App, Message, Overlay, SCROLL};
-use crate::chrome::{DRAG_STRIP, PILL_INSET, Side};
+use crate::chrome::{DRAG_STRIP, PILL_BOTTOM, PILL_INSET, Side};
 use crate::keys;
 use crate::route::Route;
 use crate::ui::Look;
@@ -31,6 +31,9 @@ pub const SEARCH: &str = "search";
 
 /// How wide the sidebar is (`w-60`).
 pub const SIDEBAR_WIDTH: f32 = 240.0;
+
+/// How far below the floating window controls a page's header starts.
+const CONTROLS_GAP: f32 = 10.0;
 
 /// The pages the sidebar and the command palette can go to before anything is loaded from a server.
 const PAGES: &[(&str, Route, &str, Icon)] = &[
@@ -523,7 +526,9 @@ fn page<'a>(app: &'a App, look: &Look) -> Element<'a, Message> {
             .boxed()
     };
 
-    let scroll = scrollable(column![notices, content])
+    // Headers put their actions in the top-right corner, so they start below the controls there.
+    let clearance = if app.chrome.layout.right.is_empty() { 0.0 } else { PILL_BOTTOM + CONTROLS_GAP - PAGE_PADDING };
+    let scroll = scrollable(column![space().height(clearance), notices, content])
         .id(SCROLL)
         .direction(iced_widget::scrollable::Direction::Vertical(iced_widget::scrollable::Scrollbar::hidden()))
         .width(Fill)

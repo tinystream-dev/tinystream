@@ -28,6 +28,8 @@ pub const PILL_INSET: f32 = 8.0;
 const CONTROL: f32 = 28.0;
 /// The space around the controls inside their pill.
 const PILL_PADDING: f32 = 3.0;
+/// How far down from the window's top the floating controls reach.
+pub const PILL_BOTTOM: f32 = PILL_INSET + CONTROL + 2.0 * PILL_PADDING;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Control {
