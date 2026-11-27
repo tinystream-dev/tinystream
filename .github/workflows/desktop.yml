@@ -1,10 +1,8 @@
 name: Desktop app
 
-# The desktop app's tarball and AppImage. Releases call this from release.yml; pushes to feat/desktop
-# and manual runs upload the same files as workflow artifacts, so testers can try a branch.
+# The desktop app's tarball and AppImage. Releases call this from release.yml; manual runs upload the
+# same files as workflow artifacts, so testers can try a branch.
 on:
-  push:
-    branches: [feat/desktop]
   workflow_dispatch:
   workflow_call:
 
