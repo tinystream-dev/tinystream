@@ -830,7 +830,7 @@ fn kind(types: &[String], compilation: bool) -> &'static str {
     }
 }
 
-fn plural(n: i64) -> &'static str {
+pub(super) fn plural(n: i64) -> &'static str {
     if n == 1 { "" } else { "s" }
 }
 
