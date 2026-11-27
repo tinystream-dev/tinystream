@@ -774,7 +774,7 @@ fn track_row<'a>(
         quality(track, look),
         star(track.starred, Message::Star(track.id, !track.starred), look),
         length(),
-        menu(std::slice::from_ref(track), Some((track, !list.numbers)), look),
+        container(menu(std::slice::from_ref(track), Some((track, !list.numbers)), look)).center_x(32),
     ]
     .spacing(12)
     .align_y(Alignment::Center);
