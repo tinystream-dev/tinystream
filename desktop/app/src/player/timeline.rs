@@ -154,6 +154,12 @@ impl<Message> Widget<Message, Theme, Renderer> for Bar<Message> {
                 if let (Some(release), Some(position)) = (&self.release, cursor.position()) {
                     shell.publish(release(self.at(bounds, position.x)));
                 }
+                // Let go away from the bar, nothing else would take the preview down.
+                if !cursor.is_over(bounds)
+                    && let Some(hover) = &self.hover
+                {
+                    shell.publish(hover(None));
+                }
                 shell.capture_event();
             },
             _ => {},
@@ -230,5 +236,77 @@ impl<Message> Widget<Message, Theme, Renderer> for Bar<Message> {
         } else {
             mouse::Interaction::None
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use iced_core::{Event, Point, Size, mouse, window};
+    use iced_wgpu::graphics::Shell;
+    use iced_wgpu::{Engine, Renderer, wgpu};
+    use iced_widget::{Element, Widget as _};
+    use iced_winit::runtime::user_interface::{Cache, UserInterface};
+
+    #[derive(Debug, Clone, PartialEq)]
+    enum Message {
+        Hover(bool),
+        Drag,
+        Seek,
+    }
+
+    fn renderer() -> Renderer {
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
+        let adapter = futures::executor::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))
+            .expect("no GPU adapter");
+        let (device, queue) =
+            futures::executor::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())).unwrap();
+        let engine = Engine::new(&adapter, device, queue, wgpu::TextureFormat::Rgba8Unorm, None, Shell::headless());
+        Renderer::new(engine, iced_core::renderer::Settings::default())
+    }
+
+    #[test]
+    #[ignore = "requires Vulkan; drags the timeline headlessly"]
+    fn letting_go_off_the_bar_takes_the_preview_down() {
+        let mut renderer = renderer();
+        let waker = iced_core::shell::Waker::new(|| {});
+        let mut cache = Cache::new();
+        let mut sent = Vec::new();
+        // The bar is the window's top 20 px, 400 wide.
+        let steps = [
+            (Point::new(100.0, 10.0), mouse::Event::CursorMoved { position: Point::new(100.0, 10.0) }),
+            (Point::new(100.0, 10.0), mouse::Event::ButtonPressed(mouse::Button::Left)),
+            (Point::new(150.0, 200.0), mouse::Event::CursorMoved { position: Point::new(150.0, 200.0) }),
+            (Point::new(150.0, 200.0), mouse::Event::ButtonReleased(mouse::Button::Left)),
+            (Point::new(160.0, 220.0), mouse::Event::CursorMoved { position: Point::new(160.0, 220.0) }),
+        ];
+        for (at, event) in steps {
+            let bar: Element<'_, Message> = super::timeline(
+                10.0,
+                100.0,
+                (0.0, 0.0),
+                &[],
+                iced_core::Color::WHITE,
+                (|hover: Option<super::Hover>| Message::Hover(hover.is_some()), |_| Message::Drag, |_| Message::Seek),
+            )
+            .boxed();
+            let mut interface = UserInterface::build(bar, Size::new(400.0, 300.0), cache, &mut renderer);
+            let mut messages = iced_core::shell::Bus::new();
+            interface.update(
+                &window::Headless,
+                &waker,
+                &[Event::Mouse(event)],
+                mouse::Cursor::Available(at),
+                &mut renderer,
+                &mut messages,
+            );
+            cache = interface.into_cache();
+            sent.extend(messages);
+        }
+        assert!(sent.contains(&Message::Seek), "{sent:?}");
+        assert_eq!(
+            sent.iter().rev().find(|m| matches!(m, Message::Hover(_))),
+            Some(&Message::Hover(false)),
+            "{sent:?}"
+        );
     }
 }
