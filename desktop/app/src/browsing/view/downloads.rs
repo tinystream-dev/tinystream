@@ -105,17 +105,12 @@ pub(super) fn downloads<'a>(b: &'a Browsing, look: &Look) -> View<'a> {
         if e.slow_hours {
             stats = stats.push(stat("Limits", "Slow hours".into()));
         }
-        let chart = iced_widget::stack![
-            container(crate::ui::numbers::sparkline(
-                down,
-                Some(max),
-                look.info,
-                Fill,
-                80,
-                std::time::Duration::from_secs(2),
-                look
-            ))
-            .align_bottom(Fill),
+        let chart = iced_widget::Stack::with_children([container(stats)
+            .width(Fill)
+            .padding(Padding { top: 20.0, right: 20.0, bottom: 32.0, left: 20.0 })
+            .boxed()])
+        .width(Fill)
+        .push_under(
             container(crate::ui::numbers::sparkline(
                 up,
                 Some(max),
@@ -123,13 +118,26 @@ pub(super) fn downloads<'a>(b: &'a Browsing, look: &Look) -> View<'a> {
                 Fill,
                 80,
                 std::time::Duration::from_secs(2),
-                look
+                look,
             ))
-            .align_bottom(Fill),
-            container(stats).padding([16, 20])
-        ];
+            .align_bottom(Fill)
+            .boxed(),
+        )
+        .push_under(
+            container(crate::ui::numbers::sparkline(
+                down,
+                Some(max),
+                look.info,
+                Fill,
+                80,
+                std::time::Duration::from_secs(2),
+                look,
+            ))
+            .align_bottom(Fill)
+            .boxed(),
+        );
         page = page.push(
-            container(squircle(chart, 18.0, look).fill(look.raised).edge().width(Fill).height(104))
+            container(squircle(chart, 18.0, look).fill(look.raised).edge().width(Fill))
                 .padding(Padding { bottom: 12.0, ..Padding::ZERO })
                 .boxed(),
         );

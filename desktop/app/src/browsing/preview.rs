@@ -85,6 +85,9 @@ pub fn prepare(app: &mut App, scene: &str, style: crate::ui::Style, custom: bool
         Key::Engine,
         json!({"downloadEngine":{"downloadRate":4200000,"uploadRate":128000,"active":1,"killSwitch":null,"version":"2.0.11","downloadPath":"/srv/media/downloads"}}),
     );
+    let wave = |base: f32, swing: f32| (0..60).map(|i| base + swing * (i as f32 / 6.0).sin()).collect::<Vec<_>>();
+    b.rates.insert("download".into(), wave(3_600_000.0, 900_000.0));
+    b.rates.insert("upload".into(), wave(120_000.0, 40_000.0));
     b.put(Key::Inbox,json!({"notifications":{"unread":1,"items":[{"id":1,"title":"The quiet orbit is ready","body":"Episode 4 is ready to watch.","image":"poster","kind":"READY","createdAt":now()-120,"link":"/watch/10"}]}}));
     b.put(Key::Discover(String::new(),String::new()),json!({"discover":{"library":"Shows","results":[{"id":"20","provider":"TMDB","category":"EPISODES","library":"Shows","name":"Paper skies","year":2026,"poster":"poster","overview":"Two strangers travel north."}]}}));
     b.put(Key::ForYou(String::new()), json!({"forYou":{"shelves":[]}}));
