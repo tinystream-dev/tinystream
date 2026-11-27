@@ -288,7 +288,11 @@ impl App {
                 if generation != self.session.generation {
                     return;
                 }
-                if let Some(route) = self.music.update(message, effects) {
+                let route = self.music.update(message, effects);
+                for notice in std::mem::take(&mut self.music.notices) {
+                    self.toast(notice, None, crate::ui::overlay::Tone::Ok, effects);
+                }
+                if let Some(route) = route {
                     self.navigate(route, effects);
                 }
             },

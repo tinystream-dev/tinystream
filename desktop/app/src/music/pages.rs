@@ -11,7 +11,7 @@ use super::model::{self, Track};
 use super::{Card, Dialog, Message, Music, Sort, Tab};
 use crate::images::Picture;
 use crate::route::Route;
-use crate::ui::controls::{Tone, badge, button, chip, input, segmented, tip};
+use crate::ui::controls::{Tone, badge, button, chip, input, menu_item, segmented, tip};
 use crate::ui::effects::{self, Ambient};
 use crate::ui::icon::{Icon, icon};
 use crate::ui::pressable::{Appearance, Status, pressable};
@@ -52,7 +52,29 @@ pub fn page<'a>(music: &'a Music, counts: Option<(i64, i64)>, look: &Look) -> Vi
 /// What's asked over the page: a new playlist's name, or whether to delete one.
 pub fn dialog<'a>(music: &'a Music, look: &Look) -> Option<View<'a>> {
     match music.dialog.as_ref()? {
-        Dialog::NewPlaylist => {
+        Dialog::AddTo(tracks) => {
+            let new = Message::Dialog(Some(Dialog::NewPlaylist(tracks.clone())));
+            let mut rows = column![menu_item(
+                Some(Icon::Plus),
+                ty::inherit("New playlist…", ty::S13),
+                None,
+                false,
+                Some(new),
+                look
+            )];
+            for (id, name) in &music.lists {
+                let label = ty::inherit(name.as_str(), ty::S13).wrapping(iced_core::text::Wrapping::None);
+                let add = Message::AddTo(*id, name.clone(), tracks.clone());
+                rows = rows.push(menu_item(Some(Icon::ListPlus), label, None, false, Some(add), look));
+            }
+            let content = column![
+                text("Add to playlist", ty::S15, look.ink).font(MEDIUM),
+                iced_widget::scrollable(rows).height(iced_core::Length::Shrink.max(288.0))
+            ]
+            .spacing(12);
+            Some(crate::ui::overlay::dialog(content, 320.0, Message::Dialog(None), look))
+        },
+        Dialog::NewPlaylist(_) => {
             let named = !music.name.trim().is_empty();
             let content = column![
                 text("New playlist", ty::S15, look.ink).font(MEDIUM),
@@ -549,7 +571,7 @@ fn new_playlist<'a>(look: &Look) -> View<'a> {
         ink: if matches!(status, Status::Hovered | Status::Pressed) { l.ink } else { l.ink_3 },
     })
     .width(Fill)
-    .on_press(Message::Dialog(Some(Dialog::NewPlaylist)))
+    .on_press(Message::Dialog(Some(Dialog::NewPlaylist(vec![]))))
     .boxed()
 }
 
@@ -637,21 +659,21 @@ pub(super) fn quality<'a>(track: &Track, look: &Look) -> View<'a> {
 enum Action {
     Next,
     Queue,
+    Playlist,
     Album,
-    Artist,
+    Artist(usize),
 }
 
-/// `<TrackMenu>`: queueing some tracks, or going to where one's from (`one`).
+/// `<TrackMenu>`: queueing some tracks, keeping them, or going to where one's from (`one`).
 fn menu<'a>(tracks: &'a [Track], one: Option<(&'a Track, bool)>, look: &Look) -> View<'a> {
     use Action::*;
-    let album = one.is_some_and(|(t, album)| album && t.album_id.is_some());
-    let artist = one.and_then(|(t, _)| t.artists.first());
-    let actions: &'static [Action] = match (album, artist.is_some()) {
-        (true, true) => &[Next, Queue, Album, Artist],
-        (true, false) => &[Next, Queue, Album],
-        (false, true) => &[Next, Queue, Artist],
-        (false, false) => &[Next, Queue],
-    };
+    let chosen = move || one.map_or_else(|| tracks.to_vec(), |(t, _)| vec![t.clone()]);
+    let mut actions = vec![Next, Queue, Playlist];
+    if one.is_some_and(|(t, album)| album && t.album_id.is_some()) {
+        actions.push(Album);
+    }
+    let artists = one.map_or(&[][..], |(t, _)| &t.artists[..t.artists.len().min(3)]);
+    actions.extend((0..artists.len()).map(Artist));
     let menu = crate::ui::select::icon_menu(
         Icon::Ellipsis,
         actions,
@@ -659,13 +681,15 @@ fn menu<'a>(tracks: &'a [Track], one: Option<(&'a Track, bool)>, look: &Look) ->
         |action| match action {
             Next => "Play next".into(),
             Queue => "Add to queue".into(),
+            Playlist => "Add to playlist".into(),
             Album => "Go to album".into(),
-            Artist => artist.map_or(String::new(), |a| a.name.clone()),
+            Artist(i) => artists[*i].name.clone(),
         },
         move |action| match action {
-            Next | Queue => Message::Add(one.map_or_else(|| tracks.to_vec(), |(t, _)| vec![t.clone()]), action == Next),
+            Next | Queue => Message::Add(chosen(), action == Next),
+            Playlist => Message::Dialog(Some(Dialog::AddTo(chosen().iter().map(|t| t.id).collect()))),
             Album => Message::Go(Route::Album(one.and_then(|(t, _)| t.album_id).unwrap_or_default() as u64)),
-            Artist => Message::Go(Route::Artist(artist.map_or(0, |a| a.id) as u64)),
+            Artist(i) => Message::Go(Route::Artist(artists[i].id as u64)),
         },
         look,
     );

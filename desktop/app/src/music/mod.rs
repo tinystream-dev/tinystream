@@ -86,7 +86,10 @@ pub enum RoomAction {
 /// What's asked of the person over the page.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Dialog {
-    NewPlaylist,
+    /// A new playlist, with these tracks in it.
+    NewPlaylist(Vec<i64>),
+    /// One of your playlists to put these tracks in.
+    AddTo(Vec<i64>),
     DeletePlaylist(i64, String),
 }
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
@@ -108,6 +111,8 @@ pub enum Message {
     PlaylistPublic,
     Dialog(Option<Dialog>),
     Created(Result<Value, api::Error>),
+    AddTo(i64, String, Vec<i64>),
+    Added(String, Result<Value, api::Error>),
     Rename(bool),
     Popular(bool),
     Measured(i64, Result<Value, api::Error>),
@@ -174,6 +179,10 @@ pub struct Music {
     pub room_gone: Option<String>,
     pub room_menu: Vec<RoomAction>,
     pub dialog: Option<Dialog>,
+    /// Your playlists, for adding to one.
+    pub lists: Vec<(i64, String)>,
+    /// Passing notices for the app to show.
+    pub notices: Vec<String>,
     pub renaming: bool,
     pub popular: bool,
     pub generation: u64,
@@ -228,6 +237,8 @@ impl Default for Music {
             room_gone: None,
             room_menu: vec![],
             dialog: None,
+            lists: vec![],
+            notices: vec![],
             renaming: false,
             popular: false,
             generation: 0,
@@ -566,12 +577,33 @@ impl Music {
             },
             Message::Created(result) => match result {
                 Ok(value) => {
+                    let filled = matches!(&self.dialog, Some(Dialog::NewPlaylist(tracks)) if !tracks.is_empty());
                     self.dialog = None;
-                    if let Some(id) = value["createPlaylist"]["id"].as_u64() {
+                    if filled {
+                        let name = value["createPlaylist"]["name"].as_str().unwrap_or_default();
+                        self.notices.push(format!("Made “{name}”"));
+                    } else if let Some(id) = value["createPlaylist"]["id"].as_u64() {
                         return Some(Route::Playlist(id));
                     }
                 },
                 Err(e) => self.error = Some(e.message),
+            },
+            Message::AddTo(id, name, tracks) => {
+                self.dialog = None;
+                self.request::<api::MusicAddToPlaylist>(
+                    api::music_add_to_playlist::Variables { id, tracks },
+                    move |r| Message::Added(name, r),
+                    effects,
+                );
+            },
+            Message::Added(name, result) => match result {
+                Ok(_) => {
+                    self.notices.push(format!("Added to “{name}”"));
+                    if matches!(self.route, Some(Route::Playlist(_))) {
+                        self.fetch(effects);
+                    }
+                },
+                Err(e) => self.notices.push(e.message),
             },
             Message::Deleted(result) => match result {
                 Ok(_) => return Some(Route::Home),
@@ -619,8 +651,14 @@ impl Music {
             },
             Message::Timer(timer) => self.player.timer(timer),
             Message::Dialog(dialog) => {
-                if dialog == Some(Dialog::NewPlaylist) {
-                    self.name.clear();
+                match &dialog {
+                    Some(Dialog::NewPlaylist(_)) => self.name.clear(),
+                    Some(Dialog::AddTo(_)) => self.request::<api::MusicPlaylistNames>(
+                        api::music_playlist_names::Variables {},
+                        |r| Message::Loaded("lists".into(), r),
+                        effects,
+                    ),
+                    _ => {},
                 }
                 self.dialog = dialog;
             },
@@ -797,9 +835,13 @@ impl Music {
                 self.guest_name = name;
             },
             Message::CreatePlaylist => {
+                let tracks = match &self.dialog {
+                    Some(Dialog::NewPlaylist(tracks)) => tracks.clone(),
+                    _ => vec![],
+                };
                 if !self.name.trim().is_empty() {
                     self.request::<api::MusicCreatePlaylist>(
-                        api::music_create_playlist::Variables { name: self.name.trim().to_owned() },
+                        api::music_create_playlist::Variables { name: self.name.trim().to_owned(), tracks },
                         Message::Created,
                         effects,
                     )
@@ -854,6 +896,18 @@ impl Music {
                     .filter_map(|v| Some((v["id"].as_i64()?, v["username"].as_str()?.to_owned())))
                     .collect();
                 self.fill_room_menu();
+            }
+            return None;
+        }
+        if key == "lists" {
+            if let Ok(value) = result {
+                self.lists = value["playlists"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter(|p| p["mine"].as_bool() == Some(true))
+                    .filter_map(|p| Some((p["id"].as_i64()?, p["name"].as_str()?.to_owned())))
+                    .collect();
             }
             return None;
         }
@@ -1394,7 +1448,7 @@ mod tests {
         list.mine = true;
         app.music.detail = Some(list);
         draw(&mut app, "playlist.png", Some(Point::new(700.0, 470.0)));
-        app.music.dialog = Some(Dialog::NewPlaylist);
+        app.music.dialog = Some(Dialog::NewPlaylist(vec![]));
         draw(&mut app, "new-playlist.png", None);
         app.music.dialog = None;
 

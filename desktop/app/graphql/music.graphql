@@ -14,7 +14,9 @@ mutation MusicPlaying($trackId: Int, $position: Float!, $paused: Boolean!) { now
 mutation MusicPlayed($trackId: Int!) { played(trackId: $trackId) }
 mutation MusicMeasure($trackId: Int!) { measureLoudness(trackId: $trackId) { ...MusicTrack } }
 mutation MusicStar($kind: MusicKind!, $id: Int!, $starred: Boolean!) { star(kind: $kind, id: $id, starred: $starred) }
-mutation MusicCreatePlaylist($name: String!) { createPlaylist(name: $name) { ...PlaylistCard } }
+mutation MusicCreatePlaylist($name: String!, $tracks: [Int!]!) { createPlaylist(name: $name, tracks: $tracks) { ...PlaylistCard } }
+mutation MusicAddToPlaylist($id: Int!, $tracks: [Int!]!) { addToPlaylist(id: $id, tracks: $tracks) { id name } }
+query MusicPlaylistNames { playlists { id name mine } }
 mutation MusicUpdatePlaylist($id: Int!, $input: PlaylistInput!) { updatePlaylist(id: $id, input: $input) { ...PlaylistCard } }
 mutation MusicDeletePlaylist($id: Int!) { deletePlaylist(id: $id) }
 mutation MusicStartRoom($input: NewListenRoom!) { startListenRoom(input: $input) { code } }
