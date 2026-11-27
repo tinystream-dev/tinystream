@@ -22,6 +22,12 @@ const EDGE: f32 = 6.0;
 const CORNER: f32 = 14.0;
 /// How far the pointer has to move with the button down before a press becomes a move.
 const DRAG_THRESHOLD: f32 = 4.0;
+/// How far the floating controls sit in from the window's corner.
+pub const PILL_INSET: f32 = 8.0;
+/// How big each control is.
+const CONTROL: f32 = 28.0;
+/// The space around the controls inside their pill.
+const PILL_PADDING: f32 = 3.0;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Control {
@@ -183,7 +189,7 @@ impl Chrome {
                 Control::Close => Icon::X,
             };
             let close = control == Control::Close;
-            pressable(container(icon(glyph, 14.0).stroke(1.6)).center(28), 14.0, look, move |status| {
+            pressable(container(icon(glyph, 14.0).stroke(1.6)).center(CONTROL), CONTROL / 2.0, look, move |status| {
                 let (fill, ink) = match status {
                     Status::Hovered if close => (Some(l.danger), l.canvas),
                     Status::Pressed if close => (Some(l.danger.scale_alpha(0.8)), l.canvas),
@@ -230,10 +236,10 @@ impl Chrome {
             *color = color.scale_alpha(alpha);
         }
         self.controls(side, &look).map(|controls| {
-            squircle(controls, 17.0, &look)
+            squircle(controls, CONTROL / 2.0 + PILL_PADDING, &look)
                 .round()
                 .paint(Paint { fill: Some(look.float), material, edge: true, lift: true, ..Paint::NONE })
-                .padding(3)
+                .padding(PILL_PADDING)
                 .boxed()
         })
     }
