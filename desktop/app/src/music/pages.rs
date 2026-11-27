@@ -795,7 +795,7 @@ fn track_row<'a>(
     .height(48)
     .padding([0, 8])
     .on_press(if here { Message::Toggle } else { Message::PlayFrom(index, end) });
-    crate::ui::reveal::reveal(container(rest).width(Fill).height(48).padding([0, 8]), hovered)
+    crate::ui::reveal::reveal(container(rest).width(Fill).center_y(48).padding([0, 8]), hovered)
 }
 
 /// `<Playing>`: three bars, for the track that's on.
