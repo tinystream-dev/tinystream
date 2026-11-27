@@ -1,10 +1,20 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+use iced_core::Length;
 use iced_widget::{column, row};
 
 use super::*;
 
+/// How wide the page has to be for an episode's title, when it's looked for and its state to fit
+/// on one line.
+const ROW_MIN: f32 = 640.0;
+
 pub(super) fn wanted<'a>(b: &'a Browsing, route: &Route, look: &Look) -> View<'a> {
+    let (route, l) = (route.clone(), *look);
+    iced_widget::responsive(move |size| page(b, &route, size.width >= ROW_MIN, &l)).height(Length::Shrink).boxed()
+}
+
+fn page<'a>(b: &'a Browsing, route: &Route, wide: bool, look: &Look) -> View<'a> {
     let Some(d) = b.data(&Key::Wanted) else {
         return column![heading("Wanted", look), pending(b, &Key::Wanted, look)].width(Fill).boxed();
     };
@@ -150,12 +160,16 @@ pub(super) fn wanted<'a>(b: &'a Browsing, route: &Route, look: &Look) -> View<'a
             if i > 0 {
                 list = list.push(divider(look));
             }
+            let name = truncate(e.name.clone().unwrap_or_else(|| format!("Episode {}", e.episode)), ty::SM, look.ink);
+            let when = truncate(when, ty::XS, look.ink_3);
             list = list.push(
                 row![
                     text(code(e.season, e.episode), ty::XS, look.ink_3).width(64),
-                    text(e.name.clone().unwrap_or_else(|| format!("Episode {}", e.episode)), ty::SM, look.ink)
-                        .width(Fill),
-                    text(when, ty::XS, look.ink_3),
+                    if wide {
+                        row![name.width(Fill), when].spacing(16).width(Fill).align_y(Alignment::Center).boxed()
+                    } else {
+                        column![name, when].spacing(2).width(Fill).boxed()
+                    },
                     row![
                         squircle(space().width(7).height(7), 3.5, look).fill(tone),
                         text(word, ty::S13, if upcoming { look.ink_2 } else { tone })
@@ -174,7 +188,12 @@ pub(super) fn wanted<'a>(b: &'a Browsing, route: &Route, look: &Look) -> View<'a
         let band = 156.0;
         let content = column![
             container(header).padding(Padding { top: 20.0, right: 20.0, bottom: 0.0, left: 20.0 }),
-            container(list).padding(Padding { top: 8.0, right: 20.0, bottom: 8.0, left: 102.0 })
+            container(list).padding(Padding {
+                top: 8.0,
+                right: 20.0,
+                bottom: 8.0,
+                left: if wide { 102.0 } else { 20.0 }
+            })
         ];
         let layers = [
             container(art(b, backdrop, 20.0, look)).width(Fill).height(band).boxed(),
