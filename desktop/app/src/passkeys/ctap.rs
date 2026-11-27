@@ -296,10 +296,12 @@ impl Session<'_> {
     }
 }
 
-fn pin_parameters(map: &mut Vec<(Value, Value)>, token: Option<&(Protocol, Vec<u8>)>, hash: &[u8]) {
+/// Adds `pinUvAuthParam` at `at` and `pinUvAuthProtocol` after it: 8 for `makeCredential`, 6 for
+/// `getAssertion`.
+fn pin_parameters(map: &mut Vec<(Value, Value)>, at: i64, token: Option<&(Protocol, Vec<u8>)>, hash: &[u8]) {
     if let Some((protocol, token)) = token {
-        map.push((Value::Int(8), Value::Bytes(pin::authenticate(*protocol, token, hash))));
-        map.push((Value::Int(9), Value::Int(*protocol as i64)));
+        map.push((Value::Int(at), Value::Bytes(pin::authenticate(*protocol, token, hash))));
+        map.push((Value::Int(at + 1), Value::Int(*protocol as i64)));
     }
 }
 
@@ -330,7 +332,9 @@ fn explain(failure: Failure) -> Error {
             ERR_PIN_AUTH_BLOCKED => {
                 "Too many wrong PINs in a row. Unplug the security key, plug it back in and try again."
             },
-            ERR_PIN_NOT_SET => "This security key needs a PIN, but none is set. Set one in your key's app first.",
+            ERR_PIN_NOT_SET | ERR_PIN_REQUIRED => {
+                "This security key needs a PIN, but none is set. Set one in your key's app first."
+            },
             status => return Error::Failed(format!("The security key reported error 0x{status:02x}.")),
         },
     };
@@ -497,7 +501,7 @@ impl Authenticator for Ctap2 {
             if !request.exclude.is_empty() {
                 parameters.push((Value::Int(5), credential_list(&request.exclude)));
             }
-            pin_parameters(&mut parameters, token, &request.client_data_hash);
+            pin_parameters(&mut parameters, 8, token, &request.client_data_hash);
             session.command(MAKE_CREDENTIAL, Some(Value::Map(parameters)))
         })?;
         let auth_data = response.get(2).and_then(Value::as_bytes).ok_or_else(|| explain(Failure::Garbled))?.to_vec();
@@ -522,7 +526,7 @@ impl Authenticator for Ctap2 {
             if !request.allow.is_empty() {
                 parameters.push((Value::Int(3), credential_list(&request.allow)));
             }
-            pin_parameters(&mut parameters, token, &request.client_data_hash);
+            pin_parameters(&mut parameters, 6, token, &request.client_data_hash);
             session.command(GET_ASSERTION, Some(Value::Map(parameters)))
         })?;
         let garbled = || explain(Failure::Garbled);
@@ -655,6 +659,18 @@ mod tests {
         let mut device = Device::open(Box::new(key)).unwrap();
         let result = device.command(GET_ASSERTION, None, &AtomicBool::new(false), &|| {});
         assert!(matches!(result, Err(Failure::Status(ERR_NO_CREDENTIALS))));
+    }
+
+    #[test]
+    fn puts_the_pin_proof_where_each_command_reads_it() {
+        let token = (Protocol::Two, vec![5; 32]);
+        let mut assertion = vec![];
+        pin_parameters(&mut assertion, 6, Some(&token), &[0; 32]);
+        assert_eq!(assertion[0].0, Value::Int(6));
+        assert_eq!(assertion[1], (Value::Int(7), Value::Int(2)));
+        let mut none = vec![];
+        pin_parameters(&mut none, 8, None, &[0; 32]);
+        assert!(none.is_empty());
     }
 
     #[test]
