@@ -335,7 +335,7 @@ fn artist<'a>(music: &'a Music, look: &Look) -> View<'a> {
             track_list(music, &popular[..shown], List { album: true, ..List::default() }, look),
             look,
         );
-        page = page.push(container(container(list).width(Fill.max(896))).center_x(Fill).padding(top(48.0)).boxed());
+        page = page.push(container(list).padding(top(48.0)).boxed());
     }
     let single =
         |a: &&Card| a.release_types.iter().any(|t| t.eq_ignore_ascii_case("single") || t.eq_ignore_ascii_case("ep"));
