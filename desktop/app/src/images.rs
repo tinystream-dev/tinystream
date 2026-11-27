@@ -160,6 +160,28 @@ async fn read(bytes: Vec<u8>, shrink: bool) -> Option<Handle> {
     .flatten()
 }
 
+/// Four pictures in a square, two by two, each `cell` pixels wide: a playlist's mosaic as one
+/// picture, so its corners round like any other.
+pub async fn mosaic(pictures: [Handle; 4], cell: u32) -> Option<Handle> {
+    tokio::task::spawn_blocking(move || {
+        let mut square = image::RgbaImage::new(cell * 2, cell * 2);
+        for (i, picture) in pictures.iter().enumerate() {
+            let Handle::Rgba { width, height, pixels, .. } = picture else { return None };
+            let source = image::RgbaImage::from_raw(*width, *height, pixels.to_vec())?;
+            // Cropped to a square from the middle, like `object-cover`.
+            let (width, height) = (*width, *height);
+            let side = width.min(height);
+            let cropped = image::imageops::crop_imm(&source, (width - side) / 2, (height - side) / 2, side, side);
+            let scaled = image::imageops::resize(&*cropped, cell, cell, image::imageops::FilterType::Triangle);
+            image::imageops::replace(&mut square, &scaled, (i as u32 % 2 * cell).into(), (i as u32 / 2 * cell).into());
+        }
+        Some(Handle::from_rgba(cell * 2, cell * 2, square.into_raw()))
+    })
+    .await
+    .ok()
+    .flatten()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
