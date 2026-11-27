@@ -838,7 +838,7 @@ impl Session {
         })).expect("preview connection"));
         self.screen = match scene {
             "servers" => Screen::Servers,
-            "settings" | "credits" | "account" => Screen::Ready,
+            "settings" | "credits" | "account" | "shortcuts" => Screen::Ready,
             "reset" => Screen::Reset,
             "invite" => {
                 self.link_valid = true;

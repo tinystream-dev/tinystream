@@ -147,6 +147,9 @@ fn main() -> ExitCode {
             if scene == "account" {
                 app.overlay = Some(app::Overlay::Account);
             }
+            if scene == "shortcuts" {
+                app.overlay = Some(app::Overlay::Shortcuts);
+            }
         }
         return match snapshot::snapshot(&mut app, flags.size, flags.scale, flags.pointer, path, &flags.input()) {
             Ok(messages) => {
