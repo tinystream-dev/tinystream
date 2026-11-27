@@ -84,6 +84,7 @@ pub(super) fn downloads<'a>(b: &'a Browsing, look: &Look) -> View<'a> {
         }
         let down = b.rates.get("download").map_or(&[][..], Vec::as_slice);
         let up = b.rates.get("upload").map_or(&[][..], Vec::as_slice);
+        let max = down.iter().chain(up).copied().fold(1.0f32, f32::max);
         let peers =
             d.downloads.iter().filter_map(|d| d.live.as_ref()).filter(|l| !l.paused).map(|l| l.peers).sum::<i64>();
         let shared = d.downloads.iter().filter_map(|d| d.live.as_ref()).map(|l| l.uploaded).sum::<i64>();
@@ -107,6 +108,7 @@ pub(super) fn downloads<'a>(b: &'a Browsing, look: &Look) -> View<'a> {
         let chart = iced_widget::stack![
             container(crate::ui::numbers::sparkline(
                 down,
+                Some(max),
                 look.info,
                 Fill,
                 80,
@@ -114,8 +116,16 @@ pub(super) fn downloads<'a>(b: &'a Browsing, look: &Look) -> View<'a> {
                 look
             ))
             .align_bottom(Fill),
-            container(crate::ui::numbers::sparkline(up, look.ok, Fill, 80, std::time::Duration::from_secs(2), look))
-                .align_bottom(Fill),
+            container(crate::ui::numbers::sparkline(
+                up,
+                Some(max),
+                look.ok,
+                Fill,
+                80,
+                std::time::Duration::from_secs(2),
+                look
+            ))
+            .align_bottom(Fill),
             container(stats).padding([16, 20])
         ];
         page = page.push(
@@ -371,6 +381,7 @@ fn download_row<'a>(b: &'a Browsing, dl: &'a Download, nested: bool, look: &Look
         if let Some(values) = b.rates.get(&format!("dl{}", dl.id)) {
             details = details.push(crate::ui::numbers::sparkline(
                 values,
+                None,
                 look.info,
                 Fill,
                 28,

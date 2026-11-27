@@ -228,9 +228,11 @@ impl<Message> Widget<Message, Theme, Renderer> for Digit<'_, Message> {
     }
 }
 
-/// `<Sparkline>`: a soft area chart of recent values, scaled to its own peak.
+/// `<Sparkline>`: a soft area chart of recent values, scaled to `max`, or to its own peak without
+/// one.
 pub fn sparkline<'a, Message: 'a>(
     values: &[f32],
+    max: Option<f32>,
     color: Color,
     width: impl Into<Length>,
     height: impl Into<Length>,
@@ -239,6 +241,7 @@ pub fn sparkline<'a, Message: 'a>(
 ) -> Element<'a, Message> {
     canvas::Canvas::new(Spark {
         values: values[values.len().saturating_sub(SAMPLES)..].to_vec(),
+        max,
         color,
         interval,
         still: look.reduce_motion,
@@ -250,6 +253,7 @@ pub fn sparkline<'a, Message: 'a>(
 
 struct Spark {
     values: Vec<f32>,
+    max: Option<f32>,
     color: Color,
     interval: Duration,
     still: bool,
@@ -279,7 +283,7 @@ impl<Message> canvas::Program<Message> for Spark {
         let Event::Window(window::Event::RedrawRequested(now)) = event else {
             return None;
         };
-        let target = self.values.iter().copied().fold(1.0f32, f32::max);
+        let target = self.max.unwrap_or_else(|| self.values.iter().copied().fold(1.0f32, f32::max));
         if state.values != self.values {
             if state.values.is_empty() {
                 state.peak = target;
