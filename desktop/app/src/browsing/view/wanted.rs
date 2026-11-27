@@ -33,7 +33,14 @@ fn page<'a>(b: &'a Browsing, route: &Route, wide: bool, look: &Look) -> View<'a>
         (v, if n > 0 { format!("{l} {n}") } else { l.to_owned() })
     });
     let switcher = segmented(filter, &filters, move |v| msg(b, Message::Filter(v.into())), look);
-    let mut page = column![page_title("Wanted", Some(switcher), look)].width(Fill);
+    let title = if wide {
+        page_title("Wanted", Some(switcher), look)
+    } else {
+        container(column![truncate("Wanted", ty::TITLE, look.ink).font(SEMIBOLD), switcher].spacing(16))
+            .padding(Padding { bottom: 32.0, ..Padding::ZERO })
+            .boxed()
+    };
+    let mut page = column![title].width(Fill);
     let mut groups: std::collections::BTreeMap<(i64, i64), Vec<&Wanted>> = Default::default();
     for e in &d.wanted {
         if filter == "all" || filter_of(e) == filter {
