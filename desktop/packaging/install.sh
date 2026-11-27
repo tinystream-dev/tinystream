@@ -46,8 +46,8 @@ refresh() {
     fi
     if command -v update-desktop-database > /dev/null; then
         update-desktop-database -q "$share/applications"
-    else
-        echo "update-desktop-database isn't installed (it comes with desktop-file-utils), so tinystream:// links won't open the app until something else refreshes $share/applications" >&2
+    elif [ "$action" = install ]; then
+        echo "update-desktop-database isn't installed (it comes with desktop-file-utils), so some desktops may not open tinystream:// links in the app until something else refreshes $share/applications." >&2
     fi
     if command -v gtk-update-icon-cache > /dev/null && [ -f "$share/icons/hicolor/index.theme" ]; then
         gtk-update-icon-cache -q -t "$share/icons/hicolor" || true
