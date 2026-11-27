@@ -9,7 +9,7 @@ use iced_widget::{Column, Element, Row, Widget as _, column, container, responsi
 use super::{Message, Screen, Session, profile_avatar};
 use crate::app::Message as AppMessage;
 use crate::servers::Server;
-use crate::ui::controls::{banner, button, field, icon_button, input, panel, segmented, spinner, toggle};
+use crate::ui::controls::{banner, button, field, icon_button, input, or, panel, segmented, spinner, toggle};
 use crate::ui::icon::{Icon, icon};
 use crate::ui::logo::logo;
 use crate::ui::media::avatar;
@@ -61,6 +61,19 @@ impl Session {
     pub fn view(&self) -> Element<'_, AppMessage> {
         let look = self.look();
         let base = responsive(move |size| self.signed_out(size, &look)).boxed();
+        if let Some((_, ceremony)) = &self.passkey {
+            return crate::ui::modal::modal(
+                base,
+                crate::passkeys::view::prompt(
+                    ceremony,
+                    |pin| session(Message::PasskeyPin(pin)),
+                    session(Message::PasskeySubmit),
+                    session(Message::PasskeyClose),
+                    &look,
+                ),
+                session(Message::PasskeyClose),
+            );
+        }
         if let Some(server) = self.removing.and_then(|id| self.config.servers.iter().find(|s| s.id == id)) {
             return crate::ui::modal::modal(
                 base,
@@ -243,7 +256,20 @@ impl Session {
     fn picker(&self, l: &Look) -> Element<'_, AppMessage> {
         let profiles = self.connection.iter().flat_map(|c| &c.sign_in_profiles).map(|profile| {
             let picture = self.images.get(&profile_avatar(&profile.key));
-            let face = avatar(&profile.key, picture, 104.0, Some(person(104.0, l)), l);
+            let mut face = avatar(&profile.key, picture, 104.0, Some(person(104.0, l)), l);
+            if profile.passkey {
+                face = iced_widget::stack![
+                    face,
+                    container(passkey_badge(l)).align_right(Length::Fill).align_bottom(Length::Fill).padding(Padding {
+                        right: 2.0,
+                        bottom: 2.0,
+                        ..Padding::ZERO
+                    })
+                ]
+                .width(104)
+                .height(104)
+                .boxed();
+            }
             let ink = l.ink;
             pressable(crate::ui::effects::lift_on_hover(face, -4.0, 1.05, l), 52.0, l, move |_| Appearance {
                 paint: Paint::NONE,
@@ -259,6 +285,33 @@ impl Session {
     fn unlock(&self, l: &Look) -> Element<'_, AppMessage> {
         let key = self.profile.as_deref().unwrap_or_default();
         let picture = self.images.get(&profile_avatar(key));
+        let has_passkey =
+            self.connection.as_ref().is_some_and(|c| c.sign_in_profiles.iter().any(|p| p.key == key && p.passkey));
+        let face = column![
+            container(avatar(key, picture, 128.0, Some(person(128.0, l)), l)).center_x(Length::Fill),
+            container(
+                button("Not you?", l)
+                    .plain()
+                    .small()
+                    .icon(Icon::ArrowLeft)
+                    .on_press_maybe((!self.busy || self.passkey.is_some()).then(|| session(Message::Login)))
+                    .boxed()
+            )
+            .center_x(Length::Fill)
+            .padding(Padding { top: 12.0, bottom: 24.0, ..Padding::ZERO }),
+        ];
+        if self.passkey.is_some() {
+            let waiting = column![
+                spinner(20.0, l),
+                text("Waiting for your passkey…", type_::SM, l.ink_2),
+                button("Use your password instead", l).plain().small().on_press(session(Message::PasskeyClose)).boxed(),
+            ]
+            .spacing(16)
+            .align_x(Alignment::Center)
+            .width(Length::Fill)
+            .padding([8, 0]);
+            return face.push(form_panel(vec![waiting.boxed()], l)).boxed();
+        }
         let mut form = vec![field(
             "Password",
             input("auth-password", &self.password, "", |v| session(Message::Password(v)), l)
@@ -275,24 +328,13 @@ impl Session {
             form.push(error(message, l));
         }
         form.push(primary(Some("Sign in"), "Signing in…", !self.password.is_empty(), Message::Submit, self.busy, l));
+        if has_passkey {
+            form.push(passkey_button("Use your passkey", !self.busy, l));
+        }
         if let Some(forgot) = self.forgot(l) {
             form.push(forgot);
         }
-        column![
-            container(avatar(key, picture, 128.0, Some(person(128.0, l)), l)).center_x(Length::Fill),
-            container(
-                button("Not you?", l)
-                    .plain()
-                    .small()
-                    .icon(Icon::ArrowLeft)
-                    .on_press_maybe((!self.busy).then(|| session(Message::Login)))
-                    .boxed()
-            )
-            .center_x(Length::Fill)
-            .padding(Padding { top: 12.0, bottom: 24.0, ..Padding::ZERO }),
-            form_panel(form, l),
-        ]
-        .boxed()
+        face.push(form_panel(form, l)).boxed()
     }
 
     fn username_form(&self, setup: bool, l: &Look) -> Element<'_, AppMessage> {
@@ -332,6 +374,10 @@ impl Session {
         ));
         if !setup && let Some(forgot) = self.forgot(l) {
             form.push(forgot);
+        }
+        if !setup {
+            form.push(or(l));
+            form.push(passkey_button("Sign in with a passkey", !self.busy, l));
         }
         form_panel(form, l)
     }
@@ -855,6 +901,30 @@ fn primary<'a>(
         action
     };
     action.on_press_maybe((ready && !busy).then(|| session(message))).boxed()
+}
+
+/// Signing in with a passkey instead (`<Button size="lg"><KeyRound /> …</Button>`).
+fn passkey_button<'a>(label: &'a str, enabled: bool, l: &Look) -> Element<'a, AppMessage> {
+    button(label, l)
+        .radius(14.0)
+        .large()
+        .icon(Icon::KeyRound)
+        .fill()
+        .on_press_maybe(enabled.then(|| session(Message::Passkey)))
+        .boxed()
+}
+
+/// The key on a profile picture that signs in with a passkey.
+fn passkey_badge<'a>(l: &Look) -> Element<'a, AppMessage> {
+    let (panel, canvas) = (l.panel, l.canvas);
+    container(icon(Icon::KeyRound, 14.0).color(l.ink_2))
+        .center(28)
+        .style(move |_| container::Style {
+            background: Some(panel.into()),
+            border: iced_core::Border { color: canvas, width: 3.0, radius: 14.0.into() },
+            ..container::Style::default()
+        })
+        .boxed()
 }
 
 /// A way back, under the frame (`<Button variant="plain"><ArrowLeft /> …</Button>`).

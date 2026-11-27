@@ -5,15 +5,16 @@ mod listen;
 pub mod model;
 pub(crate) mod output;
 mod pages;
+pub mod player;
 mod ring;
 mod room;
 mod view;
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
 
 use graphql_client::GraphQLQuery;
-use model::{Entry, Repeat, Settings, Track};
+use model::{Entry, Repeat, Track};
 pub use pages::{dialog, page};
+use player::{Change, Player};
 pub use room::view as room;
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -22,6 +23,9 @@ pub use view::{now_playing, pill};
 use crate::api::{self, Api};
 use crate::app::{Effect, Message as AppMessage};
 use crate::route::Route;
+
+/// What the server calls this app, on the queue it saves and what it says it's playing.
+const CLIENT: &str = "Desktop";
 
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
@@ -82,7 +86,10 @@ pub enum RoomAction {
 /// What's asked of the person over the page.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Dialog {
-    NewPlaylist,
+    /// A new playlist, with these tracks in it.
+    NewPlaylist(Vec<i64>),
+    /// One of your playlists to put these tracks in.
+    AddTo(Vec<i64>),
     DeletePlaylist(i64, String),
 }
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
@@ -96,30 +103,33 @@ pub enum Tab {
 #[derive(Clone)]
 pub enum Message {
     Picture(String, Option<iced_widget::image::Handle>),
+    Mosaic(String, Option<iced_widget::image::Handle>),
     RoomChanged,
     CopyRoom,
     Edited(Result<Value, api::Error>),
-    Remote(i64, f64, Result<Value, api::Error>),
     Deleted(Result<Value, api::Error>),
     PlaylistRemove(usize),
     PlaylistPublic,
     Dialog(Option<Dialog>),
     Created(Result<Value, api::Error>),
+    AddTo(i64, String, Vec<i64>),
+    Added(String, Result<Value, api::Error>),
     Rename(bool),
     Popular(bool),
     Measured(i64, Result<Value, api::Error>),
+    Queued(player::Ask, Result<Value, api::Error>),
+    Found(u64, Result<Value, api::Error>),
+    Timer(player::Timer),
     RoomMenu(RoomAction),
     JoinRoom,
     RoomStarted(Result<Value, api::Error>),
     Ready(Arc<Mutex<engine::Engine>>),
     Audio(engine::Update),
     Loaded(String, Result<Value, api::Error>),
-    Restored(Result<Value, api::Error>),
     Done(Result<Value, api::Error>),
     Tab(Tab),
     Sort(Sort),
     Query(String),
-    Play(Vec<Track>, usize),
     PlayFrom(usize, usize),
     ShuffleSongs,
     PlayAlbum(i64),
@@ -160,6 +170,9 @@ impl std::fmt::Debug for Message {
 
 pub struct Music {
     pub images: crate::images::Images,
+    /// Playlists' four covers made into one picture, by [`mosaic_key`].
+    pub mosaics: std::collections::HashMap<String, Option<iced_widget::image::Handle>>,
+    pub player: Player,
     pub people: Vec<(i64, String)>,
     pub can_invite: bool,
     pub can_share: bool,
@@ -169,32 +182,30 @@ pub struct Music {
     pub room_gone: Option<String>,
     pub room_menu: Vec<RoomAction>,
     pub dialog: Option<Dialog>,
+    /// Your playlists, for adding to one.
+    pub lists: Vec<(i64, String)>,
+    /// Passing notices for the app to show.
+    pub notices: Vec<String>,
     pub renaming: bool,
     pub popular: bool,
-    measured: std::collections::HashSet<i64>,
     pub generation: u64,
+    /// The room on the page; the player follows it once joined.
     pub room_code: Option<String>,
     room: Option<listen::Client>,
     pub snapshot: listen::Snapshot,
-    room_ids: Vec<i64>,
+    /// The room's tracks as last fetched, by id.
+    room_tracks: Vec<Track>,
     room_slot: Option<Arc<Mutex<Option<listen::Client>>>>,
-    room_started: bool,
+    /// The status last told to the room.
+    room_status: Option<&'static str>,
     pub guest_name: String,
     pub room_joined: bool,
     api: Option<Api>,
     engine: Option<Arc<Mutex<engine::Engine>>>,
-    pub queue: Vec<Entry>,
-    pub index: usize,
-    pub position: f64,
-    pub playing: bool,
-    pub waiting: bool,
+    /// What's for the engine before it's ready.
+    held: Vec<player::Do>,
+    /// The rate sound goes out at.
     pub rate: u32,
-    pub settings: Settings,
-    pub repeat: Repeat,
-    pub shuffled: bool,
-    unshuffled: Option<Vec<Entry>>,
-    pub dismissed: bool,
-    pub suspended: bool,
     pub blocked: bool,
     pub expanded: bool,
     pub fullscreen: bool,
@@ -210,16 +221,18 @@ pub struct Music {
     pub error: Option<String>,
     pub loading: bool,
     pub lyrics: Vec<(Option<i64>, String)>,
+    /// The track the lyrics are for.
+    lyrics_for: Option<i64>,
     route: Option<Route>,
     library: bool,
     key: String,
-    uid: u64,
-    saved: Instant,
 }
 impl Default for Music {
     fn default() -> Self {
         Self {
             images: crate::images::Images::default(),
+            mosaics: std::collections::HashMap::new(),
+            player: Player::default(),
             people: vec![],
             can_invite: false,
             can_share: false,
@@ -228,32 +241,23 @@ impl Default for Music {
             room_gone: None,
             room_menu: vec![],
             dialog: None,
+            lists: vec![],
+            notices: vec![],
             renaming: false,
             popular: false,
-            measured: std::collections::HashSet::new(),
             generation: 0,
             room_code: None,
             room: None,
             snapshot: listen::Snapshot::default(),
-            room_ids: vec![],
+            room_tracks: vec![],
             room_slot: None,
-            room_started: false,
+            room_status: None,
             guest_name: crate::player::room::guest_name().unwrap_or_default(),
             room_joined: false,
             api: None,
             engine: None,
-            queue: vec![],
-            index: 0,
-            position: 0.0,
-            playing: false,
-            waiting: false,
+            held: vec![],
             rate: 48000,
-            settings: Settings::default(),
-            repeat: Repeat::Off,
-            shuffled: false,
-            unshuffled: None,
-            dismissed: false,
-            suspended: false,
             blocked: false,
             expanded: false,
             fullscreen: false,
@@ -269,17 +273,22 @@ impl Default for Music {
             error: None,
             loading: false,
             lyrics: vec![],
+            lyrics_for: None,
             route: None,
             library: false,
             key: String::new(),
-            uid: 0,
-            saved: Instant::now(),
         }
     }
 }
+
+/// Where the player's settings and whether it was put away are kept.
+fn kept(name: &str) -> Option<std::path::PathBuf> {
+    crate::paths::config_dir().map(|d| d.join(name))
+}
+
 impl Music {
     pub fn current(&self) -> Option<&Entry> {
-        self.queue.get(self.index)
+        self.player.current()
     }
 
     pub fn owns(&self, route: &Route) -> bool {
@@ -297,10 +306,11 @@ impl Music {
             next.generation = generation;
             next.api = Some(api.clone());
             *self = next;
-            if let Some(path) = crate::paths::config_dir().map(|d| d.join("music-settings")) {
-                self.settings =
-                    std::fs::read(path).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
-            }
+            let settings = kept("music-settings")
+                .and_then(|p| std::fs::read(p).ok())
+                .and_then(|b| serde_json::from_slice(&b).ok());
+            let dismissed = kept("music-dismissed").is_some_and(|p| p.exists());
+            self.player = Player::new(settings.unwrap_or_default(), dismissed);
             let signed_in = api.token.is_some();
             let api = api.clone();
             effects.push(Effect::Listen(Box::new(move |send| {
@@ -313,28 +323,27 @@ impl Music {
                 send(AppMessage::Music(generation, Message::Ready(Arc::new(Mutex::new(engine)))));
             })));
             if signed_in {
-                self.restore(effects);
+                self.player.restore();
             }
         }
         if !matches!(route, Route::Listen(_)) && self.room_code.is_some() {
             if let Some(room) = self.room.take() {
                 room.close();
             }
+            self.room_slot = None;
             self.room_code = None;
-            self.room_ids.clear();
-            self.queue.clear();
-            self.playing = false;
-            if let Some(engine) = &self.engine {
-                engine.lock().unwrap().stop();
+            self.room_tracks.clear();
+            if self.player.room.is_some() {
+                self.player.leave_room();
             }
-            self.restore(effects);
         }
         self.library = library;
         let suspended = self.blocked || matches!(route, Route::Watch(..) | Route::Together(_) | Route::Clip(_));
-        if suspended && !self.suspended {
-            self.pause(effects);
+        if suspended && !self.player.suspended {
+            self.player.suspend();
+        } else if !suspended && self.player.suspended {
+            self.player.unsuspend();
         }
-        self.suspended = suspended;
         if suspended {
             self.expanded = false;
             self.fullscreen = false;
@@ -355,6 +364,7 @@ impl Music {
                 self.fetch(effects);
             }
         }
+        self.run(effects);
     }
 
     fn request<Q: GraphQLQuery + 'static>(
@@ -372,8 +382,129 @@ impl Music {
         })));
     }
 
-    pub fn restore(&self, effects: &mut Vec<Effect>) {
-        self.request::<api::MusicQueue>(api::music_queue::Variables {}, Message::Restored, effects);
+    /// Does what the player asked for.
+    fn run(&mut self, effects: &mut Vec<Effect>) {
+        use player::Do;
+        let mut work = std::mem::take(&mut self.held);
+        work.extend(self.player.take());
+        for task in work {
+            match task {
+                Do::Load(..) | Do::Upcoming(..) | Do::Gain(..) | Do::Play | Do::Pause | Do::Volume(_) | Do::Stop => {
+                    let Some(engine) = &self.engine else {
+                        self.held.push(task);
+                        continue;
+                    };
+                    let mut engine = engine.lock().unwrap();
+                    match task {
+                        Do::Load(items, start) => engine.load(items, start),
+                        Do::Upcoming(after, items) => engine.upcoming(after, items),
+                        Do::Gain(key, gain) => engine.gain(key, gain),
+                        Do::Play => engine.play(),
+                        Do::Pause => engine.pause(),
+                        Do::Volume(volume) => engine.volume(volume),
+                        _ => engine.stop(),
+                    }
+                },
+                Do::Save(input) => {
+                    let input = api::music_save::QueueInput {
+                        tracks: input.tracks,
+                        current: input.current as i64,
+                        position: input.position,
+                        shuffled: input.shuffled,
+                        repeat: match input.repeat {
+                            Repeat::Off => api::music_save::Repeat::OFF,
+                            Repeat::All => api::music_save::Repeat::ALL,
+                            Repeat::One => api::music_save::Repeat::ONE,
+                        },
+                    };
+                    self.request::<api::MusicSave>(api::music_save::Variables { input }, Message::Done, effects);
+                },
+                Do::Played(track_id) => {
+                    self.request::<api::MusicPlayed>(api::music_played::Variables { track_id }, Message::Done, effects)
+                },
+                Do::NowPlaying(track_id, position, paused) => self.request::<api::MusicPlaying>(
+                    api::music_playing::Variables { track_id, position, paused },
+                    Message::Done,
+                    effects,
+                ),
+                Do::Measure(track_id) => self.request::<api::MusicMeasure>(
+                    api::music_measure::Variables { track_id },
+                    move |r| Message::Measured(track_id, r),
+                    effects,
+                ),
+                Do::Queue(ask) => {
+                    self.request::<api::MusicQueue>(
+                        api::music_queue::Variables {},
+                        move |r| Message::Queued(ask, r),
+                        effects,
+                    );
+                },
+                Do::Track(ticket, id) => self.request::<api::MusicTrack>(
+                    api::music_track::Variables { id },
+                    move |r| Message::Found(ticket, r),
+                    effects,
+                ),
+                Do::After(delay, timer) => {
+                    let generation = self.generation;
+                    effects.push(Effect::Request(Box::pin(async move {
+                        tokio::time::sleep(delay).await;
+                        AppMessage::Music(generation, Message::Timer(timer))
+                    })));
+                },
+                Do::Started(_) => {
+                    let id = self.current().map(|e| e.track.id);
+                    if id != self.lyrics_for
+                        && let Some(track_id) = id
+                    {
+                        self.lyrics_for = id;
+                        self.lyrics.clear();
+                        self.request::<api::MusicLyrics>(
+                            api::music_lyrics::Variables { track_id },
+                            move |r| Message::Loaded(format!("lyrics:{track_id}"), r),
+                            effects,
+                        );
+                    }
+                },
+                Do::Remember(settings) => {
+                    if let (Some(path), Ok(bytes)) = (kept("music-settings"), serde_json::to_vec(&settings)) {
+                        let _ = path.parent().map(std::fs::create_dir_all);
+                        let _ = std::fs::write(path, bytes);
+                    }
+                },
+                Do::Dismissed(dismissed) => {
+                    if let Some(path) = kept("music-dismissed") {
+                        if dismissed {
+                            let _ = path.parent().map(std::fs::create_dir_all);
+                            let _ = std::fs::write(path, b"1");
+                        } else if path.exists() {
+                            let _ = std::fs::remove_file(path);
+                        }
+                    }
+                },
+                Do::Room(command) => {
+                    if !self.snapshot.control() {
+                        self.error = Some("Only the host can control this room".into());
+                        continue;
+                    }
+                    let message = match command {
+                        player::Room::Play(position) => json!({"type":"play","position":position}),
+                        player::Room::Pause(position) => json!({"type":"pause","position":position}),
+                        player::Room::Seek(position) => json!({"type":"seek","position":position}),
+                        player::Room::Skip(index) => json!({
+                            "type":"skip",
+                            "index":index,
+                            "from":self.snapshot.room.as_ref().map_or(0, |r| r.current),
+                        }),
+                        player::Room::Add(tracks, next) => json!({"type":"add","tracks":tracks,"next":next}),
+                        player::Room::Remove(index) => json!({"type":"remove","index":index}),
+                        player::Room::Move(from, to) => json!({"type":"move","from":from,"to":to}),
+                    };
+                    if let Some(room) = &self.room {
+                        room.send(message);
+                    }
+                },
+            }
+        }
     }
 
     fn fetch(&mut self, effects: &mut Vec<Effect>) {
@@ -425,165 +556,59 @@ impl Music {
         }
     }
 
-    fn entries(&mut self, tracks: Vec<Track>) -> Vec<Entry> {
-        tracks
-            .into_iter()
-            .map(|track| {
-                self.uid += 1;
-                Entry { key: format!("e{}", self.uid), track, fallback: false }
-            })
-            .collect()
-    }
-
-    fn start(&mut self, index: usize, time: f64, playing: bool, effects: &mut Vec<Effect>) {
-        if self.queue.is_empty() {
-            return;
-        }
-        self.index = index.min(self.queue.len() - 1);
-        self.position = time.max(0.0);
-        self.playing = playing;
-        self.waiting = true;
-        self.dismissed = false;
-        self.error = None;
-        let mut entries = self.queue[self.index..].to_vec();
-        if self.repeat == Repeat::One {
-            entries = vec![self.queue[self.index].clone()];
-        } else if self.repeat == Repeat::All {
-            entries.extend(self.queue[..self.index].to_vec());
-        }
-        if let Some(engine) = &self.engine {
-            let mut settings = self.settings.clone();
-            if matches!(settings.gain, model::Gain::Auto) {
-                if self.shuffled {
-                    settings.gain = model::Gain::Track;
-                } else if self.index > 0
-                    && self.queue[self.index].track.album_id.is_some()
-                    && self.queue[self.index - 1].track.album_id == self.queue[self.index].track.album_id
-                    && let Some(first) = entries.first_mut()
-                {
-                    first.track.gains.track_gain = first.track.gains.album_gain.or(first.track.gains.track_gain);
-                    first.track.gains.track_peak = first.track.gains.album_peak.or(first.track.gains.track_peak);
-                }
-            }
-            engine.lock().unwrap().load(entries, settings, self.position, playing, self.repeat);
-        }
-        for entry in self.queue.iter().skip(self.index).take(3) {
-            if entry.track.gains.pending && self.measured.insert(entry.track.id) {
-                let id = entry.track.id;
-                self.request::<api::MusicMeasure>(
-                    api::music_measure::Variables { track_id: id },
-                    move |r| Message::Measured(id, r),
-                    effects,
-                );
-            }
-        }
-        self.save(effects);
-    }
-
-    fn pause(&mut self, effects: &mut Vec<Effect>) {
-        self.playing = false;
-        if let Some(engine) = &self.engine {
-            engine.lock().unwrap().playing(false);
-        }
-        self.save(effects);
-    }
-
-    pub fn save(&self, effects: &mut Vec<Effect>) {
-        if self.queue.is_empty() || self.room_code.is_some() {
-            return;
-        }
-        let input = api::music_save::QueueInput {
-            tracks: self.queue.iter().map(|e| e.track.id).collect(),
-            current: self.index as i64,
-            position: self.position,
-            shuffled: self.shuffled,
-            repeat: match self.repeat {
-                Repeat::Off => api::music_save::Repeat::OFF,
-                Repeat::All => api::music_save::Repeat::ALL,
-                Repeat::One => api::music_save::Repeat::ONE,
-            },
-        };
-        self.request::<api::MusicSave>(api::music_save::Variables { input }, Message::Done, effects);
-        self.request::<api::MusicPlaying>(
-            api::music_playing::Variables {
-                track_id: self.current().map(|e| e.track.id),
-                position: self.position,
-                paused: !self.playing,
-            },
-            Message::Done,
-            effects,
-        );
-    }
-
-    fn changed_queue(&mut self, effects: &mut Vec<Effect>) {
-        if self.playing {
-            self.start(self.index, self.position, true, effects);
-        } else {
-            self.save(effects);
-        }
+    /// Saves the queue now, before the app goes away.
+    pub fn save(&mut self, effects: &mut Vec<Effect>) {
+        self.player.flush();
+        self.run(effects);
     }
 
     pub fn update(&mut self, message: Message, effects: &mut Vec<Effect>) -> Option<Route> {
-        if self.room_code.is_some() {
-            let outgoing = match &message {
-                Message::Toggle => {
-                    Some(json!({"type": if self.playing {"pause"} else {"play"},"position":self.position}))
-                },
-                Message::Pause => Some(json!({"type":"pause","position":self.position})),
-                Message::Seek(position) => Some(json!({"type":"seek","position":position})),
-                Message::Next => Some(json!({"type":"skip","index":self.index+1,"from":self.index})),
-                Message::Previous => {
-                    Some(json!({"type":"skip","index":self.index.saturating_sub(1),"from":self.index}))
-                },
-                Message::Jump(index) => Some(json!({"type":"skip","index":index,"from":self.index})),
-                Message::Remove(index) => Some(json!({"type":"remove","index":index})),
-                Message::Move(from, by) => Some(json!({"type":"move","from":from,"to":(*from as i32+by).max(0)})),
-                Message::Add(tracks, next) => {
-                    Some(json!({"type":"add","tracks":tracks.iter().map(|t| t.id).collect::<Vec<_>>(),"next":next}))
-                },
-                _ => None,
-            };
-            if let Some(outgoing) = outgoing {
-                if !self.snapshot.control() {
-                    self.error = Some("Only the host can control this room".into());
-                    return None;
-                }
-                if let Some(room) = &self.room {
-                    room.send(outgoing);
-                }
-                return None;
-            }
+        let route = self.handle(message, effects);
+        if self.current().is_none() || self.player.dismissed || self.player.suspended {
+            self.expanded = false;
+            self.fullscreen = false;
         }
+        self.run(effects);
+        self.fetch_art(effects);
+        self.compose(effects);
+        route
+    }
+
+    fn handle(&mut self, message: Message, effects: &mut Vec<Effect>) -> Option<Route> {
         match message {
-            Message::Remote(id, time, result) => {
-                if self.room_code.is_none()
-                    && let Ok(value) = result
-                    && let Ok(track) = serde_json::from_value::<Track>(value["track"].clone())
-                    && track.id == id
-                {
-                    if let Some(engine) = &self.engine {
-                        engine.lock().unwrap().stop();
-                    }
-                    self.queue = self.entries(vec![track]);
-                    self.index = 0;
-                    self.position = time;
-                    self.playing = false;
-                    self.waiting = false;
-                    self.dismissed = false;
-                }
-            },
             Message::Edited(result) => match result {
                 Ok(_) => self.fetch(effects),
                 Err(e) => self.error = Some(e.message),
             },
             Message::Created(result) => match result {
                 Ok(value) => {
+                    let filled = matches!(&self.dialog, Some(Dialog::NewPlaylist(tracks)) if !tracks.is_empty());
                     self.dialog = None;
-                    if let Some(id) = value["createPlaylist"]["id"].as_u64() {
+                    if filled {
+                        let name = value["createPlaylist"]["name"].as_str().unwrap_or_default();
+                        self.notices.push(format!("Made “{name}”"));
+                    } else if let Some(id) = value["createPlaylist"]["id"].as_u64() {
                         return Some(Route::Playlist(id));
                     }
                 },
                 Err(e) => self.error = Some(e.message),
+            },
+            Message::AddTo(id, name, tracks) => {
+                self.dialog = None;
+                self.request::<api::MusicAddToPlaylist>(
+                    api::music_add_to_playlist::Variables { id, tracks },
+                    move |r| Message::Added(name, r),
+                    effects,
+                );
+            },
+            Message::Added(name, result) => match result {
+                Ok(_) => {
+                    self.notices.push(format!("Added to “{name}”"));
+                    if matches!(self.route, Some(Route::Playlist(_))) {
+                        self.fetch(effects);
+                    }
+                },
+                Err(e) => self.notices.push(e.message),
             },
             Message::Deleted(result) => match result {
                 Ok(_) => return Some(Route::Home),
@@ -608,29 +633,37 @@ impl Music {
             },
             Message::Popular(all) => self.popular = all,
             Message::Measured(id, result) => {
-                if let Ok(value) = result
-                    && let Ok(track) = serde_json::from_value::<Track>(value["measureLoudness"].clone())
-                {
-                    for e in &mut self.queue {
-                        if e.track.id == id {
-                            e.track = track.clone();
-                        }
-                    }
-                }
-                if let Some(engine) = &self.engine {
-                    for (i, e) in self.queue.iter().enumerate() {
-                        if e.track.id == id {
-                            engine
-                                .lock()
-                                .unwrap()
-                                .gain(e.key.clone(), model::gain(i, &self.queue, &self.settings, self.shuffled));
-                        }
-                    }
-                }
+                let track =
+                    result.ok().and_then(|v| serde_json::from_value::<Track>(v["measureLoudness"].clone()).ok());
+                self.player.measured(id, track);
             },
+            Message::Queued(ask, result) => {
+                let queue = result.ok().map(|value| {
+                    let q = &value["playQueue"];
+                    player::PlayQueue {
+                        tracks: serde_json::from_value(q["tracks"].clone()).unwrap_or_default(),
+                        current: q["current"].as_u64().unwrap_or(0) as usize,
+                        position: q["position"].as_f64().unwrap_or(0.0),
+                        shuffled: q["shuffled"].as_bool().unwrap_or(false),
+                        repeat: serde_json::from_value(q["repeat"].clone()).unwrap_or_default(),
+                    }
+                });
+                self.player.queue(ask, queue);
+            },
+            Message::Found(ticket, result) => {
+                let track = result.ok().and_then(|v| serde_json::from_value::<Track>(v["track"].clone()).ok());
+                self.player.track(ticket, track);
+            },
+            Message::Timer(timer) => self.player.timer(timer),
             Message::Dialog(dialog) => {
-                if dialog == Some(Dialog::NewPlaylist) {
-                    self.name.clear();
+                match &dialog {
+                    Some(Dialog::NewPlaylist(_)) => self.name.clear(),
+                    Some(Dialog::AddTo(_)) => self.request::<api::MusicPlaylistNames>(
+                        api::music_playlist_names::Variables {},
+                        |r| Message::Loaded("lists".into(), r),
+                        effects,
+                    ),
+                    _ => {},
                 }
                 self.dialog = dialog;
             },
@@ -645,9 +678,12 @@ impl Music {
                 self.images.arrived(path, handle, true);
                 self.images.limit_ready(256);
             },
+            Message::Mosaic(key, handle) => {
+                self.mosaics.insert(key, handle);
+            },
             Message::RoomMenu(action) => {
                 let command = match action {
-                    RoomAction::Copy => return self.update(Message::CopyRoom, effects),
+                    RoomAction::Copy => return self.handle(Message::CopyRoom, effects),
                     RoomAction::Public(public) => json!({"type":"settings","public":public}),
                     RoomAction::Everyone(everyone) => {
                         json!({"type":"settings","control":if everyone {"everyone"} else {"host"}})
@@ -675,196 +711,24 @@ impl Music {
                 },
                 Err(e) => self.error = Some(e.message),
             },
-            Message::Ready(engine) => {
-                self.engine = Some(engine);
-                if self.playing {
-                    self.start(self.index, self.position, true, effects);
-                }
-            },
-            Message::Loaded(key, result) => {
-                if key == "people" {
-                    if let Ok(value) = result {
-                        self.people = value["users"]
-                            .as_array()
-                            .into_iter()
-                            .flatten()
-                            .filter_map(|v| Some((v["id"].as_i64()?, v["username"].as_str()?.to_owned())))
-                            .collect();
-                        self.fill_room_menu();
-                    }
-                    return None;
-                }
-                if key == "room-info" {
-                    self.loading = false;
-                    match result {
-                        Ok(value) => {
-                            let info = &value["listenRoom"];
-                            self.can_invite = info["canInvite"].as_bool().unwrap_or(false);
-                            self.can_share = info["canShare"].as_bool().unwrap_or(false);
-                            self.is_host = info["isHost"].as_bool().unwrap_or(false);
-                            self.host_name = info["hostName"].as_str().unwrap_or_default().to_owned();
-                            if self.can_invite {
-                                self.request::<api::MusicPeople>(
-                                    api::music_people::Variables {},
-                                    |r| Message::Loaded("people".into(), r),
-                                    effects,
-                                );
-                            }
-                            let tracks: Vec<Track> = serde_json::from_value(info["tracks"].clone()).unwrap_or_default();
-                            self.room_started = false;
-                            self.room_ids = tracks.iter().map(|t| t.id).collect();
-                            self.queue = self.entries(tracks);
-                            if info["signedIn"].as_bool() == Some(true) || self.room_joined {
-                                self.connect_room(effects);
-                            }
-                            self.sync_room(effects);
-                        },
-                        Err(e) if self.room_ids.is_empty() => self.room_gone = Some(e.message),
-                        Err(e) => self.error = Some(e.message),
-                    }
-                    self.fill_room_menu();
-                    return None;
-                }
-                if key == "play-album" {
-                    match result {
-                        Ok(value) => {
-                            let tracks = serde_json::from_value(value["album"]["tracks"].clone()).unwrap_or_default();
-                            return self.update(Message::Play(tracks, 0), effects);
-                        },
-                        Err(e) => self.error = Some(e.message),
-                    }
-                    return None;
-                }
-                if key == "more" {
-                    if let Ok(value) = result {
-                        let id = self.detail.as_ref().map(|d| d.id);
-                        self.more_by = serde_json::from_value::<Vec<Card>>(value["artist"]["albums"].clone())
-                            .unwrap_or_default()
-                            .into_iter()
-                            .filter(|a| Some(a.id) != id)
-                            .take(12)
-                            .collect();
-                        self.fetch_art(effects);
-                    }
-                    return None;
-                }
-                if key == "lyrics" {
-                    if let Ok(value) = result {
-                        self.lyrics = value["lyrics"]["lines"]
-                            .as_array()
-                            .into_iter()
-                            .flatten()
-                            .map(|l| (l["start"].as_i64(), l["text"].as_str().unwrap_or("").to_string()))
-                            .collect();
-                    }
-                    return None;
-                }
-                if key != self.key {
-                    return None;
-                }
-                self.loading = false;
-                match result {
-                    Ok(value) => {
-                        if let Some(detail) =
-                            value.get("album").or_else(|| value.get("artist")).or_else(|| value.get("playlist"))
-                        {
-                            self.detail = serde_json::from_value(detail.clone()).ok();
-                            self.songs = self.detail.as_ref().map_or(vec![], |d| d.tracks.clone());
-                            self.cards = self.detail.as_ref().map_or(vec![], |d| d.albums.clone());
-                            self.name = self.detail.as_ref().map_or(String::new(), |d| d.name.clone());
-                            if let (Some(Route::Album(_)), Some(album)) = (&self.route, &self.detail)
-                                && !album.compilation
-                                && let Some(artist) = album.artists.first()
-                            {
-                                self.request::<api::MusicMore>(
-                                    api::music_more::Variables { id: artist.id },
-                                    |r| Message::Loaded("more".into(), r),
-                                    effects,
-                                );
-                            }
-                        } else if let Some(songs) = value.get("songs") {
-                            self.songs = serde_json::from_value(songs.clone()).unwrap_or_default();
-                        } else if let Some(rows) =
-                            value.get("albums").or_else(|| value.get("artists")).or_else(|| value.get("playlists"))
-                        {
-                            self.cards = serde_json::from_value(rows.clone()).unwrap_or_default();
-                        }
-                    },
-                    Err(error) => self.error = Some(error.message),
-                }
-            },
-            Message::Restored(result) => {
-                if !self.playing && self.room_code.is_none() {
-                    match result {
-                        Ok(value) => {
-                            let q = &value["playQueue"];
-                            let tracks = serde_json::from_value(q["tracks"].clone()).unwrap_or_default();
-                            self.queue = self.entries(tracks);
-                            self.index = q["current"].as_u64().unwrap_or(0) as usize;
-                            self.index = self.index.min(self.queue.len().saturating_sub(1));
-                            self.position = q["position"].as_f64().unwrap_or(0.0);
-                            self.repeat = serde_json::from_value(q["repeat"].clone()).unwrap_or_default();
-                            self.shuffled = q["shuffled"].as_bool().unwrap_or(false);
-                        },
-                        Err(error) => self.error = Some(error.message),
-                    }
-                }
-            },
+            Message::Ready(engine) => self.engine = Some(engine),
+            Message::Loaded(key, result) => return self.loaded(key, result, effects),
             Message::Done(Err(error)) => self.error = Some(error.message),
             Message::Done(Ok(_)) => {},
             Message::Audio(update) => match update {
-                engine::Update::Reload => self.start(self.index, self.position, self.playing, effects),
+                engine::Update::Reload => self.player.engine_reload(),
                 engine::Update::Position { key, time, rate } => {
-                    if self.current().is_some_and(|e| e.key == key.split('@').next().unwrap_or(&key)) {
-                        self.position = time;
-                        self.rate = rate;
-                        if self.saved.elapsed().as_secs() >= 30 {
-                            self.saved = Instant::now();
-                            self.save(effects);
-                        }
-                    }
+                    self.rate = rate;
+                    self.player.engine_position(key, time);
+                    self.player.tick();
                 },
-                engine::Update::Started(key) => {
-                    self.waiting = false;
-                    if let Some(i) = self.queue.iter().position(|e| e.key == key.split('@').next().unwrap_or(&key)) {
-                        self.index = i;
-                        self.position = 0.0;
-                        let id = self.queue[i].track.id;
-                        self.request::<api::MusicPlayed>(
-                            api::music_played::Variables { track_id: id },
-                            Message::Done,
-                            effects,
-                        );
-                        self.request::<api::MusicLyrics>(
-                            api::music_lyrics::Variables { track_id: id },
-                            |r| Message::Loaded("lyrics".into(), r),
-                            effects,
-                        );
-                    }
+                engine::Update::Track(key) => self.player.engine_track(&key),
+                engine::Update::Ended => self.player.engine_ended(),
+                engine::Update::Starved(waiting) => {
+                    self.player.engine_starved(waiting);
+                    self.tell_room();
                 },
-                engine::Update::Waiting(value) => {
-                    self.waiting = value;
-                    if let Some(room) = &self.room {
-                        room.send(json!({"type":"status","status":if value {"buffering"} else {"ready"}}));
-                    }
-                },
-                engine::Update::Ended => {
-                    self.playing = false;
-                    if self.repeat != Repeat::Off {
-                        self.start(if self.repeat == Repeat::One { self.index } else { 0 }, 0.0, true, effects);
-                    } else {
-                        self.save(effects);
-                    }
-                },
-                engine::Update::Error(key, error) => {
-                    if let Some(i) = self.queue.iter().position(|e| e.key == key && !e.fallback) {
-                        self.queue[i].fallback = true;
-                        self.start(self.index, self.position, self.playing, effects);
-                    } else {
-                        self.error = Some(error);
-                        self.pause(effects);
-                    }
-                },
+                engine::Update::Error(key, error) => self.player.engine_error(&key, &error),
             },
             Message::Tab(tab) => {
                 self.tab = tab;
@@ -880,155 +744,53 @@ impl Music {
                 self.query = query;
                 self.fetch(effects);
             },
-            Message::Play(tracks, index) => {
-                self.queue = self.entries(tracks);
-                self.shuffled = false;
-                self.unshuffled = None;
-                self.start(index, 0.0, true, effects);
-            },
             Message::PlayFrom(index, end) => {
                 let tracks = self.songs[..end.min(self.songs.len())].to_vec();
-                return self.update(Message::Play(tracks, index), effects);
+                self.player.play(tracks, index, false);
             },
-            Message::ShuffleSongs => {
-                if !self.songs.is_empty() {
-                    self.queue = self.entries(self.songs.clone());
-                    self.unshuffled = Some(self.queue.clone());
-                    let mut bytes = [0; 8];
-                    let first = if getrandom::fill(&mut bytes).is_ok() {
-                        (u64::from_le_bytes(bytes) % self.queue.len() as u64) as usize
-                    } else {
-                        0
-                    };
-                    shuffle(&mut self.queue, first);
-                    self.shuffled = true;
-                    self.start(0, 0.0, true, effects);
-                }
-            },
+            Message::ShuffleSongs => self.player.play(self.songs.clone(), 0, true),
             Message::PlayAlbum(id) => self.request::<api::MusicAlbum>(
                 api::music_album::Variables { id },
                 |r| Message::Loaded("play-album".into(), r),
                 effects,
             ),
-            Message::Add(tracks, next) => {
-                let entries = self.entries(tracks);
-                let at = if next { (self.index + 1).min(self.queue.len()) } else { self.queue.len() };
-                self.queue.splice(at..at, entries);
-                if self.playing {
-                    if let (Some(engine), Some(current)) = (&self.engine, self.current()) {
-                        engine.lock().unwrap().upcoming(
-                            current.key.clone(),
-                            self.queue[self.index + 1..].to_vec(),
-                            self.settings.clone(),
-                        );
-                    }
-                    self.save(effects);
-                } else {
-                    self.changed_queue(effects);
-                }
-            },
-            Message::Toggle => {
-                if self.playing {
-                    self.pause(effects)
-                } else {
-                    self.start(self.index, self.position, true, effects);
-                }
-            },
-            Message::Pause => self.pause(effects),
-            Message::Next => {
-                if self.index + 1 < self.queue.len() {
-                    self.start(self.index + 1, 0.0, true, effects);
-                } else if self.repeat == Repeat::All {
-                    self.start(0, 0.0, true, effects);
-                }
-            },
-            Message::Previous => self.start(
-                if self.position > 3.0 { self.index } else { self.index.saturating_sub(1) },
-                0.0,
-                true,
-                effects,
-            ),
-            Message::Jump(index) => self.start(index, 0.0, true, effects),
-            Message::Seek(time) => self.start(self.index, time, self.playing, effects),
+            Message::Add(tracks, true) => self.player.play_next(tracks),
+            Message::Add(tracks, false) => self.player.add(tracks),
+            Message::Toggle => self.player.toggle(),
+            Message::Pause => self.player.pause(),
+            Message::Next => self.player.next(),
+            Message::Previous => self.player.previous(),
+            Message::Jump(index) => self.player.jump_to(index),
+            Message::Seek(time) => self.player.seek(time),
             Message::Remove(index) => {
-                if index < self.queue.len() {
-                    self.queue.remove(index);
-                    if index < self.index {
-                        self.index -= 1;
-                    }
-                    self.index = self.index.min(self.queue.len().saturating_sub(1));
-                    if self.queue.is_empty() {
-                        self.playing = false;
-                        if let Some(e) = &self.engine {
-                            e.lock().unwrap().stop();
-                        }
-                    } else {
-                        self.changed_queue(effects);
-                    }
+                if let Some(key) = self.player.queue.get(index).map(|e| e.key.clone()) {
+                    self.player.remove(&key);
                 }
             },
-            Message::Move(index, by) => {
-                let to = (index as i32 + by).max(0) as usize;
-                if index < self.queue.len() && to < self.queue.len() {
-                    let key = self.current().map(|e| e.key.clone());
-                    let entry = self.queue.remove(index);
-                    self.queue.insert(to, entry);
-                    self.index = key.and_then(|k| self.queue.iter().position(|e| e.key == k)).unwrap_or(0);
-                    self.changed_queue(effects);
-                }
-            },
-            Message::Shuffle => {
-                if let Some(original) = self.unshuffled.take() {
-                    let key = self.current().map(|e| e.key.clone());
-                    self.queue = original;
-                    self.index = key.and_then(|k| self.queue.iter().position(|e| e.key == k)).unwrap_or(0);
-                    self.shuffled = false;
-                } else {
-                    self.unshuffled = Some(self.queue.clone());
-                    shuffle(&mut self.queue, self.index);
-                    self.index = 0;
-                    self.shuffled = true;
-                }
-                self.changed_queue(effects);
-            },
-            Message::Repeat => {
-                self.repeat = match self.repeat {
-                    Repeat::Off => Repeat::All,
-                    Repeat::All => Repeat::One,
-                    Repeat::One => Repeat::Off,
-                };
-                self.changed_queue(effects);
-            },
+            Message::Move(index, by) => self.player.move_entry(index, (index as i32 + by).max(0) as usize),
+            Message::Shuffle => self.player.shuffle(!self.player.shuffled),
+            Message::Repeat => self.player.repeat(match self.player.repeat {
+                Repeat::Off => Repeat::All,
+                Repeat::All => Repeat::One,
+                Repeat::One => Repeat::Off,
+            }),
             Message::Volume(volume) => {
-                self.settings.volume = volume;
-                self.settings.muted = false;
-                self.settings_changed();
-            },
-            Message::Gain(gain) => {
-                self.settings.gain = gain;
-                self.settings_changed();
-                self.changed_queue(effects);
-            },
-            Message::Fade(fade) => {
-                self.settings.crossfade = fade;
-                self.settings_changed();
-                self.changed_queue(effects);
-            },
-            Message::Dismiss => {
-                if self.playing {
-                    self.pause(effects);
+                self.player.settings(Change::Volume(volume));
+                if self.player.settings.muted {
+                    self.player.settings(Change::Muted(false));
                 }
-                self.dismissed = true;
+            },
+            Message::Gain(gain) => self.player.settings(Change::Gain(gain)),
+            Message::Fade(fade) => self.player.settings(Change::Crossfade(fade)),
+            Message::Mute => self.player.settings(Change::Muted(!self.player.settings.muted)),
+            Message::Dismiss => {
+                self.player.dismiss();
                 self.expanded = false;
                 self.fullscreen = false;
             },
             Message::Collapse => {
                 self.expanded = false;
                 self.fullscreen = false;
-            },
-            Message::Mute => {
-                self.settings.muted = !self.settings.muted;
-                self.settings_changed();
             },
             Message::Expand => {
                 self.expanded = !self.expanded;
@@ -1050,10 +812,9 @@ impl Music {
                         t.starred = starred;
                     }
                 }
-                for e in &mut self.queue {
-                    if e.track.id == id {
-                        e.track.starred = starred;
-                    }
+                if let Some(mut track) = self.player.queue.iter().find(|e| e.track.id == id).map(|e| e.track.clone()) {
+                    track.starred = starred;
+                    self.player.update(&track);
                 }
                 self.request::<api::MusicStar>(
                     api::music_star::Variables { kind: api::music_star::MusicKind::TRACK, id, starred },
@@ -1082,9 +843,13 @@ impl Music {
                 self.guest_name = name;
             },
             Message::CreatePlaylist => {
+                let tracks = match &self.dialog {
+                    Some(Dialog::NewPlaylist(tracks)) => tracks.clone(),
+                    _ => vec![],
+                };
                 if !self.name.trim().is_empty() {
                     self.request::<api::MusicCreatePlaylist>(
-                        api::music_create_playlist::Variables { name: self.name.trim().to_owned() },
+                        api::music_create_playlist::Variables { name: self.name.trim().to_owned(), tracks },
                         Message::Created,
                         effects,
                     )
@@ -1126,27 +891,139 @@ impl Music {
                 );
             },
         }
-        if self.current().is_none() || self.dismissed || self.suspended {
-            self.expanded = false;
-            self.fullscreen = false;
+        None
+    }
+
+    fn loaded(&mut self, key: String, result: Result<Value, api::Error>, effects: &mut Vec<Effect>) -> Option<Route> {
+        if key == "people" {
+            if let Ok(value) = result {
+                self.people = value["users"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|v| Some((v["id"].as_i64()?, v["username"].as_str()?.to_owned())))
+                    .collect();
+                self.fill_room_menu();
+            }
+            return None;
         }
-        self.fetch_art(effects);
+        if key == "lists" {
+            if let Ok(value) = result {
+                self.lists = value["playlists"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter(|p| p["mine"].as_bool() == Some(true))
+                    .filter_map(|p| Some((p["id"].as_i64()?, p["name"].as_str()?.to_owned())))
+                    .collect();
+            }
+            return None;
+        }
+        if key == "room-info" {
+            self.loading = false;
+            match result {
+                Ok(value) => {
+                    let info = &value["listenRoom"];
+                    self.can_invite = info["canInvite"].as_bool().unwrap_or(false);
+                    self.can_share = info["canShare"].as_bool().unwrap_or(false);
+                    self.is_host = info["isHost"].as_bool().unwrap_or(false);
+                    self.host_name = info["hostName"].as_str().unwrap_or_default().to_owned();
+                    if self.can_invite && self.people.is_empty() {
+                        self.request::<api::MusicPeople>(
+                            api::music_people::Variables {},
+                            |r| Message::Loaded("people".into(), r),
+                            effects,
+                        );
+                    }
+                    self.room_tracks = serde_json::from_value(info["tracks"].clone()).unwrap_or_default();
+                    if self.room.is_none() && (info["signedIn"].as_bool() == Some(true) || self.room_joined) {
+                        self.connect_room(effects);
+                    }
+                    self.sync_room(effects);
+                },
+                Err(e) if self.room_tracks.is_empty() => self.room_gone = Some(e.message),
+                Err(e) => self.error = Some(e.message),
+            }
+            self.fill_room_menu();
+            return None;
+        }
+        if key == "play-album" {
+            match result {
+                Ok(value) => {
+                    let tracks = serde_json::from_value(value["album"]["tracks"].clone()).unwrap_or_default();
+                    self.player.play(tracks, 0, false);
+                },
+                Err(e) => self.error = Some(e.message),
+            }
+            return None;
+        }
+        if key == "more" {
+            if let Ok(value) = result {
+                let id = self.detail.as_ref().map(|d| d.id);
+                self.more_by = serde_json::from_value::<Vec<Card>>(value["artist"]["albums"].clone())
+                    .unwrap_or_default()
+                    .into_iter()
+                    .filter(|a| Some(a.id) != id)
+                    .take(12)
+                    .collect();
+            }
+            return None;
+        }
+        if let Some(id) = key.strip_prefix("lyrics:") {
+            if let Ok(value) = result
+                && self.lyrics_for.is_some_and(|l| l.to_string() == id)
+            {
+                self.lyrics = value["lyrics"]["lines"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .map(|l| (l["start"].as_i64(), l["text"].as_str().unwrap_or("").to_string()))
+                    .collect();
+            }
+            return None;
+        }
+        if key != self.key {
+            return None;
+        }
+        self.loading = false;
+        match result {
+            Ok(value) => {
+                if let Some(detail) =
+                    value.get("album").or_else(|| value.get("artist")).or_else(|| value.get("playlist"))
+                {
+                    self.detail = serde_json::from_value(detail.clone()).ok();
+                    self.songs = self.detail.as_ref().map_or(vec![], |d| d.tracks.clone());
+                    self.cards = self.detail.as_ref().map_or(vec![], |d| d.albums.clone());
+                    self.name = self.detail.as_ref().map_or(String::new(), |d| d.name.clone());
+                    if let (Some(Route::Album(_)), Some(album)) = (&self.route, &self.detail)
+                        && !album.compilation
+                        && let Some(artist) = album.artists.first()
+                    {
+                        self.request::<api::MusicMore>(
+                            api::music_more::Variables { id: artist.id },
+                            |r| Message::Loaded("more".into(), r),
+                            effects,
+                        );
+                    }
+                } else if let Some(songs) = value.get("songs") {
+                    self.songs = serde_json::from_value(songs.clone()).unwrap_or_default();
+                } else if let Some(rows) =
+                    value.get("albums").or_else(|| value.get("artists")).or_else(|| value.get("playlists"))
+                {
+                    self.cards = serde_json::from_value(rows.clone()).unwrap_or_default();
+                }
+            },
+            Err(error) => self.error = Some(error.message),
+        }
         None
     }
 
     pub fn live(&mut self, live: &crate::api::Live, effects: &mut Vec<Effect>) {
-        if self.room_code.is_some() {
-            return;
-        }
         match live {
-            crate::api::Live::Connected => {
-                if !self.playing {
-                    self.restore(effects);
-                }
-            },
+            crate::api::Live::Connected => self.player.refresh_from_server(),
             crate::api::Live::Event(event) => match &event.events {
                 api::events::EventsEvents::LibraryChanged(_) | api::events::EventsEvents::ScanFinished(_) => {
-                    if self.route.as_ref().is_some_and(|r| self.owns(r)) {
+                    if self.route.as_ref().is_some_and(|r| self.owns(r) && !matches!(r, Route::Listen(_))) {
                         self.fetch(effects);
                     }
                 },
@@ -1157,37 +1034,56 @@ impl Music {
                         self.fetch(effects);
                     }
                 },
+                // Another app moved the queue on; follow it unless we're the ones playing.
                 api::events::EventsEvents::QueueChanged(change) => {
-                    if change.by.as_deref() != Some("Desktop") && !self.playing {
-                        self.restore(effects);
+                    if change.by.as_deref() != Some(CLIENT) {
+                        self.player.refresh_from_server();
                     }
                 },
                 api::events::EventsEvents::PlaybackChanged(change) => {
-                    if change.client != "Desktop"
-                        && (!self.playing || !change.paused)
-                        && let Some(id) = change.track_id
-                    {
-                        let time = change.position;
-                        self.request::<api::MusicTrack>(
-                            api::music_track::Variables { id },
-                            move |r| Message::Remote(id, time, r),
-                            effects,
-                        );
-                    }
+                    self.player.follow_remote(&change.client, change.track_id, change.position, change.paused)
                 },
                 _ => {},
             },
             _ => {},
         }
+        self.run(effects);
+    }
+
+    /// Makes the mosaics whose covers have all arrived.
+    fn compose(&mut self, effects: &mut Vec<Effect>) {
+        let lists = self.cards.iter().chain(self.detail.as_ref()).filter(|c| c.covers.len() >= 4);
+        for list in lists {
+            let key = mosaic_key(&list.covers);
+            if self.mosaics.contains_key(&key) {
+                continue;
+            }
+            let pictures: Vec<_> = list.covers[..4]
+                .iter()
+                .map_while(|p| match self.images.picture(p) {
+                    Some(crate::images::Picture::Ready(handle, _)) => Some(handle.clone()),
+                    _ => None,
+                })
+                .collect();
+            let Ok(pictures) = <[_; 4]>::try_from(pictures) else { continue };
+            self.mosaics.insert(key.clone(), None);
+            let generation = self.generation;
+            effects.push(Effect::Request(Box::pin(async move {
+                AppMessage::Music(generation, Message::Mosaic(key, crate::images::mosaic(pictures, 256).await))
+            })));
+        }
     }
 
     fn fetch_art(&mut self, effects: &mut Vec<Effect>) {
         let cards = self.cards.iter().chain(&self.more_by).chain(self.detail.iter().flat_map(|d| &d.appears_on));
+        let queue = &self.player.queue;
         let paths: Vec<String> = cards
             .chain(self.detail.as_ref())
             .flat_map(|c| c.cover.iter().chain(c.covers.iter().take(4)))
             .chain(self.songs.iter().filter_map(|t| t.cover.as_ref()))
-            .chain(self.queue.iter().skip(self.index.saturating_sub(1)).take(30).filter_map(|e| e.track.cover.as_ref()))
+            .chain(
+                queue.iter().skip(self.player.index.saturating_sub(1)).take(30).filter_map(|e| e.track.cover.as_ref()),
+            )
             .cloned()
             .collect();
         for path in paths {
@@ -1206,8 +1102,9 @@ impl Music {
         }
     }
 
+    /// What the system's media controls show.
     pub fn desktop_media(&self) -> crate::platform::integration::Media {
-        let Some(current) = self.current().filter(|_| !self.suspended) else {
+        let Some(current) = self.current().filter(|_| !self.player.suspended) else {
             return Default::default();
         };
         crate::platform::integration::Media {
@@ -1221,12 +1118,12 @@ impl Music {
                 .and_then(|a| current.track.cover.as_ref().and_then(|p| a.origin.join(p).ok()))
                 .map_or(String::new(), |u| u.to_string()),
             length: current.track.duration,
-            position: self.position,
-            playing: self.playing,
+            position: self.player.shown(),
+            playing: self.player.playing,
             rate: 1.0,
-            volume: self.settings.volume as f64,
-            next: self.index + 1 < self.queue.len(),
-            previous: self.index > 0,
+            volume: self.player.settings.volume as f64,
+            next: self.player.index + 1 < self.player.queue.len(),
+            previous: self.player.index > 0,
             seek: true,
             discontinuities: 0,
             tray: false,
@@ -1234,15 +1131,15 @@ impl Music {
     }
 
     fn begin_room(&mut self, code: String, effects: &mut Vec<Effect>) {
-        self.save(effects);
-        self.pause(effects);
         if let Some(room) = self.room.take() {
             room.close();
         }
-        self.room_started = false;
+        self.room_slot = None;
         self.room_code = Some(code.clone());
         self.room_joined = false;
         self.room_gone = None;
+        self.room_tracks.clear();
+        self.room_status = None;
         self.loading = true;
         self.snapshot = listen::Snapshot::default();
         self.request::<api::MusicRoom>(
@@ -1253,7 +1150,7 @@ impl Music {
     }
 
     fn connect_room(&mut self, effects: &mut Vec<Effect>) {
-        if self.room.is_some() {
+        if self.room.is_some() || self.room_slot.is_some() {
             return;
         }
         let (Some(api), Some(code)) = (self.api.clone(), self.room_code.clone()) else {
@@ -1264,6 +1161,7 @@ impl Music {
             return;
         }
         self.room_joined = true;
+        self.player.enter_room(code.clone());
         let generation = self.generation;
         let name = (api.token.is_none()).then(|| self.guest_name.clone());
         let slot = Arc::new(Mutex::new(None));
@@ -1282,6 +1180,7 @@ impl Music {
         self.room_slot = Some(receive);
     }
 
+    /// Brings the player in line with the room, one change at a time.
     fn sync_room(&mut self, effects: &mut Vec<Effect>) {
         if self.room.is_none()
             && let Some(slot) = &self.room_slot
@@ -1294,14 +1193,24 @@ impl Music {
         self.snapshot = room.snapshot();
         self.fill_room_menu();
         if self.snapshot.ended {
-            self.pause(effects);
-            self.room_gone = Some("Whoever started this room has ended it.".into());
+            if self.room_gone.is_none() {
+                self.room_gone = Some("Whoever started this room has ended it.".into());
+                self.player.leave_room();
+            }
             return;
         }
         let Some(state) = &self.snapshot.room else {
             return;
         };
-        if state.queue != self.room_ids {
+        let Some((index, time, playing)) = self.snapshot.target() else {
+            return;
+        };
+        if state.queue.is_empty() {
+            return;
+        }
+        let tracks: Vec<Track> =
+            state.queue.iter().filter_map(|id| self.room_tracks.iter().find(|t| t.id == *id).cloned()).collect();
+        if tracks.len() != state.queue.len() {
             if !self.loading {
                 self.loading = true;
                 let code = self.room_code.clone().unwrap_or_default();
@@ -1313,21 +1222,26 @@ impl Music {
             }
             return;
         }
-        let Some((index, time, playing)) = self.snapshot.target() else {
+        if self.player.index != index || self.current().is_none() {
+            self.tell("loading");
+        }
+        self.player.follow(tracks, index, time, playing);
+        self.tell_room();
+    }
+
+    fn tell_room(&mut self) {
+        if self.room.is_some() && self.player.room.is_some() {
+            self.tell(if self.player.waiting && self.player.playing { "buffering" } else { "ready" });
+        }
+    }
+
+    fn tell(&mut self, status: &'static str) {
+        if self.room_status == Some(status) {
             return;
-        };
-        let changed = index != self.index || (self.position - time).abs() > if playing { 0.35 } else { 1.0 };
-        if changed || self.engine.is_some() && self.current().is_some() && !self.room_started {
-            self.room_started = true;
-            self.start(index, time, playing, effects);
-        } else if playing != self.playing {
-            self.playing = playing;
-            if let Some(engine) = &self.engine {
-                engine.lock().unwrap().playing(playing);
-            }
         }
         if let Some(room) = &self.room {
-            room.send(json!({"type":"status","status":if self.waiting && self.playing{"buffering"}else{"ready"}}));
+            self.room_status = Some(status);
+            room.send(json!({"type":"status","status":status}));
         }
     }
 
@@ -1372,31 +1286,11 @@ impl Music {
             effects,
         );
     }
-
-    fn settings_changed(&self) {
-        if let Some(e) = &self.engine {
-            e.lock().unwrap().settings(self.settings.clone());
-        }
-        if let Some(dir) = crate::paths::config_dir() {
-            let _ = std::fs::create_dir_all(&dir);
-            if let Ok(bytes) = serde_json::to_vec(&self.settings) {
-                let _ = std::fs::write(dir.join("music-settings"), bytes);
-            }
-        }
-    }
 }
-fn shuffle(queue: &mut Vec<Entry>, index: usize) {
-    if queue.is_empty() {
-        return;
-    }
-    let current = queue.remove(index.min(queue.len() - 1));
-    for i in (1..queue.len()).rev() {
-        let mut bytes = [0; 8];
-        if getrandom::fill(&mut bytes).is_ok() {
-            queue.swap(i, (u64::from_le_bytes(bytes) % (i as u64 + 1)) as usize);
-        }
-    }
-    queue.insert(0, current);
+
+/// What a playlist's mosaic is kept under: its first four covers.
+pub fn mosaic_key(covers: &[String]) -> String {
+    covers.iter().take(4).map(String::as_str).collect::<Vec<_>>().join("\n")
 }
 
 impl Drop for Music {
@@ -1411,24 +1305,27 @@ impl Drop for Music {
 mod tests {
     use super::*;
     fn tracks() -> Vec<Track> {
-        (1..=3).map(|id| Track { id, title: format!("Track {id}"), ..Track::default() }).collect()
+        (1..=3).map(|id| Track { id, title: format!("Track {id}"), duration: 200.0, ..Track::default() }).collect()
+    }
+    fn entries(tracks: Vec<Track>) -> Vec<Entry> {
+        tracks.into_iter().map(|track| Entry { key: format!("t{}", track.id), track, fallback: false }).collect()
     }
     #[test]
     fn closing_a_playing_player_pauses_and_dismisses_without_opening_fullscreen() {
         let mut music = Music::default();
         let mut effects = vec![];
-        music.update(Message::Play(tracks(), 0), &mut effects);
+        music.player.play(tracks(), 0, false);
         music.expanded = true;
         music.update(Message::Dismiss, &mut effects);
-        assert!(music.dismissed, "Close must dismiss while playing");
-        assert!(!music.playing);
+        assert!(music.player.dismissed, "Close must dismiss while playing");
+        assert!(!music.player.playing);
         assert!(!music.expanded);
         assert!(!music.fullscreen);
     }
     #[test]
     fn leaving_now_playing_returns_to_the_pill() {
         let mut music = Music::default();
-        music.queue = music.entries(tracks());
+        music.player.state_mut().queue = entries(tracks());
         let mut effects = vec![];
         music.update(Message::Fullscreen, &mut effects);
         assert!(music.fullscreen);
@@ -1440,32 +1337,41 @@ mod tests {
     fn queue_edits_and_shuffle_preserve_the_audible_track() {
         let mut music = Music::default();
         let mut effects = vec![];
-        music.update(Message::Play(tracks(), 1), &mut effects);
+        music.player.play(tracks(), 1, false);
         assert_eq!(music.current().unwrap().track.id, 2);
         music.update(Message::Shuffle, &mut effects);
         assert_eq!(music.current().unwrap().track.id, 2);
         music.update(Message::Shuffle, &mut effects);
-        assert_eq!(music.queue.iter().map(|e| e.track.id).collect::<Vec<_>>(), vec![1, 2, 3]);
+        assert_eq!(music.player.queue.iter().map(|e| e.track.id).collect::<Vec<_>>(), vec![1, 2, 3]);
         assert_eq!(music.current().unwrap().track.id, 2);
         music.update(Message::Remove(0), &mut effects);
         assert_eq!(music.current().unwrap().track.id, 2);
         music.update(Message::Seek(42.0), &mut effects);
         music.update(Message::Pause, &mut effects);
-        assert!(!music.playing);
-        assert_eq!(music.position, 42.0);
+        assert!(!music.player.playing);
+        assert_eq!(music.player.shown(), 42.0);
         music.update(Message::Dismiss, &mut effects);
-        assert!(music.dismissed);
+        assert!(music.player.dismissed);
     }
     #[test]
     fn server_queue_restores_paused_without_starting_audio() {
         let mut music = Music::default();
         let mut effects = vec![];
-        music.update(Message::Restored(Ok(json!({"playQueue":{"tracks":[{"id":5,"title":"Five"}],"current":0,"position":17.25,"repeat":"ALL","shuffled":false}}))),&mut effects);
+        music.player.restore();
+        music.update(Message::Queued(player::Ask::Restore, Ok(json!({"playQueue":{"tracks":[{"id":5,"title":"Five"}],"current":0,"position":17.25,"repeat":"ALL","shuffled":false}}))),&mut effects);
         assert_eq!(music.current().unwrap().track.id, 5);
-        assert_eq!(music.position, 17.25);
-        assert!(!music.playing);
+        assert_eq!(music.player.shown(), 17.25);
+        assert!(!music.player.playing);
         assert!(music.engine.is_none());
-        assert_eq!(music.repeat, Repeat::All);
+        assert_eq!(music.player.repeat, Repeat::All);
+    }
+    #[test]
+    fn engine_work_waits_for_the_engine() {
+        let mut music = Music::default();
+        let mut effects = vec![];
+        music.player.play(tracks(), 0, false);
+        music.update(Message::Next, &mut effects);
+        assert!(music.held.iter().filter(|d| matches!(d, player::Do::Load(..))).count() == 2);
     }
     #[test]
     #[ignore = "requires Vulkan; draws the library and the album, artist and playlist pages"]
@@ -1535,6 +1441,20 @@ mod tests {
         let draw = |app: &mut crate::app::App, name: &str, cursor: Option<Point>| {
             crate::snapshot::snapshot(app, size, 1.0, cursor, &dir.join(name), &[]).unwrap();
         };
+        for card in &app.music.cards {
+            let pictures = <[_; 4]>::try_from(
+                card.covers
+                    .iter()
+                    .filter_map(|p| match app.music.images.picture(p) {
+                        Some(crate::images::Picture::Ready(handle, _)) => Some(handle.clone()),
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>(),
+            )
+            .unwrap();
+            let mosaic = crate::test_support::run(crate::images::mosaic(pictures, 256));
+            app.music.mosaics.insert(mosaic_key(&card.covers), mosaic);
+        }
         for tab in [Tab::Albums, Tab::Artists, Tab::Playlists] {
             app.music.tab = tab;
             draw(&mut app, &format!("library-{tab:?}.png"), Some(Point::new(400.0, 300.0)));
@@ -1556,9 +1476,10 @@ mod tests {
         app.music.detail = Some(album);
         app.music.songs = songs.clone();
         app.music.more_by = app.music.cards[1..5].to_vec();
-        app.music.queue = app.music.entries(songs.clone());
-        app.music.index = 1;
-        app.music.playing = true;
+        let state = app.music.player.state_mut();
+        state.queue = entries(songs.clone());
+        state.index = 1;
+        state.playing = true;
         draw(&mut app, "album.png", Some(Point::new(700.0, 520.0)));
 
         app.history = crate::route::History::new(Route::Artist(1));
@@ -1578,7 +1499,7 @@ mod tests {
         list.mine = true;
         app.music.detail = Some(list);
         draw(&mut app, "playlist.png", Some(Point::new(700.0, 470.0)));
-        app.music.dialog = Some(Dialog::NewPlaylist);
+        app.music.dialog = Some(Dialog::NewPlaylist(vec![]));
         draw(&mut app, "new-playlist.png", None);
         app.music.dialog = None;
 
@@ -1593,7 +1514,7 @@ mod tests {
         app.music.is_host = true;
         app.music.can_share = true;
         app.music.people = vec![(7, "cranky".into())];
-        app.music.queue[1].track.cover_tint = Some("40 90 200".into());
+        app.music.player.state_mut().queue[1].track.cover_tint = Some("40 90 200".into());
         app.music.snapshot.connected = true;
         app.music.snapshot.room = serde_json::from_value(json!({
             "queue": [1, 2, 3, 4, 5, 6, 7],
@@ -1610,7 +1531,7 @@ mod tests {
         .ok();
         assert!(app.music.snapshot.room.is_some());
         app.music.fill_room_menu();
-        app.music.position = 63.0;
+        app.music.player.state_mut().resume_at = 63.0;
         draw(&mut app, "room.png", Some(Point::new(1000.0, 260.0)));
         let click = [
             iced_core::Event::Mouse(iced_core::mouse::Event::ButtonPressed(iced_core::mouse::Button::Left)),
@@ -1643,8 +1564,16 @@ mod tests {
             artist: "The River Quartet".into(),
             ..Default::default()
         });
+        let pixels = (0..64 * 64).flat_map(|p| {
+            let (x, y) = ((p % 64) as u8, (p / 64) as u8);
+            [200u8.saturating_sub(y * 2), 40 + x * 2, 70 + y, 255]
+        });
+        let handle = iced_widget::image::Handle::from_rgba(64, 64, pixels.collect::<Vec<u8>>());
+        app.music.images.arrived("/c/now".into(), Some(handle), false);
         let mut songs = tracks();
         for t in &mut songs {
+            t.cover = Some("/c/now".into());
+            t.cover_tint = Some("200 40 70".into());
             t.artist = "The River Quartet".into();
             t.album = "A quiet afternoon".into();
             t.duration = 245.0;
@@ -1653,9 +1582,10 @@ mod tests {
             t.bit_depth = Some(24);
         }
         app.music.songs = songs.clone();
-        app.music.queue = app.music.entries(songs);
-        app.music.position = 63.0;
-        app.music.playing = true;
+        let state = app.music.player.state_mut();
+        state.queue = entries(songs);
+        state.resume_at = 63.0;
+        state.playing = true;
         let draw = |app: &mut crate::app::App, name: &str, cursor: Option<Point>, events: &[Event]| {
             crate::snapshot::snapshot(app, Size::new(1280, 800), 1.0, cursor, &dir.join(name), events).unwrap()
         };
@@ -1665,26 +1595,26 @@ mod tests {
         ];
         draw(&mut app, "pill.png", None, &[]);
         draw(&mut app, "pause.png", Some(Point::new(721.0, 754.0)), &click);
-        assert!(!app.music.playing, "Pill play button should pause");
+        assert!(!app.music.player.playing, "Pill play button should pause");
         assert!(!app.music.expanded, "Transport click must not expand the pill");
         assert!(!app.music.fullscreen);
-        app.music.playing = true;
+        app.music.player.state_mut().playing = true;
         let messages = draw(&mut app, "closed.png", Some(Point::new(811.0, 754.0)), &click);
         assert!(
             messages.iter().any(|m| matches!(m, crate::app::Message::Music(_, Message::Dismiss))),
             "Click must reach close"
         );
-        assert!(app.music.dismissed);
-        assert!(!app.music.playing);
+        assert!(app.music.player.dismissed);
+        assert!(!app.music.player.playing);
         assert!(!app.music.fullscreen);
-        assert_eq!(app.music.queue.len(), 3);
-        app.music.dismissed = false;
-        app.music.playing = true;
+        assert_eq!(app.music.player.queue.len(), 3);
+        app.music.player.state_mut().dismissed = false;
+        app.music.player.state_mut().playing = true;
         app.music.expanded = true;
         draw(&mut app, "card.png", None, &[]);
         draw(&mut app, "collapsed.png", Some(Point::new(300.0, 100.0)), &click);
         assert!(!app.music.expanded, "Clicking outside should collapse the card");
-        assert!(app.music.playing);
+        assert!(app.music.player.playing);
         app.music.fullscreen = true;
         app.music.expanded = true;
         app.music.panel = 1;
@@ -1692,7 +1622,7 @@ mod tests {
         draw(&mut app, "now-playing-closed.png", Some(Point::new(52.0, 68.0)), &click);
         assert!(!app.music.fullscreen);
         assert!(!app.music.expanded);
-        assert!(app.music.playing);
+        assert!(app.music.player.playing);
         app.music.fullscreen = true;
         app.music.expanded = true;
         app.music.panel = 2;

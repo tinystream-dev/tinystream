@@ -19,6 +19,7 @@ pub async fn request(api: &Api, operation: &str, variables: Value) -> Result<Val
         "RemoveLibrary" => send!(SettingsRemoveLibrary),
         "Folders" => send!(SettingsFolders),
         "Passkeys" => send!(SettingsPasskeys),
+        "DeletePasskey" => send!(SettingsDeletePasskey),
         "ChangePassword" => send!(SettingsChangePassword),
         "MyEmail" => send!(SettingsMyEmail),
         "SetEmail" => send!(SettingsSetEmail),

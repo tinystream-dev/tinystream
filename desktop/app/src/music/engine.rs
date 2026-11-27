@@ -1,34 +1,51 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
+//! The music player's sound: a thread decodes the queue with the sequencer (decoder/core) into the
+//! output's ring, and the output plays it. Where we are is worked out from the frames played and
+//! where each track began, as on web (`web/src/music/engine.ts`).
 
+use std::collections::VecDeque;
 use std::io;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, mpsc};
 use std::time::{Duration, Instant};
 
 use tinystream_decoder_core::RangeSource;
-use tinystream_decoder_core::sequence::{Event, Item, Sequencer};
+use tinystream_decoder_core::sequence::{self, Event, Sequencer};
 
-use super::model::{Entry, Repeat, Settings, fade, gain};
+use super::model::Item;
 use super::output::Output;
 use crate::api::Api;
 use crate::platform::{Current, Desktop};
 
+/// Frames decoded at a time.
+const CHUNK: usize = 4096;
+/// Frames past what's been played that may be on their way out already, so they're never redone.
+const PLAYING: u64 = 8192;
+
 #[derive(Debug, Clone)]
 pub enum Update {
+    /// The output went away or changed: whatever was playing has to be loaded again.
     Reload,
-    Position { key: String, time: f64, rate: u32 },
-    Started(String),
-    Waiting(bool),
+    /// Where in the track you hear now, and the rate sound goes out at.
+    Position {
+        key: String,
+        time: f64,
+        rate: u32,
+    },
+    /// A track began playing (it's audible now, not just decoded).
+    Track(String),
+    /// Everything queued has been played.
     Ended,
+    Starved(bool),
     Error(String, String),
 }
 
 enum Command {
-    Load(Vec<Entry>, Settings, f64, bool, Arc<AtomicBool>, Repeat),
-    Upcoming(String, Vec<Entry>, Settings),
-    Playing(bool),
-    Settings(Settings),
+    Load(Vec<Item>, f64, Arc<AtomicBool>),
+    Upcoming(String, Vec<Item>),
     Gain(String, f32),
+    Playing(bool),
+    Volume(f32),
     Stop,
 }
 
@@ -43,26 +60,33 @@ impl Engine {
         Self { commands, cancel: Arc::new(AtomicBool::new(false)) }
     }
 
-    pub fn load(&mut self, entries: Vec<Entry>, settings: Settings, time: f64, playing: bool, repeat: Repeat) {
+    /// Plays `items` in order, from `start` seconds into the first, throwing away whatever was
+    /// lined up.
+    pub fn load(&mut self, items: Vec<Item>, start: f64) {
         self.cancel.store(true, Ordering::Release);
         self.cancel = Arc::new(AtomicBool::new(false));
-        let _ = self.commands.send(Command::Load(entries, settings, time, playing, self.cancel.clone(), repeat));
+        let _ = self.commands.send(Command::Load(items, start, self.cancel.clone()));
     }
 
-    pub fn upcoming(&self, after: String, entries: Vec<Entry>, settings: Settings) {
-        let _ = self.commands.send(Command::Upcoming(after, entries, settings));
-    }
-
-    pub fn playing(&self, playing: bool) {
-        let _ = self.commands.send(Command::Playing(playing));
+    /// What comes after `after` changed.
+    pub fn upcoming(&self, after: String, items: Vec<Item>) {
+        let _ = self.commands.send(Command::Upcoming(after, items));
     }
 
     pub fn gain(&self, key: String, gain: f32) {
         let _ = self.commands.send(Command::Gain(key, gain));
     }
 
-    pub fn settings(&self, settings: Settings) {
-        let _ = self.commands.send(Command::Settings(settings));
+    pub fn play(&self) {
+        let _ = self.commands.send(Command::Playing(true));
+    }
+
+    pub fn pause(&self) {
+        let _ = self.commands.send(Command::Playing(false));
+    }
+
+    pub fn volume(&self, volume: f32) {
+        let _ = self.commands.send(Command::Volume(volume));
     }
 
     pub fn stop(&self) {
@@ -159,6 +183,14 @@ impl RangeSource for Source {
     }
 }
 
+/// `key` begins at `frame`, `offset` seconds in.
+struct Mark {
+    key: String,
+    frame: u64,
+    offset: f64,
+    duration: f64,
+}
+
 fn run(
     api: Api,
     runtime: tokio::runtime::Handle,
@@ -168,188 +200,187 @@ fn run(
     let mut output: Option<Output> = None;
     let mut sequencer = Sequencer::new(48000);
     let mut cancel = Arc::new(AtomicBool::new(false));
-    let mut marks = std::collections::VecDeque::new();
-    let mut current: Option<(String, u64, f64, f64)> = None;
-    let mut end = None;
-    let mut pending = Vec::new();
-    let mut at = 0;
+    let mut marks: VecDeque<Mark> = VecDeque::new();
+    let mut end: Option<u64> = None;
+    let mut current: Option<String> = None;
     let mut playing = false;
-    let mut loop_entries: Vec<Entry> = vec![];
-    let mut loop_last = String::new();
-    let mut loop_cycle = 0u64;
-    let mut looping = false;
-    let mut settings = Settings::default();
+    let mut volume = 1.0;
+    let mut starved = false;
     let mut progress = Instant::now();
     let mut device_check = Instant::now();
-    let mut waiting = false;
-    let items = |entries: &[Entry], settings: &Settings, cancel: &Arc<AtomicBool>| {
-        entries
-            .iter()
-            .enumerate()
-            .map(|(i, e)| {
-                let direct =
-                    !e.fallback && ["flac", "mp3", "aac", "alac", "vorbis", "pcm"].contains(&e.track.codec.as_str());
-                Item {
-                    key: e.key.clone(),
-                    size: if direct { e.track.size } else { 0 },
-                    ext: if direct { e.track.suffix.clone() } else { "flac".into() },
-                    gain: gain(i, entries, settings, false),
-                    crossfade: fade(i, entries, settings),
-                    source: Arc::new(Source {
-                        api: api.clone(),
-                        runtime: runtime.clone(),
-                        path: if direct { e.track.file.clone() } else { e.track.flac.clone() },
-                        size: if direct { e.track.size } else { 0 },
-                        cancel: cancel.clone(),
-                    }),
-                }
+    let mut buffer = vec![0.0; CHUNK * 2];
+    let native = |items: Vec<Item>, cancel: &Arc<AtomicBool>| {
+        items
+            .into_iter()
+            .map(|item| sequence::Item {
+                source: Arc::new(Source {
+                    api: api.clone(),
+                    runtime: runtime.clone(),
+                    path: item.path,
+                    size: item.size,
+                    cancel: cancel.clone(),
+                }),
+                key: item.key,
+                size: item.size,
+                ext: item.ext,
+                gain: item.gain,
+                crossfade: item.crossfade,
             })
             .collect::<Vec<_>>()
     };
     loop {
-        match commands.recv_timeout(Duration::from_millis(if playing { 10 } else { 200 })) {
-            Ok(Command::Load(mut entries, next, time, play, token, repeat)) => {
-                output = None;
+        let busy = playing || output.as_ref().is_some_and(|o| !sequencer.finished() && o.ring().room() >= CHUNK as u64);
+        let command = match commands.recv_timeout(Duration::from_millis(if busy { 10 } else { 200 })) {
+            Ok(command) => Some(command),
+            Err(mpsc::RecvTimeoutError::Timeout) => None,
+            Err(mpsc::RecvTimeoutError::Disconnected) => return,
+        };
+        let mut events = vec![];
+        match command {
+            Some(Command::Load(items, start, token)) => {
                 cancel = token;
                 if cancel.load(Ordering::Acquire) {
                     continue;
                 }
-                match Current::audio_output() {
-                    Ok(audio) => {
-                        sequencer = Sequencer::new(audio.rate);
-                        settings = next;
-                        audio.volume(if settings.muted { 0.0 } else { settings.volume });
-                        marks.clear();
-                        current = None;
-                        end = None;
-                        pending.clear();
-                        at = 0;
-                        looping = repeat != Repeat::Off;
-                        if repeat == Repeat::One {
-                            entries.truncate(1);
-                        }
-                        loop_entries = entries.clone();
-                        loop_last = entries.last().map_or(String::new(), |e| e.key.clone());
-                        loop_cycle = 0;
-                        sequencer.play(items(&entries, &settings, &cancel), time, 0);
-                        playing = play;
-                        audio.playing(play);
-                        output = Some(audio);
-                    },
-                    Err(error) => {
-                        emit(Update::Error(entries.first().map_or(String::new(), |e| e.key.clone()), error.to_string()))
-                    },
+                if output.is_none() {
+                    match Current::audio_output() {
+                        Ok(audio) => {
+                            audio.volume(volume);
+                            output = Some(audio);
+                        },
+                        Err(error) => {
+                            let key = items.first().map_or(String::new(), |i| i.key.clone());
+                            emit(Update::Error(key, error.to_string()));
+                            continue;
+                        },
+                    }
+                }
+                let audio = output.as_ref().unwrap();
+                if sequencer.rate() != audio.rate {
+                    sequencer = Sequencer::new(audio.rate);
+                }
+                marks.clear();
+                end = None;
+                current = None;
+                let at = audio.ring().flush();
+                sequencer.play(native(items, &cancel), start, at);
+                audio.playing(playing);
+                events = sequencer.events();
+            },
+            Some(Command::Upcoming(after, items)) => {
+                end = None;
+                if let Some(audio) = &output {
+                    if let Some(back) =
+                        sequencer.upcoming(&after, native(items, &cancel), audio.ring().heard() + PLAYING)
+                    {
+                        audio.ring().rewind(back);
+                    }
+                    events = sequencer.events();
                 }
             },
-            Ok(Command::Upcoming(after, entries, next)) => {
-                if let Some(audio) = &output
-                    && sequencer.upcoming(&after, items(&entries, &next, &cancel), audio.ring.heard()).is_some()
-                {
-                    emit(Update::Reload);
-                }
-            },
-            Ok(Command::Playing(value)) => {
+            Some(Command::Gain(key, gain)) => sequencer.gain(&key, gain),
+            Some(Command::Playing(value)) => {
                 playing = value;
                 if let Some(audio) = &output {
                     audio.playing(value);
                 }
             },
-            Ok(Command::Gain(key, gain)) => sequencer.gain(&key, gain),
-            Ok(Command::Settings(next)) => {
-                settings = next;
+            Some(Command::Volume(value)) => {
+                volume = value;
                 if let Some(audio) = &output {
-                    audio.volume(if settings.muted { 0.0 } else { settings.volume });
+                    audio.volume(value);
                 }
             },
-            Ok(Command::Stop) => {
-                output = None;
+            Some(Command::Stop) => {
+                playing = false;
                 sequencer.stop();
-                current = None;
                 marks.clear();
+                end = None;
+                current = None;
+                if let Some(audio) = &output {
+                    audio.playing(false);
+                    audio.ring().flush();
+                }
             },
-            Err(mpsc::RecvTimeoutError::Disconnected) => return,
-            Err(mpsc::RecvTimeoutError::Timeout) => {},
+            None => {},
         }
         let Some(audio) = &output else { continue };
+        if device_check.elapsed() >= Duration::from_secs(2) {
+            device_check = Instant::now();
+            if audio.failed() || audio.device_changed() {
+                output = None;
+                marks.clear();
+                sequencer.stop();
+                if current.take().is_some() {
+                    emit(Update::Reload);
+                }
+                continue;
+            }
+        }
         if cancel.load(Ordering::Acquire) {
             continue;
         }
-        if device_check.elapsed() >= Duration::from_secs(2) {
-            device_check = Instant::now();
-            if audio.device_changed() || audio.failed.load(Ordering::Acquire) {
-                emit(Update::Reload);
-                output = None;
-                continue;
+        let mut guard = 0;
+        while audio.ring().room() >= CHUNK as u64 && !sequencer.finished() && guard < 64 {
+            guard += 1;
+            let frames = sequencer.read(&mut buffer);
+            if cancel.load(Ordering::Acquire) {
+                break;
+            }
+            audio.ring().write(&buffer[..frames * 2]);
+            events.extend(sequencer.events());
+            if frames < CHUNK {
+                break;
             }
         }
-        let heard = audio.ring.heard();
-        while marks.front().is_some_and(|(_, frame, _, _)| *frame <= heard) {
-            current = marks.pop_front();
-            emit(Update::Started(current.as_ref().unwrap().0.clone()));
-        }
-        if progress.elapsed() >= Duration::from_millis(200) {
-            progress = Instant::now();
-            if let Some((key, frame, offset, duration)) = &current {
-                emit(Update::Position {
-                    key: key.clone(),
-                    time: (offset + heard.saturating_sub(*frame) as f64 / audio.rate as f64).min(*duration),
-                    rate: audio.rate,
-                });
-            }
-        }
-        if end.is_some_and(|frame| heard >= frame) {
-            emit(Update::Ended);
-            output = None;
+        if cancel.load(Ordering::Acquire) {
             continue;
         }
-        if at >= pending.len()
-            && !sequencer.finished()
-            && audio.ring.written().saturating_sub(heard) < audio.ring.capacity() / 2
+        for event in events {
+            match event {
+                Event::Mark { key, frame, offset, duration } => {
+                    let at = marks.iter().position(|m| m.frame > frame).unwrap_or(marks.len());
+                    marks.insert(at, Mark { key, frame, offset, duration });
+                },
+                Event::Rewind { frame } => {
+                    marks.retain(|m| m.frame < frame);
+                    end = None;
+                },
+                Event::End { frame } => end = Some(frame),
+                Event::Error { key, message } => emit(Update::Error(key, message)),
+            }
+        }
+        let heard = audio.heard();
+        let mark = marks.iter().rposition(|m| m.frame <= heard);
+        if let Some(i) = mark {
+            if current.as_deref() != Some(marks[i].key.as_str()) {
+                current = Some(marks[i].key.clone());
+                emit(Update::Track(marks[i].key.clone()));
+            }
+            // Marks long behind are of no more use.
+            if i > 4 {
+                marks.drain(..i - 1);
+            }
+        }
+        if playing && end.is_some_and(|frame| heard >= frame) {
+            end = None;
+            emit(Update::Ended);
+        }
+        if progress.elapsed() >= Duration::from_millis(200)
+            && let Some(m) = marks.iter().rev().find(|m| m.frame <= heard)
         {
-            pending.resize(8192, 0.0);
-            let frames = sequencer.read(&mut pending);
-            if cancel.load(Ordering::Acquire) {
-                pending.clear();
-                at = 0;
-                continue;
-            }
-            pending.truncate(frames * 2);
-            at = 0;
-            for event in sequencer.events() {
-                match event {
-                    Event::Mark { key, frame, offset, duration } => {
-                        if looping && key == loop_last {
-                            loop_cycle += 1;
-                            let next: Vec<_> = loop_entries
-                                .iter()
-                                .cloned()
-                                .map(|mut e| {
-                                    e.key = format!("{}@{}", e.key, loop_cycle);
-                                    e
-                                })
-                                .collect();
-                            loop_last = next.last().map_or(String::new(), |e| e.key.clone());
-                            sequencer.upcoming(&key, items(&next, &settings, &cancel), audio.ring.heard());
-                        }
-                        marks.push_back((key, frame, offset, duration));
-                    },
-                    Event::End { frame } => {
-                        if !looping {
-                            end = Some(frame);
-                        }
-                    },
-                    Event::Error { key, message } => emit(Update::Error(key, message)),
-                    Event::Rewind { .. } => {},
-                }
-            }
+            progress = Instant::now();
+            let time = m.offset + (heard - m.frame) as f64 / audio.rate as f64;
+            emit(Update::Position {
+                key: m.key.clone(),
+                time: if m.duration > 0.0 { time.min(m.duration) } else { time },
+                rate: audio.rate,
+            });
         }
-        if at < pending.len() {
-            at += audio.ring.write(&pending[at..]) * 2;
-        }
-        let starved = playing && end.is_none() && audio.ring.written() == heard;
-        if waiting != starved {
-            waiting = starved;
-            emit(Update::Waiting(waiting));
+        let now = playing && audio.starved();
+        if now != starved {
+            starved = now;
+            emit(Update::Starved(starved));
         }
     }
 }
@@ -461,29 +492,26 @@ mod output_tests {
                 let _ = tx.send(event);
             }),
         );
-        let entries = (0..2)
-            .map(|i| Entry {
+        let items = (0..2)
+            .map(|i| Item {
                 key: format!("e{i}"),
-                fallback: false,
-                track: super::super::model::Track {
-                    id: i,
-                    title: format!("Track {i}"),
-                    codec: "flac".into(),
-                    suffix: "flac".into(),
-                    size,
-                    file: "/fixture".into(),
-                    ..Default::default()
-                },
+                path: "/fixture".into(),
+                size,
+                ext: "flac".into(),
+                gain: 1.0,
+                crossfade: 0.0,
             })
             .collect();
-        engine.load(entries, Settings { volume: 0.0, ..Settings::default() }, 0.0, true, Repeat::Off);
+        engine.volume(0.0);
+        engine.load(items, 0.0);
+        engine.play();
         let mut started = vec![];
         let deadline = Instant::now() + Duration::from_secs(8);
         let mut ended = false;
         let mut error = None;
         while Instant::now() < deadline {
             match rx.recv_timeout(Duration::from_millis(200)) {
-                Ok(Update::Started(key)) => started.push(key),
+                Ok(Update::Track(key)) => started.push(key),
                 Ok(Update::Ended) => {
                     ended = true;
                     break;

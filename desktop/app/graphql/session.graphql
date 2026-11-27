@@ -3,7 +3,7 @@
 query Connection {
   server { version signInStyle setupRequired email }
   appearance { mode style mediaTint light { palette { tokens { name value } } } dark { palette { tokens { name value } } } }
-  signInProfiles { key avatar }
+  signInProfiles { key avatar passkey }
   viewer { ...Person }
 }
 
@@ -16,6 +16,17 @@ mutation SignIn($username: String, $profile: String, $password: String!) {
 
 mutation Setup($username: String!, $password: String!) {
   setup(username: $username, password: $password) {
+    token
+    user { ...Person }
+  }
+}
+
+mutation StartPasskeySignIn($username: String, $profile: String) {
+  startPasskeySignIn(username: $username, profile: $profile) { challenge options }
+}
+
+mutation FinishPasskeySignIn($challenge: String!, $credential: JSON!) {
+  finishPasskeySignIn(challenge: $challenge, credential: $credential) {
     token
     user { ...Person }
   }

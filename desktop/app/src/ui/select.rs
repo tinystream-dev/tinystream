@@ -56,16 +56,17 @@ pub fn select<'a, Message: Clone + 'a, T: Clone + PartialEq + 'a>(
 
 pub fn icon_menu<'a, Message: Clone + 'a, T: Clone + PartialEq + 'a>(
     glyph: Icon,
-    options: &'a [T],
+    options: impl Into<Cow<'a, [T]>>,
     selected: Option<T>,
     label: impl Fn(&T) -> String,
     on_change: impl Fn(T) -> Message + 'a,
     look: &Look,
 ) -> Element<'a, Message> {
+    let options = options.into();
     Select {
-        options: Cow::Borrowed(options),
         labels: options.iter().map(label).collect(),
         chosen: selected.as_ref().and_then(|value| options.iter().position(|o| o == value)),
+        options,
         on_change: Box::new(on_change),
         content: container(icon(glyph, 16.0)).center(36).boxed(),
         look: *look,

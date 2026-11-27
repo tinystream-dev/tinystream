@@ -127,6 +127,27 @@ test('follows the engine to the next track', async () => {
   expect(player.getState().index).toBe(1)
 })
 
+test('keeps lining up as each track starts', async () => {
+  const { engine, player } = setup()
+  await player.music.play([1, 2, 3, 4, 5, 6].map((id) => track(id)), 0)
+  const [{ items }] = engine.loaded
+  expect(items).toHaveLength(4)
+  engine.emit('track', items[1].key)
+  const last = engine.lined.at(-1)!
+  expect(last.after).toBe(items[1].key)
+  expect(last.items.map((i) => i.url)).toEqual(['/file/3', '/file/4', '/file/5'])
+})
+
+test('repeating one track plays it again', async () => {
+  const { engine, player } = setup()
+  await player.music.play([track(1), track(2)], 0)
+  player.music.repeat('ONE')
+  engine.emit('ended')
+  await Bun.sleep(0)
+  expect(engine.loaded.at(-1)!.items[0].url).toBe('/file/1')
+  expect(player.getState().playing).toBe(true)
+})
+
 test('falls back to FLAC when the decoder can’t read a file', async () => {
   const { engine, player } = setup()
   await player.music.play([track(1, { codec: 'mp3', suffix: 'mp3' })], 0)

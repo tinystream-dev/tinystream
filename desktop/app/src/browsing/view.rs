@@ -635,6 +635,10 @@ fn civil(at: i64) -> (i64, i64, i64) {
     let month = mp + if mp < 10 { 3 } else { -9 };
     (yoe + era * 400 + i64::from(month <= 2), month, day)
 }
+/// `toLocaleDateString` with `dateStyle: 'medium'`, as the web dates passkeys.
+pub(crate) fn medium_date(at: i64) -> String {
+    format!("{}, {}", date(at), civil(at).0)
+}
 fn date(at: i64) -> String {
     let (_, month, day) = civil(at);
     format!(

@@ -344,9 +344,9 @@ and prints the glibc it needs: built on Ubuntu 24.04, that's 2.39.
 `.github/workflows/desktop.yml` builds them with `cargo build --release --locked` on Ubuntu 24.04,
 checks the libraries, validates the metadata and checks that `install.sh` makes `xdg-open` send
 `tinystream://` to the app. Tags run it from `release.yml`, which attaches both to the release;
-pushes to `feat/desktop` and manual runs upload them as the `tinystream-desktop-x86_64-linux`
-artifact, versioned with the commit. To package by hand on a system like Ubuntu 24.04 (the build
-host's glibc is the oldest the result runs on), from the repository root:
+manual runs upload them as the `tinystream-desktop-x86_64-linux` artifact, versioned with the
+commit. To package by hand on a system like Ubuntu 24.04 (the build host's glibc is the oldest the
+result runs on), from the repository root:
 
 ```sh
 (cd desktop && cargo build --release --locked)

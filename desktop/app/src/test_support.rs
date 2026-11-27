@@ -108,7 +108,7 @@ pub async fn http(
 }
 
 pub fn connection(signed_in: bool) -> Value {
-    json!({"data":{"server":{"version":"0.38.0","signInStyle":"PROFILES","setupRequired":false,"email":true},"appearance":{"mode":"SINGLE","style":"LAYERED","mediaTint":false,"light":{"palette":{"tokens":[]}},"dark":{"palette":{"tokens":[]}}},"signInProfiles":[{"key":"opaque-profile","avatar":null}],"viewer": if signed_in { json!({"id":1,"username":"David","avatar":null}) } else { Value::Null }}})
+    json!({"data":{"server":{"version":"0.38.0","signInStyle":"PROFILES","setupRequired":false,"email":true},"appearance":{"mode":"SINGLE","style":"LAYERED","mediaTint":false,"light":{"palette":{"tokens":[]}},"dark":{"palette":{"tokens":[]}}},"signInProfiles":[{"key":"opaque-profile","avatar":null,"passkey":false}],"viewer": if signed_in { json!({"id":1,"username":"David","avatar":null}) } else { Value::Null }}})
 }
 
 pub fn texture_pixels(

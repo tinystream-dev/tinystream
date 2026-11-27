@@ -10,7 +10,7 @@ use iced_core::layout::{self, Layout};
 use iced_core::widget::{Operation, Tree, tree};
 use iced_core::{
     Background, Border, Color, Event, Gradient, Length, Radians, Rectangle, Renderer as _, Size, Theme, Transformation,
-    Vector, Widget, gradient, mouse, overlay, renderer, window,
+    Vector, Widget, gradient, image, mouse, overlay, renderer, window,
 };
 use iced_wgpu::graphics::color;
 use iced_wgpu::graphics::mesh::{Indexed, Mesh, SolidVertex2D};
@@ -505,6 +505,61 @@ impl<Message> Widget<Message, Theme, Renderer> for Glow {
                     clip_bounds: clip,
                 });
             });
+        });
+    }
+}
+
+/// A picture covering its space a quarter bigger than it, blurred and saturated, with `veil`
+/// painted over it: Now Playing's backdrop, from the cover. Nothing shows where backdrops can't be
+/// read back.
+pub fn smear<'a, Message: 'a>(picture: image::Handle, blur: f32, saturate: f32, veil: Color) -> Element<'a, Message> {
+    iced_widget::Widget::boxed(Smear { picture, blur, saturate, veil })
+}
+
+struct Smear {
+    picture: image::Handle,
+    blur: f32,
+    saturate: f32,
+    veil: Color,
+}
+
+impl iced_core::widget::Meta for Smear {}
+
+impl<Message> Widget<Message, Theme, Renderer> for Smear {
+    fn size(&self) -> Size<Length> {
+        Size::new(Length::Fill, Length::Fill)
+    }
+
+    fn layout(&mut self, tree: &mut Tree, _renderer: &Renderer, limits: &layout::Limits) {
+        tree.size = layout::atomic(limits, Length::Fill, Length::Fill);
+    }
+
+    fn draw(
+        &self,
+        _tree: &Tree,
+        renderer: &mut Renderer,
+        _theme: &Theme,
+        _style: &renderer::Style,
+        layout: Layout,
+        _cursor: mouse::Cursor,
+        viewport: &Rectangle,
+    ) {
+        use iced_core::image::Renderer as _;
+        let bounds = layout.bounds();
+        let Some(clip) = bounds.intersection(viewport) else { return };
+        if !backdrop::available() {
+            return;
+        }
+        let size = renderer.measure_image(&self.picture).unwrap_or(Size::new(1, 1));
+        let scale = (bounds.width / size.width.max(1) as f32).max(bounds.height / size.height.max(1) as f32) * 1.25;
+        let (width, height) = (size.width as f32 * scale, size.height as f32 * scale);
+        let spread =
+            Rectangle { x: bounds.center_x() - width / 2.0, y: bounds.center_y() - height / 2.0, width, height };
+        renderer.with_layer(clip, |renderer| {
+            renderer.draw_image(image::Image::new(self.picture.clone()), spread, clip);
+        });
+        renderer.with_layer(clip, |renderer| {
+            renderer.draw_primitive(bounds, Backdrop::new(self.blur, self.saturate, self.veil, 0.0, 0.0, 1.0));
         });
     }
 }

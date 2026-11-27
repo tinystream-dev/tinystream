@@ -29,7 +29,7 @@ pub fn view<'a>(music: &'a Music, signed_in: bool, look: &Look) -> View<'a> {
         return self::gone(gone, signed_in, look);
     }
     if !music.room_joined {
-        if music.loading && music.queue.is_empty() {
+        if music.loading && music.host_name.is_empty() {
             return center(spinner(36.0, look), look);
         }
         return join(music, signed_in, look);
@@ -63,7 +63,7 @@ fn inside<'a>(music: &'a Music, room: &'a State, entry: &'a Entry, size: iced_co
     if !music.snapshot.connected {
         header = header.push(text("Reconnecting…", ty::XS, look.warn).boxed());
     }
-    if let Some(error) = music.snapshot.error.as_ref().or(music.error.as_ref()) {
+    if let Some(error) = music.snapshot.error.as_ref().or(music.player.error.as_ref()).or(music.error.as_ref()) {
         header = header.push(text(error, ty::XS, look.danger).boxed());
     }
     header = header.push(space().width(Fill).boxed()).push(members(room, look)).push(invite(music, look));
@@ -92,7 +92,7 @@ fn inside<'a>(music: &'a Music, room: &'a State, entry: &'a Entry, size: iced_co
             .padding(Padding { left: 8.0, bottom: 8.0, ..Padding::ZERO })
             .boxed(),
     );
-    for (i, entry) in music.queue.iter().enumerate() {
+    for (i, entry) in music.player.queue.iter().enumerate() {
         up_next = up_next.push(queued(music, entry, i, look));
     }
     let body = row![
@@ -163,8 +163,8 @@ fn invite<'a>(music: &'a Music, look: &Look) -> View<'a> {
 }
 
 fn queued<'a>(music: &'a Music, entry: &'a Entry, i: usize, look: &Look) -> View<'a> {
-    let current = i == music.index;
-    let fade = |c: iced_core::Color| if i < music.index { c.scale_alpha(0.45) } else { c };
+    let current = i == music.player.index;
+    let fade = |c: iced_core::Color| if i < music.player.index { c.scale_alpha(0.45) } else { c };
     let mut cover = Stack::new().push(super::view::art(music, entry.track.cover.as_deref(), 40.0, look));
     if current {
         cover = cover.push(
