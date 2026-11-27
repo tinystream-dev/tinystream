@@ -486,7 +486,7 @@ impl Session {
             Some(user) => format!("{} · signed in", user.username),
             None => "Signed out".to_owned(),
         };
-        let action_space = if signed_in { 76.0 } else { 42.0 } + if active { 30.0 } else { 0.0 };
+        let action_space = if signed_in { 76.0 } else { 42.0 } + 30.0;
         let mut details = column![
             truncate(host(&server.url), if size > 32.0 { type_::S15 } else { type_::S13 }, l.ink).font(MEDIUM),
             truncate(
@@ -510,12 +510,18 @@ impl Session {
                 .boxed(),
             );
         }
-        let mut line = Row::new().spacing(12).align_y(Alignment::Center).push(face).push(
-            container(details).width(Length::Fill).padding(Padding { right: action_space, ..Padding::ZERO }).boxed(),
-        );
-        if active {
-            line = line.push(icon(Icon::Check, 18.0).color(l.ink).boxed());
-        }
+        // Every row keeps room for the tick, so their buttons line up.
+        let line = Row::new()
+            .spacing(12)
+            .align_y(Alignment::Center)
+            .push(face)
+            .push(
+                container(details)
+                    .width(Length::Fill)
+                    .padding(Padding { right: action_space, ..Padding::ZERO })
+                    .boxed(),
+            )
+            .push(if active { icon(Icon::Check, 18.0).color(l.ink).boxed() } else { space().width(18).boxed() });
         let look = *l;
         let switch = (!active || !signed_in).then(|| session(Message::Switch(server.id))).filter(|_| !self.busy);
         let base = pressable(line, 16.0, l, move |status| Appearance {
@@ -552,7 +558,7 @@ impl Session {
         let floating = container(squircle(actions, 10.0, l).fill(l.float).edge().padding(2))
             .align_right(Length::Fill)
             .center_y(Length::Fill)
-            .padding(Padding { right: if active { 40.0 } else { 10.0 }, ..Padding::ZERO });
+            .padding(Padding { right: 40.0, ..Padding::ZERO });
         iced_widget::stack![base, floating].boxed()
     }
 
