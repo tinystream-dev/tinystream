@@ -393,6 +393,7 @@
         clipLimit
         clipStorage
         clipLinks
+        offlineDownloads
       }
     }
   }

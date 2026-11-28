@@ -83,6 +83,7 @@ pub fn fields(name: &str) -> &'static [(&'static str, &'static str)] {
             ("clipLimit", "Int"),
             ("clipStorage", "Int"),
             ("clipLinks", "Boolean"),
+            ("offlineDownloads", "Boolean"),
         ],
         "PermissionsInput" => &[
             ("allLibraries", "Boolean!"),
@@ -101,6 +102,7 @@ pub fn fields(name: &str) -> &'static [(&'static str, &'static str)] {
             ("clipLimit", "Int!"),
             ("clipStorage", "Int!"),
             ("clipLinks", "Boolean!"),
+            ("offlineDownloads", "Boolean!"),
         ],
         "ProfileInput" => &[
             ("name", "String!"),
