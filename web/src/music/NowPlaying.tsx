@@ -74,6 +74,12 @@ function Lyrics({ trackId }: { trackId: number }) {
   )
 }
 
+/** Kept apart so only this redraws as the position moves, not the whole queue. */
+function Left({ total }: { total: number }) {
+  const time = usePosition()
+  return <>{duration(total - time)}</>
+}
+
 function Queue() {
   const queue = usePlayer((s) => s.queue)
   const index = usePlayer((s) => s.index)
@@ -86,7 +92,7 @@ function Queue() {
     <div ref={ref} className="h-full overflow-y-auto pr-1">
       <div className="mb-2 flex items-center justify-between px-2">
         <p className="text-xs text-ink-3 tabular">
-          {queue.length} track{queue.length === 1 ? '' : 's'} · {duration(queue.slice(index).reduce((n, e) => n + e.track.duration, 0))} left
+          {queue.length} track{queue.length === 1 ? '' : 's'} · <Left total={queue.slice(index).reduce((n, e) => n + e.track.duration, 0)} /> left
         </p>
         <button onClick={() => music.clear()} className="flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs text-ink-3 hover:bg-hover hover:text-ink">
           <Trash2 className="size-3.5" /> Clear
