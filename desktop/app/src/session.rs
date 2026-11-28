@@ -121,6 +121,7 @@ pub enum Message {
     Updates(bool),
     ShowTray(bool),
     HardwareDecoding(bool),
+    OfflineDownloads(bool),
     DefaultQuality(Option<u32>),
     Notifications(bool),
     ReduceMotion(Option<bool>),
@@ -344,6 +345,15 @@ impl Session {
                 self.task(effects, async move {
                     Ok(Outcome::Saved(
                         store.save(|config| config.hardware_decoding = enabled).await.map_err(storage_error)?,
+                    ))
+                });
+            },
+            Message::OfflineDownloads(enabled) => {
+                let Some(store) = self.store.clone() else { return };
+                self.config.offline_downloads = enabled;
+                self.task(effects, async move {
+                    Ok(Outcome::Saved(
+                        store.save(|config| config.offline_downloads = enabled).await.map_err(storage_error)?,
                     ))
                 });
             },

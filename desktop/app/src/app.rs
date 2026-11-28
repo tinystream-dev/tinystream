@@ -32,6 +32,8 @@ pub struct App {
     pub settings: crate::settings::Settings,
     pub clips: crate::clips::Clips,
     pub downloads: crate::offline::Downloads,
+    /// The tracks last fetched ahead of the music.
+    ahead: Vec<i64>,
     /// Passing notices, bottom right (`toast()`).
     pub toasts: Vec<crate::ui::overlay::Toast>,
     toast_serial: u64,
@@ -152,6 +154,7 @@ impl App {
             settings: crate::settings::Settings::default(),
             clips: crate::clips::Clips::default(),
             downloads: crate::offline::Downloads::default(),
+            ahead: Vec::new(),
             toasts: Vec::new(),
             toast_serial: 0,
             chrome,
@@ -274,6 +277,7 @@ impl App {
                 effects,
             );
         }
+        self.follow_downloads(effects);
         let active = self.player.as_ref().is_some_and(crate::player::Player::playback_active);
         if active != self.video_active {
             self.video_active = active;
@@ -450,6 +454,9 @@ impl App {
                 {
                     self.browsing.live(live);
                     self.clips.live(live);
+                    if matches!(live, crate::api::Live::Connected) {
+                        self.downloads.reconnected(effects);
+                    }
                     self.music.live(live, effects);
                     if matches!(live, crate::api::Live::Connected)
                         || matches!(live, crate::api::Live::Event(e) if matches!(&e.events, crate::api::events::EventsEvents::ClipChanged(_) | crate::api::events::EventsEvents::ListChanged(_)))
@@ -703,6 +710,32 @@ impl App {
         player.fullscreen = self.chrome.fullscreen;
         player.pip = keep_pip;
         self.player = Some(player);
+    }
+
+    /// Keeps downloads on the server in use and the settings, and fetches the track playing and the
+    /// next few ahead while music plays.
+    fn follow_downloads(&mut self, effects: &mut Vec<Effect>) {
+        let api = self.session.api.as_ref().filter(|api| api.token.is_some());
+        self.downloads.follow(self.session.config.offline_downloads, api, effects);
+        if self.history.current().route == Route::Settings {
+            let origins = self.session.config.servers.iter().filter_map(|s| crate::offline::origin(&s.url)).collect();
+            self.downloads.measure(origins, effects);
+        }
+        if self.session.connection.is_some() {
+            self.downloads.allow(self.browsing.can().offline_downloads, effects);
+        }
+        let s = &*self.music.player;
+        let ahead: Vec<i64> = match s.current() {
+            Some(_) if s.playing && s.room.is_none() && self.music.room_code.is_none() && self.downloads.ready() => {
+                s.queue.iter().skip(s.index).take(1 + crate::offline::AHEAD).map(|e| e.track.id).collect()
+            },
+            _ => Vec::new(),
+        };
+        if !ahead.is_empty() && ahead != self.ahead {
+            let keys = ahead.iter().copied().map(crate::offline::Key::Track).collect();
+            self.downloads.update(crate::offline::Message::Cache(keys), effects);
+        }
+        self.ahead = ahead;
     }
 
     fn hide(&mut self, effects: &mut Vec<Effect>) {

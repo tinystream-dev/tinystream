@@ -57,6 +57,7 @@ pub struct Permissions {
     pub edit_metadata: bool,
     pub watch_together: bool,
     pub clip: bool,
+    pub offline_downloads: bool,
 }
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase", default)]

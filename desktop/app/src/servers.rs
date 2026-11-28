@@ -48,6 +48,8 @@ pub struct Config {
     pub fallback_seen: bool,
     /// Overrides the desktop's reduced motion setting.
     pub reduce_motion: Option<bool>,
+    /// Keep downloads to play offline (#97); off until turned on.
+    pub offline_downloads: bool,
 }
 
 impl Default for Config {
@@ -65,6 +67,7 @@ impl Default for Config {
             dismissed: vec![],
             fallback_seen: false,
             reduce_motion: None,
+            offline_downloads: false,
         }
     }
 }

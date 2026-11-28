@@ -505,7 +505,7 @@ fn content<'a>(app: &'a App, look: &Look) -> Element<'a, AppMessage> {
     let s = &app.settings;
     let settings = s.data("Settings").map(|v| &v["settings"]);
     match s.tab {
-        Tab::Desktop => app.session.desktop_settings(look),
+        Tab::Desktop => app.session.desktop_settings(crate::offline::view::settings(app, look), look),
         Tab::Credits => card(
             "Credits",
             column![

@@ -20,6 +20,7 @@ use crate::app::{Effect, Message as AppMessage};
 
 pub mod fetch;
 pub mod store;
+pub mod view;
 
 pub use store::{Index, Key, State, Store};
 

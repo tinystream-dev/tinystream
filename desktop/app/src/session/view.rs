@@ -674,7 +674,7 @@ impl Session {
     }
 
     /// The desktop's own settings, at the top of the Settings page.
-    pub fn desktop_settings(&self, look: &Look) -> Element<'_, AppMessage> {
+    pub fn desktop_settings<'a>(&'a self, offline: Element<'a, AppMessage>, look: &Look) -> Element<'a, AppMessage> {
         let l = look;
         let motion = segmented(
             self.config.reduce_motion,
@@ -733,6 +733,7 @@ impl Session {
                 .boxed(),
                 l,
             ),
+            card("Offline downloads", None, offline, l),
             card(
                 "Appearance",
                 None,
