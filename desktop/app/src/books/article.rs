@@ -5,14 +5,15 @@ use std::sync::Arc;
 use iced_core::text::{self, Paragraph as _, Renderer as _};
 use iced_core::widget::{Tree, tree};
 use iced_core::{
-    Color, Event, Font, Length, Point, Rectangle, Size, Theme, Vector, Widget, alignment, font, layout, mouse,
+    Color, Event, Font, Length, Point, Rectangle, Size, Theme, Vector, Widget, alignment, font, layout, mouse, overlay,
     renderer, window,
 };
-use iced_widget::Renderer;
 use iced_widget::image::Handle;
+use iced_widget::{Element, Renderer};
 
 use super::model::{self, Document, Range};
 use super::{Books, Message};
+use crate::ui::overlay::EDGE;
 
 type Paragraph = <Renderer as text::Renderer>::Paragraph;
 
@@ -62,12 +63,15 @@ struct State {
     focused: bool,
     rows: Vec<Row>,
     drag: Option<(usize, Point)>,
+    click: Option<mouse::Click>,
     layout_changed: bool,
     images: usize,
 }
 
 pub struct Article<'a> {
     pub books: &'a Books,
+    /// What can be done with the selection, floated under where it ends.
+    pub menu: Option<Element<'a, Message>>,
     pub ink: Color,
     pub secondary: Color,
     pub highlight: Color,
@@ -81,6 +85,12 @@ impl Widget<Message, Theme, Renderer> for Article<'_> {
 
     fn state(&self) -> tree::State {
         tree::State::new(State::default())
+    }
+
+    fn diff(&mut self, tree: &mut Tree) {
+        if tree.children.len() != 1 {
+            tree.children = vec![Tree::empty()];
+        }
     }
 
     fn size(&self) -> Size<Length> {
@@ -398,12 +408,18 @@ impl Widget<Message, Theme, Renderer> for Article<'_> {
             Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left))
                 if cursor.is_over(*viewport) && cursor.is_over(layout.bounds()) =>
             {
-                state.drag = Some((position, point));
+                let click = mouse::Click::new(point, mouse::Button::Left, state.click);
+                state.click = Some(click);
+                if click.kind() == mouse::click::Kind::Single {
+                    state.drag = Some((position, point));
+                } else if let Some(word) = doc.word_at(position) {
+                    shell.publish(Message::Select(word, Some(word.end - 1)));
+                }
                 shell.capture_event();
             },
             Event::Mouse(mouse::Event::CursorMoved { .. }) if state.drag.is_some() => {
                 let (start, _) = state.drag.unwrap();
-                shell.publish(Message::Select(doc.snap_to_words(start, position)));
+                shell.publish(Message::Select(doc.snap_to_words(start, position), None));
                 shell.capture_event();
             },
             Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
@@ -424,11 +440,13 @@ impl Widget<Message, Theme, Renderer> for Article<'_> {
                             .find(|q| q.range().is_some_and(|r| position >= r.start && position < r.end))
                         {
                             shell.publish(Message::OpenQuote(quote.id));
-                        } else {
-                            shell.publish(Message::Select(doc.snap_to_words(start, position.saturating_add(1))));
+                        } else if self.books.selection.is_some() {
+                            shell.publish(Message::ClearSelection);
                         }
                     } else {
-                        shell.publish(Message::Select(doc.snap_to_words(start, position)));
+                        let range = doc.snap_to_words(start, position);
+                        let end = if position < start { range.start } else { range.end.saturating_sub(1) };
+                        shell.publish(Message::Select(range, Some(end)));
                     }
                     shell.capture_event();
                 }
@@ -453,7 +471,206 @@ impl Widget<Message, Theme, Renderer> for Article<'_> {
             mouse::Interaction::default()
         }
     }
+
+    fn overlay<'b>(
+        &'b mut self,
+        tree: &'b mut Tree,
+        layout: layout::Layout,
+        renderer: &Renderer,
+        viewport: &Rectangle,
+        translation: Vector,
+        window: Size,
+    ) -> Vec<overlay::Element<'b, Message, Theme, Renderer>> {
+        let (Some(content), Some(doc), Some(range), Some(at)) =
+            (self.menu.as_mut(), &self.books.document, self.books.selection, self.books.menu)
+        else {
+            return Vec::new();
+        };
+        let state = tree.state.downcast_ref::<State>();
+        if state.drag.is_some() {
+            return Vec::new();
+        }
+        let Some(word) = word_bounds(state, doc, at).map(|r| r + Vector::new(layout.bounds().x, layout.bounds().y))
+        else {
+            return Vec::new();
+        };
+        if !viewport.intersects(&word) {
+            return Vec::new();
+        }
+        let (word, shown) = (word + translation, *viewport + translation);
+        let tree = &mut tree.children[0];
+        tree.diff::<Message, Theme, Renderer>(content);
+        content.layout(tree, renderer, &layout::Limits::new(Size::ZERO, window));
+        let size = tree.size;
+        let x = if at == range.start { word.x } else { word.x + word.width };
+        let below = word.y + word.height + GAP;
+        let y = if below + size.height <= shown.y + shown.height - EDGE { below } else { word.y - GAP - size.height };
+        let x = (x - size.width / 2.0).min(shown.x + shown.width - size.width - EDGE).max(shown.x + EDGE);
+        let layout = layout::Layout::new(size).move_to(Point::new(x, y));
+        vec![overlay::Element::new(Box::new(Float { content, tree, layout, window }))]
+    }
 }
+
+/// How far the selection's menu keeps from the line it's under.
+const GAP: f32 = 8.0;
+
+/// Where the word holding `position` is drawn, in the article; the whole block for one without words.
+fn word_bounds(state: &State, doc: &Document, position: usize) -> Option<Rectangle> {
+    let i = doc.locate(position).0;
+    let row = state.rows.get(i)?;
+    let rect = row
+        .pieces
+        .iter()
+        .position(|p| p.range.start <= position && position < p.range.end)
+        .and_then(|span| row.paragraph.span_bounds(span).last().copied())
+        .unwrap_or(Rectangle::new(Point::ORIGIN, Size::new(row.width, row.height)));
+    Some(rect + Vector::new(row.x, row.y))
+}
+
+struct Float<'b, 'a> {
+    content: &'b mut Element<'a, Message>,
+    tree: &'b mut Tree,
+    layout: layout::Layout,
+    window: Size,
+}
+impl iced_core::Overlay<Message, Theme, Renderer> for Float<'_, '_> {
+    fn draw(&self, renderer: &mut Renderer, theme: &Theme, style: &renderer::Style, cursor: mouse::Cursor) {
+        self.content.draw(self.tree, renderer, theme, style, self.layout, cursor, &Rectangle::with_size(self.window));
+    }
+
+    fn operate(&mut self, renderer: &Renderer, operation: &mut dyn iced_core::widget::Operation) {
+        self.content.operate(self.tree, self.layout, &self.layout.bounds(), renderer, operation);
+    }
+
+    fn update(
+        &mut self,
+        event: &Event,
+        cursor: mouse::Cursor,
+        renderer: &Renderer,
+        shell: &mut iced_core::Shell<'_, Message>,
+    ) {
+        self.content.update(self.tree, event, self.layout, cursor, renderer, shell, &self.layout.bounds());
+        // A press on the menu between its controls mustn't reach the text under it and clear the selection.
+        if matches!(event, Event::Mouse(mouse::Event::ButtonPressed(_) | mouse::Event::ButtonReleased(_)))
+            && cursor.is_over(self.layout.bounds())
+        {
+            shell.capture_event();
+        }
+    }
+
+    fn mouse_interaction(&self, cursor: mouse::Cursor, renderer: &Renderer) -> mouse::Interaction {
+        self.content.mouse_interaction(self.tree, self.layout, cursor, &self.layout.bounds(), renderer)
+    }
+}
+
 fn overlaps(a: Range, b: Range) -> bool {
     a.start < b.end && a.end > b.start
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use iced_core::{Event, Point, Size, mouse, window};
+    use iced_wgpu::graphics::Shell;
+    use iced_wgpu::{Engine, Renderer, wgpu};
+    use iced_widget::{Element, Widget as _};
+    use iced_winit::runtime::user_interface::{Cache, UserInterface};
+
+    use super::super::model::Range;
+    use super::super::{Books, Message};
+
+    fn renderer() -> Renderer {
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
+        let adapter = futures::executor::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))
+            .expect("no GPU adapter");
+        let (device, queue) =
+            futures::executor::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())).unwrap();
+        let engine = Engine::new(&adapter, device, queue, wgpu::TextureFormat::Rgba8Unorm, None, Shell::headless());
+        Renderer::new(engine, iced_core::renderer::Settings::default())
+    }
+
+    /// What the reader sends for `steps` of the pointer, the first line of text being at y 40–70.
+    fn press(books: &Books, steps: &[(Point, mouse::Event)]) -> Vec<Message> {
+        let mut renderer = renderer();
+        let waker = iced_core::shell::Waker::new(|| {});
+        let mut cache = Cache::new();
+        let mut sent = Vec::new();
+        for (at, event) in steps {
+            let article: Element<'_, Message> = super::Article {
+                books,
+                menu: None,
+                ink: iced_core::Color::BLACK,
+                secondary: iced_core::Color::BLACK,
+                highlight: iced_core::Color::BLACK,
+            }
+            .boxed();
+            let mut interface = UserInterface::build(article, Size::new(800.0, 600.0), cache, &mut renderer);
+            let mut messages = iced_core::shell::Bus::new();
+            interface.update(
+                &window::Headless,
+                &waker,
+                &[Event::Mouse(*event)],
+                mouse::Cursor::Available(*at),
+                &mut renderer,
+                &mut messages,
+            );
+            cache = interface.into_cache();
+            sent.extend(messages);
+        }
+        sent
+    }
+
+    fn books() -> Books {
+        let text = "The light fell through the open window. We walked beside the river, talking about books.";
+        let document = serde_json::json!({"length": text.chars().count(), "chapters": [], "blocks": [{"k": "p", "at": 0, "s": [{"t": text}]}]});
+        Books { document: Some(Arc::new(serde_json::from_value(document).unwrap())), ..Books::default() }
+    }
+
+    fn click(at: Point) -> [(Point, mouse::Event); 2] {
+        [
+            (at, mouse::Event::ButtonPressed(mouse::Button::Left)),
+            (at, mouse::Event::ButtonReleased(mouse::Button::Left)),
+        ]
+    }
+
+    #[test]
+    #[ignore = "requires Vulkan; selects text headlessly"]
+    fn the_menu_waits_for_the_selection_to_be_made() {
+        let (from, to) = (Point::new(100.0, 50.0), Point::new(300.0, 50.0));
+        let sent = press(
+            &books(),
+            &[
+                (from, mouse::Event::CursorMoved { position: from }),
+                (from, mouse::Event::ButtonPressed(mouse::Button::Left)),
+                (to, mouse::Event::CursorMoved { position: to }),
+                (to, mouse::Event::ButtonReleased(mouse::Button::Left)),
+            ],
+        );
+        let selects: Vec<_> = sent
+            .iter()
+            .filter_map(|m| match m {
+                Message::Select(range, at) => Some((*range, *at)),
+                _ => None,
+            })
+            .collect();
+        assert!(matches!(selects.first(), Some((_, None))), "{sent:?}");
+        assert!(matches!(selects.last(), Some((range, Some(at))) if *at == range.end - 1), "{sent:?}");
+    }
+
+    #[test]
+    #[ignore = "requires Vulkan; clicks text headlessly"]
+    fn a_click_lets_go_of_the_selection_and_a_double_click_picks_a_word() {
+        let at = Point::new(100.0, 50.0);
+        let mut books = books();
+        books.selection = Some(Range { start: 0, end: 9 });
+        let sent = press(&books, &click(at));
+        assert!(matches!(sent.as_slice(), [Message::ClearSelection]), "{sent:?}");
+        books.selection = None;
+        let sent = press(&books, &[click(at), click(at)].concat());
+        assert!(
+            matches!(sent.as_slice(), [Message::Select(word, Some(end))] if *end == word.end - 1 && word.end > word.start),
+            "{sent:?}"
+        );
+    }
 }

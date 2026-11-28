@@ -89,7 +89,8 @@ pub enum Message {
     Poke,
     Contents,
     Quotes,
-    Select(Range),
+    /// What's selected, and where it ended once it's been made (none while it's being dragged).
+    Select(Range, Option<usize>),
     ClearSelection,
     Note(String),
     SaveQuote,
@@ -126,6 +127,7 @@ pub struct Books {
     pub contents: bool,
     pub show_quotes: bool,
     pub selection: Option<Range>,
+    pub menu: Option<usize>,
     pub note: String,
     pub opened_quote: Option<i64>,
     pub busy: bool,
@@ -163,6 +165,7 @@ impl Default for Books {
             contents: false,
             show_quotes: false,
             selection: None,
+            menu: None,
             note: String::new(),
             opened_quote: None,
             busy: false,
@@ -422,8 +425,9 @@ impl Books {
                 self.show_quotes = !self.show_quotes;
                 self.contents = false;
             },
-            Message::Select(range) => {
+            Message::Select(range, at) => {
                 self.selection = Some(range);
+                self.menu = at;
                 self.opened_quote = None;
             },
             Message::ClearSelection => {
@@ -619,7 +623,7 @@ mod tests {
     fn selection_and_keyboard_navigation_use_character_positions() {
         let mut books = Books { id: Some(1), document: Some(document()), ..Books::default() };
         let mut effects = Vec::new();
-        books.update(Message::Select(Range { start: 0, end: 14 }), &mut effects);
+        books.update(Message::Select(Range { start: 0, end: 14 }, Some(13)), &mut effects);
         books.update(Message::CopySelection, &mut effects);
         assert!(matches!(&effects[0], Effect::Copy(text) if text == "A quiet mornin"));
         assert!(
@@ -649,6 +653,7 @@ mod tests {
         crate::snapshot::snapshot(&mut app, Size::new(900, 700), 1.0, None, &dir.join("focus.png"), &[]).unwrap();
         app.books.focused = false;
         app.books.selection = Some(Range { start: 15, end: 90 });
+        app.books.menu = Some(89);
         app.books.contents = true;
         crate::snapshot::snapshot(&mut app, Size::new(1280, 800), 1.0, None, &dir.join("selection.png"), &[]).unwrap();
     }
