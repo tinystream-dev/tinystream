@@ -566,3 +566,111 @@ impl iced_core::Overlay<Message, Theme, Renderer> for Float<'_, '_> {
 fn overlaps(a: Range, b: Range) -> bool {
     a.start < b.end && a.end > b.start
 }
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use iced_core::{Event, Point, Size, mouse, window};
+    use iced_wgpu::graphics::Shell;
+    use iced_wgpu::{Engine, Renderer, wgpu};
+    use iced_widget::{Element, Widget as _};
+    use iced_winit::runtime::user_interface::{Cache, UserInterface};
+
+    use super::super::model::Range;
+    use super::super::{Books, Message};
+
+    fn renderer() -> Renderer {
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
+        let adapter = futures::executor::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))
+            .expect("no GPU adapter");
+        let (device, queue) =
+            futures::executor::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())).unwrap();
+        let engine = Engine::new(&adapter, device, queue, wgpu::TextureFormat::Rgba8Unorm, None, Shell::headless());
+        Renderer::new(engine, iced_core::renderer::Settings::default())
+    }
+
+    /// What the reader sends for `steps` of the pointer, the first line of text being at y 40–70.
+    fn press(books: &Books, steps: &[(Point, mouse::Event)]) -> Vec<Message> {
+        let mut renderer = renderer();
+        let waker = iced_core::shell::Waker::new(|| {});
+        let mut cache = Cache::new();
+        let mut sent = Vec::new();
+        for (at, event) in steps {
+            let article: Element<'_, Message> = super::Article {
+                books,
+                menu: None,
+                ink: iced_core::Color::BLACK,
+                secondary: iced_core::Color::BLACK,
+                highlight: iced_core::Color::BLACK,
+            }
+            .boxed();
+            let mut interface = UserInterface::build(article, Size::new(800.0, 600.0), cache, &mut renderer);
+            let mut messages = iced_core::shell::Bus::new();
+            interface.update(
+                &window::Headless,
+                &waker,
+                &[Event::Mouse(*event)],
+                mouse::Cursor::Available(*at),
+                &mut renderer,
+                &mut messages,
+            );
+            cache = interface.into_cache();
+            sent.extend(messages);
+        }
+        sent
+    }
+
+    fn books() -> Books {
+        let text = "The light fell through the open window. We walked beside the river, talking about books.";
+        let document = serde_json::json!({"length": text.chars().count(), "chapters": [], "blocks": [{"k": "p", "at": 0, "s": [{"t": text}]}]});
+        Books { document: Some(Arc::new(serde_json::from_value(document).unwrap())), ..Books::default() }
+    }
+
+    fn click(at: Point) -> [(Point, mouse::Event); 2] {
+        [
+            (at, mouse::Event::ButtonPressed(mouse::Button::Left)),
+            (at, mouse::Event::ButtonReleased(mouse::Button::Left)),
+        ]
+    }
+
+    #[test]
+    #[ignore = "requires Vulkan; selects text headlessly"]
+    fn the_menu_waits_for_the_selection_to_be_made() {
+        let (from, to) = (Point::new(100.0, 50.0), Point::new(300.0, 50.0));
+        let sent = press(
+            &books(),
+            &[
+                (from, mouse::Event::CursorMoved { position: from }),
+                (from, mouse::Event::ButtonPressed(mouse::Button::Left)),
+                (to, mouse::Event::CursorMoved { position: to }),
+                (to, mouse::Event::ButtonReleased(mouse::Button::Left)),
+            ],
+        );
+        let selects: Vec<_> = sent
+            .iter()
+            .filter_map(|m| match m {
+                Message::Select(range, at) => Some((*range, *at)),
+                _ => None,
+            })
+            .collect();
+        assert!(matches!(selects.first(), Some((_, None))), "{sent:?}");
+        assert!(matches!(selects.last(), Some((range, Some(at))) if *at == range.end - 1), "{sent:?}");
+    }
+
+    #[test]
+    #[ignore = "requires Vulkan; clicks text headlessly"]
+    fn a_click_lets_go_of_the_selection_and_a_double_click_picks_a_word() {
+        let at = Point::new(100.0, 50.0);
+        let mut books = books();
+        books.selection = Some(Range { start: 0, end: 9 });
+        let sent = press(&books, &click(at));
+        assert!(matches!(sent.as_slice(), [Message::ClearSelection]), "{sent:?}");
+        books.selection = None;
+        let sent = press(&books, &[click(at), click(at)].concat());
+        assert!(
+            matches!(sent.as_slice(), [Message::Select(word, Some(end))] if *end == word.end - 1 && word.end > word.start),
+            "{sent:?}"
+        );
+    }
+}
