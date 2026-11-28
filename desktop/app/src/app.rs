@@ -34,6 +34,9 @@ pub struct App {
     pub downloads: crate::offline::Downloads,
     /// The tracks last fetched ahead of the music.
     ahead: Vec<i64>,
+    /// Whether the server couldn't be reached last time, to show what's downloaded when that
+    /// starts.
+    offline: bool,
     /// Passing notices, bottom right (`toast()`).
     pub toasts: Vec<crate::ui::overlay::Toast>,
     toast_serial: u64,
@@ -155,6 +158,7 @@ impl App {
             clips: crate::clips::Clips::default(),
             downloads: crate::offline::Downloads::default(),
             ahead: Vec::new(),
+            offline: false,
             toasts: Vec::new(),
             toast_serial: 0,
             chrome,
@@ -722,6 +726,13 @@ impl App {
             let origins = self.session.config.servers.iter().filter_map(|s| crate::offline::origin(&s.url)).collect();
             self.downloads.measure(origins, effects);
         }
+        if self.session.offline && !self.offline {
+            let route = &self.history.current().route;
+            if !matches!(route, Route::Watch(..) | Route::Album(_) | Route::Playlist(_) | Route::Offline) {
+                self.navigate(Route::Offline, effects);
+            }
+        }
+        self.offline = self.session.offline;
         if self.session.connection.is_some() {
             self.downloads.allow(self.browsing.can().offline_downloads, effects);
         }

@@ -243,7 +243,7 @@ pub fn page<'a>(app: &'a App, look: &Look) -> View<'a> {
         );
     }
     page = page.push(container(title).padding(Padding { bottom: 32.0, ..Padding::ZERO }).boxed());
-    if !d.allowed && app.session.connection.is_some() {
+    if !d.allowed && !app.session.offline && app.session.connection.is_some() {
         page = page.push(
             container(crate::ui::controls::banner(
                 Icon::ShieldAlert,

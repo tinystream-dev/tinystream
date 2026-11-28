@@ -293,7 +293,7 @@ fn sidebar<'a>(app: &'a App, route: &Route, look: &Look) -> Element<'a, Message>
     if app.browsing.data(&crate::browsing::Key::Shell).and_then(|d| d.server.as_ref()).is_some_and(|s| s.clips) {
         nav = nav.push(nav_link("Clips", Icon::Scissors, Route::Clips, route, look));
     }
-    if app.downloads.any() {
+    if app.downloads.any() || app.session.offline {
         nav = nav.push(nav_link("Downloaded", Icon::HardDriveDownload, Route::Offline, route, look));
     }
     if app.browsing.features() {
@@ -439,7 +439,9 @@ fn page<'a>(app: &'a App, look: &Look) -> Element<'a, Message> {
         Some((false, _, from)) => from,
         _ => &app.history.current().route,
     };
-    let content: Element<'a, Message> = if *route == Route::Offline {
+    let offline = app.session.offline
+        && !matches!(route, Route::Settings | Route::Album(_) | Route::Playlist(_) | Route::Watch(..));
+    let content: Element<'a, Message> = if *route == Route::Offline || offline {
         crate::offline::view::page(app, look)
     } else if *route == Route::Settings {
         crate::settings::view::view(app, look)
@@ -510,15 +512,24 @@ fn page<'a>(app: &'a App, look: &Look) -> Element<'a, Message> {
         ));
     }
     if !app.session.online {
-        notices = notices.push(
-            row![
-                crate::ui::controls::spinner(14.0, look),
-                text("Reconnecting to live updates…", type_::S13, look.ink_2)
-            ]
+        let what = if app.session.offline {
+            "Can't reach the server. Downloads play from this computer until it's back…"
+        } else {
+            "Reconnecting to live updates…"
+        };
+        let mut line = row![crate::ui::controls::spinner(14.0, look), text(what, type_::S13, look.ink_2)]
             .spacing(8)
-            .align_y(Alignment::Center)
-            .boxed(),
-        );
+            .align_y(Alignment::Center);
+        if !app.session.offline && app.downloads.any() && *route != Route::Offline {
+            line = line.push(
+                crate::ui::controls::button("Downloaded", look)
+                    .plain()
+                    .small()
+                    .on_press(Message::Navigate(Route::Offline))
+                    .boxed(),
+            );
+        }
+        notices = notices.push(line.boxed());
     }
     if let Some(error) = &app.session.error {
         notices =

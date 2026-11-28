@@ -34,6 +34,8 @@ pub struct Session {
     pub error: Option<String>,
     pub notice: Option<String>,
     pub online: bool,
+    /// The server couldn't be reached, so only what's downloaded is shown (#97).
+    pub offline: bool,
     pub generation: u64,
     pub revision: u64,
     pub last_event: Option<Arc<api::events::ResponseData>>,
@@ -69,6 +71,7 @@ impl Default for Session {
             error: None,
             notice: None,
             online: false,
+            offline: false,
             generation: 0,
             revision: 0,
             last_event: None,
@@ -407,6 +410,14 @@ impl Session {
             Message::Done(generation, _) if generation != self.generation => {},
             Message::Done(_, result) => match result {
                 Ok(outcome) => self.completed(outcome.as_ref(), effects),
+                Err(error) if error.unreachable() && self.kept() => {
+                    self.busy = false;
+                    self.offline = true;
+                    self.screen = Screen::Ready;
+                    if let Some(api) = self.api.clone() {
+                        effects.push(Effect::Live(Some(api), self.generation));
+                    }
+                },
                 Err(error) => {
                     self.busy = false;
                     self.password.clear();
@@ -498,6 +509,7 @@ impl Session {
         self.connection = None;
         self.images.clear();
         self.online = false;
+        self.offline = false;
         self.profile = None;
         self.by_name = false;
         self.link_token.clear();
@@ -584,9 +596,24 @@ impl Session {
         }
     }
 
+    /// Whether there's anything downloaded from the server in use to show while it can't be
+    /// reached, for someone signed in to it.
+    fn kept(&self) -> bool {
+        self.config.offline_downloads
+            && self.screen == Screen::Login
+            && self.config.active().is_some_and(|server| server.user.is_some())
+            && self
+                .api
+                .as_ref()
+                .filter(|api| api.token.is_some())
+                .and_then(|api| crate::offline::Offline::new(&api.origin))
+                .is_some_and(|offline| offline.store.read(|index| index.items.values().any(|item| item.kept)))
+    }
+
     fn accept_connection(&mut self, data: api::connection::ResponseData, effects: &mut Vec<Effect>) {
         self.busy = false;
         self.error = None;
+        self.offline = false;
         let ready = data.viewer.is_some();
         if let Some(user) = &data.viewer
             && let Some(server) = self.config.servers.iter_mut().find(|s| Some(s.id) == self.config.active)
