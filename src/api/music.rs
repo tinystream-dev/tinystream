@@ -1321,8 +1321,10 @@ pub async fn flac(
     State(state): State<Arc<AppState>>,
     user: User,
     Path(id): Path<i64>,
+    Query(q): Query<FileQuery>,
     req: Request,
 ) -> ApiResult<Response> {
+    q.allowed(Some(&user))?;
     let t = visible_track(&state, &user, id).await?;
     let copy = flac_copy(&state, &t).await?;
     serve_track(&copy, req).await
