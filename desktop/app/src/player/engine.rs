@@ -197,6 +197,13 @@ impl Engine {
         self.command(&["loadfile", &stream::url(path), "replace", "-1", &options]);
     }
 
+    /// Plays `file`, kept on this computer, from `start` seconds.
+    pub fn load_file(&self, file: &std::path::Path, start: f64, paused: bool) {
+        let Ok(url) = url::Url::from_file_path(file) else { return };
+        let options = format!("start={start:.3},pause={}", if paused { "yes" } else { "no" });
+        self.command(&["loadfile", url.as_str(), "replace", "-1", &options]);
+    }
+
     pub fn frame_step(&self, back: bool) {
         self.command(&[if back { "frame-back-step" } else { "frame-step" }]);
     }

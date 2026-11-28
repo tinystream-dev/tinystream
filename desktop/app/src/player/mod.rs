@@ -1199,7 +1199,10 @@ impl Player {
         self.waiting = true;
         let path = self.source.path(&self.base, self.audio, self.audio_codec());
         if let Some(engine) = &self.engine {
-            engine.load(&path, start, paused);
+            match crate::offline::local(&self.api, &path).filter(|_| self.source == Source::Direct) {
+                Some(file) => engine.load_file(&file, start, paused),
+                None => engine.load(&path, start, paused),
+            }
         }
         if let Some(room) = &self.room {
             room.client.set_direct(self.source == Source::Direct);

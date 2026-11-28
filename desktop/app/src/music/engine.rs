@@ -183,6 +183,27 @@ impl RangeSource for Source {
     }
 }
 
+/// A track kept on this computer (#97).
+struct Kept(std::sync::Mutex<std::fs::File>);
+
+impl RangeSource for Kept {
+    fn len(&self) -> io::Result<u64> {
+        Ok(self.0.lock().unwrap_or_else(|e| e.into_inner()).metadata()?.len())
+    }
+
+    fn read_range(&self, start: u64, end: u64) -> io::Result<Vec<u8>> {
+        use std::io::{Read, Seek, SeekFrom};
+        if end < start || end - start >= 512 * 1024 {
+            return Err(io::Error::other("Invalid audio range"));
+        }
+        let mut file = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        file.seek(SeekFrom::Start(start))?;
+        let mut bytes = vec![0; (end - start + 1) as usize];
+        file.read_exact(&mut bytes)?;
+        Ok(bytes)
+    }
+}
+
 /// `key` begins at `frame`, `offset` seconds in.
 struct Mark {
     key: String,
@@ -213,13 +234,16 @@ fn run(
         items
             .into_iter()
             .map(|item| sequence::Item {
-                source: Arc::new(Source {
-                    api: api.clone(),
-                    runtime: runtime.clone(),
-                    path: item.path,
-                    size: item.size,
-                    cancel: cancel.clone(),
-                }),
+                source: match crate::offline::local(&api, &item.path).and_then(|file| std::fs::File::open(file).ok()) {
+                    Some(file) => Arc::new(Kept(std::sync::Mutex::new(file))) as Arc<dyn RangeSource>,
+                    None => Arc::new(Source {
+                        api: api.clone(),
+                        runtime: runtime.clone(),
+                        path: item.path,
+                        size: item.size,
+                        cancel: cancel.clone(),
+                    }),
+                },
                 key: item.key,
                 size: item.size,
                 ext: item.ext,
@@ -418,6 +442,17 @@ mod tests {
         });
         server.join().unwrap();
     }
+    #[test]
+    fn kept_tracks_read_from_disk() {
+        let file = std::env::temp_dir().join(format!("tinystream-kept-{}", std::process::id()));
+        std::fs::write(&file, b"abcdef").unwrap();
+        let kept = Kept(std::sync::Mutex::new(std::fs::File::open(&file).unwrap()));
+        assert_eq!(kept.len().unwrap(), 6);
+        assert_eq!(kept.read_range(1, 3).unwrap(), b"bcd");
+        assert!(kept.read_range(4, 9).is_err());
+        std::fs::remove_file(file).unwrap();
+    }
+
     #[test]
     fn authenticated_audio_ranges_are_exact_and_bounded() {
         response("206 Partial Content", "Content-Range: bytes 1-3/5\r\nContent-Length: 3\r\n", "bcd", |source| {

@@ -95,8 +95,13 @@ fn file(api: &Api, path: &str) -> Option<PathBuf> {
     Some(crate::paths::cache_dir()?.join("images").join(format!("{:016x}", hasher.finish())))
 }
 
-/// What's on disk for `path`, if anything.
+/// What's on disk for `path`, if anything: kept with a download, or from last time.
 pub async fn cached(api: &Api, path: &str) -> Option<Vec<u8>> {
+    if let Some(kept) = crate::offline::local(api, path)
+        && let Ok(bytes) = tokio::fs::read(kept).await
+    {
+        return Some(bytes);
+    }
     tokio::fs::read(file(api, path)?).await.ok()
 }
 

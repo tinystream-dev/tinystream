@@ -90,6 +90,9 @@ impl Drop for Loader {
 }
 
 async fn bytes(api: &Api, path: &str) -> Result<Vec<u8>, String> {
+    if let Some(file) = crate::offline::local(api, path) {
+        return tokio::fs::read(file).await.map_err(|error| error.to_string());
+    }
     let response = api
         .media(path)
         .map_err(|error| error.to_string())?
