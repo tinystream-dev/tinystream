@@ -24,6 +24,7 @@ fragment PermissionsFields on Permissions {
   clipLimit
   clipStorage
   clipLinks
+  offlineDownloads
 }
 
 fragment Viewer on User {

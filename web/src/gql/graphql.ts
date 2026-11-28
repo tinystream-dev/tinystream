@@ -340,6 +340,7 @@ export type PermissionOverridesInput = {
   libraries?: Array<string> | null | undefined;
   manageRequests?: boolean | null | undefined;
   manageShows?: boolean | null | undefined;
+  offlineDownloads?: boolean | null | undefined;
   request?: boolean | null | undefined;
   requestLimit?: number | null | undefined;
   shareLinks?: boolean | null | undefined;
@@ -359,6 +360,7 @@ export type PermissionsInput = {
   libraries: Array<string>;
   manageRequests: boolean;
   manageShows: boolean;
+  offlineDownloads: boolean;
   request: boolean;
   requestLimit: number;
   shareLinks: boolean;
@@ -600,9 +602,9 @@ export type UserPatch = {
 
 export type PersonFragment = { id: number, username: string, avatar: string | null };
 
-export type PermissionsFieldsFragment = { allLibraries: boolean, libraries: Array<string>, request: boolean, autoApprove: boolean, requestLimit: number, manageRequests: boolean, manageShows: boolean, downloads: boolean, editMetadata: boolean, watchTogether: boolean, shareLinks: boolean, clip: boolean, clipMaxLength: number, clipLimit: number, clipStorage: number, clipLinks: boolean };
+export type PermissionsFieldsFragment = { allLibraries: boolean, libraries: Array<string>, request: boolean, autoApprove: boolean, requestLimit: number, manageRequests: boolean, manageShows: boolean, downloads: boolean, editMetadata: boolean, watchTogether: boolean, shareLinks: boolean, clip: boolean, clipMaxLength: number, clipLimit: number, clipStorage: number, clipLinks: boolean, offlineDownloads: boolean };
 
-export type ViewerFragment = { isAdmin: boolean, id: number, username: string, avatar: string | null, permissions: { allLibraries: boolean, libraries: Array<string>, request: boolean, autoApprove: boolean, requestLimit: number, manageRequests: boolean, manageShows: boolean, downloads: boolean, editMetadata: boolean, watchTogether: boolean, shareLinks: boolean, clip: boolean, clipMaxLength: number, clipLimit: number, clipStorage: number, clipLinks: boolean } };
+export type ViewerFragment = { isAdmin: boolean, id: number, username: string, avatar: string | null, permissions: { allLibraries: boolean, libraries: Array<string>, request: boolean, autoApprove: boolean, requestLimit: number, manageRequests: boolean, manageShows: boolean, downloads: boolean, editMetadata: boolean, watchTogether: boolean, shareLinks: boolean, clip: boolean, clipMaxLength: number, clipLimit: number, clipStorage: number, clipLinks: boolean, offlineDownloads: boolean } };
 
 export type CardFragment = { id: number, kind: TitleKind, library: string, name: string, year: number | null, poster: string | null, backdrop: string | null, watchedCount: number, videoCount: number, progress: number | null, freshCount: number };
 
@@ -1086,19 +1088,19 @@ export type DeleteAppPasswordMutation = { deleteAppPassword: boolean };
 export type UsersQueryVariables = Exact<{ [key: string]: never; }>;
 
 
-export type UsersQuery = { users: Array<{ createdAt: number, lastSeen: number | null, isAdmin: boolean, id: number, username: string, avatar: string | null, overrides: { allLibraries: boolean | null, libraries: Array<string> | null, request: boolean | null, autoApprove: boolean | null, requestLimit: number | null, manageRequests: boolean | null, manageShows: boolean | null, downloads: boolean | null, editMetadata: boolean | null, watchTogether: boolean | null, shareLinks: boolean | null, clip: boolean | null, clipMaxLength: number | null, clipLimit: number | null, clipStorage: number | null, clipLinks: boolean | null }, permissions: { allLibraries: boolean, libraries: Array<string>, request: boolean, autoApprove: boolean, requestLimit: number, manageRequests: boolean, manageShows: boolean, downloads: boolean, editMetadata: boolean, watchTogether: boolean, shareLinks: boolean, clip: boolean, clipMaxLength: number, clipLimit: number, clipStorage: number, clipLinks: boolean } }> };
+export type UsersQuery = { users: Array<{ createdAt: number, lastSeen: number | null, isAdmin: boolean, id: number, username: string, avatar: string | null, overrides: { allLibraries: boolean | null, libraries: Array<string> | null, request: boolean | null, autoApprove: boolean | null, requestLimit: number | null, manageRequests: boolean | null, manageShows: boolean | null, downloads: boolean | null, editMetadata: boolean | null, watchTogether: boolean | null, shareLinks: boolean | null, clip: boolean | null, clipMaxLength: number | null, clipLimit: number | null, clipStorage: number | null, clipLinks: boolean | null }, permissions: { allLibraries: boolean, libraries: Array<string>, request: boolean, autoApprove: boolean, requestLimit: number, manageRequests: boolean, manageShows: boolean, downloads: boolean, editMetadata: boolean, watchTogether: boolean, shareLinks: boolean, clip: boolean, clipMaxLength: number, clipLimit: number, clipStorage: number, clipLinks: boolean, offlineDownloads: boolean } }> };
 
 export type PermissionDefaultsQueryVariables = Exact<{ [key: string]: never; }>;
 
 
-export type PermissionDefaultsQuery = { permissionDefaults: { allLibraries: boolean, libraries: Array<string>, request: boolean, autoApprove: boolean, requestLimit: number, manageRequests: boolean, manageShows: boolean, downloads: boolean, editMetadata: boolean, watchTogether: boolean, shareLinks: boolean, clip: boolean, clipMaxLength: number, clipLimit: number, clipStorage: number, clipLinks: boolean } };
+export type PermissionDefaultsQuery = { permissionDefaults: { allLibraries: boolean, libraries: Array<string>, request: boolean, autoApprove: boolean, requestLimit: number, manageRequests: boolean, manageShows: boolean, downloads: boolean, editMetadata: boolean, watchTogether: boolean, shareLinks: boolean, clip: boolean, clipMaxLength: number, clipLimit: number, clipStorage: number, clipLinks: boolean, offlineDownloads: boolean } };
 
 export type SetPermissionDefaultsMutationVariables = Exact<{
   permissions: PermissionsInput;
 }>;
 
 
-export type SetPermissionDefaultsMutation = { setPermissionDefaults: { allLibraries: boolean, libraries: Array<string>, request: boolean, autoApprove: boolean, requestLimit: number, manageRequests: boolean, manageShows: boolean, downloads: boolean, editMetadata: boolean, watchTogether: boolean, shareLinks: boolean, clip: boolean, clipMaxLength: number, clipLimit: number, clipStorage: number, clipLinks: boolean } };
+export type SetPermissionDefaultsMutation = { setPermissionDefaults: { allLibraries: boolean, libraries: Array<string>, request: boolean, autoApprove: boolean, requestLimit: number, manageRequests: boolean, manageShows: boolean, downloads: boolean, editMetadata: boolean, watchTogether: boolean, shareLinks: boolean, clip: boolean, clipMaxLength: number, clipLimit: number, clipStorage: number, clipLinks: boolean, offlineDownloads: boolean } };
 
 export type UpdateUserMutationVariables = Exact<{
   id: number;
@@ -1284,7 +1286,7 @@ export type RenderingClipsQuery = { clips: Array<{ id: number, kind: ClipKind, s
 export type StatusQueryVariables = Exact<{ [key: string]: never; }>;
 
 
-export type StatusQuery = { server: { setupRequired: boolean, clips: boolean, downloads: boolean, sources: number, smtp: boolean, email: boolean, publicUrl: string | null }, viewer: { isAdmin: boolean, id: number, username: string, avatar: string | null, permissions: { allLibraries: boolean, libraries: Array<string>, request: boolean, autoApprove: boolean, requestLimit: number, manageRequests: boolean, manageShows: boolean, downloads: boolean, editMetadata: boolean, watchTogether: boolean, shareLinks: boolean, clip: boolean, clipMaxLength: number, clipLimit: number, clipStorage: number, clipLinks: boolean } } | null };
+export type StatusQuery = { server: { setupRequired: boolean, clips: boolean, downloads: boolean, sources: number, smtp: boolean, email: boolean, publicUrl: string | null }, viewer: { isAdmin: boolean, id: number, username: string, avatar: string | null, permissions: { allLibraries: boolean, libraries: Array<string>, request: boolean, autoApprove: boolean, requestLimit: number, manageRequests: boolean, manageShows: boolean, downloads: boolean, editMetadata: boolean, watchTogether: boolean, shareLinks: boolean, clip: boolean, clipMaxLength: number, clipLimit: number, clipStorage: number, clipLinks: boolean, offlineDownloads: boolean } } | null };
 
 export type PeopleQueryVariables = Exact<{ [key: string]: never; }>;
 
@@ -2034,6 +2036,7 @@ export const PermissionsFieldsFragmentDoc = new TypedDocumentString(`
   clipLimit
   clipStorage
   clipLinks
+  offlineDownloads
 }
     `, {"fragmentName":"PermissionsFields"}) as unknown as TypedDocumentString<PermissionsFieldsFragment, unknown>;
 export const ViewerFragmentDoc = new TypedDocumentString(`
@@ -2066,6 +2069,7 @@ fragment PermissionsFields on Permissions {
   clipLimit
   clipStorage
   clipLinks
+  offlineDownloads
 }`, {"fragmentName":"Viewer"}) as unknown as TypedDocumentString<ViewerFragment, unknown>;
 export const CardFragmentDoc = new TypedDocumentString(`
     fragment Card on Title {
@@ -3904,6 +3908,7 @@ fragment PermissionsFields on Permissions {
   clipLimit
   clipStorage
   clipLinks
+  offlineDownloads
 }
 fragment Viewer on User {
   ...Person
@@ -3935,6 +3940,7 @@ export const PermissionDefaultsDocument = new TypedDocumentString(`
   clipLimit
   clipStorage
   clipLinks
+  offlineDownloads
 }`) as unknown as TypedDocumentString<PermissionDefaultsQuery, PermissionDefaultsQueryVariables>;
 export const SetPermissionDefaultsDocument = new TypedDocumentString(`
     mutation SetPermissionDefaults($permissions: PermissionsInput!) {
@@ -3959,6 +3965,7 @@ export const SetPermissionDefaultsDocument = new TypedDocumentString(`
   clipLimit
   clipStorage
   clipLinks
+  offlineDownloads
 }`) as unknown as TypedDocumentString<SetPermissionDefaultsMutation, SetPermissionDefaultsMutationVariables>;
 export const UpdateUserDocument = new TypedDocumentString(`
     mutation UpdateUser($id: Int!, $input: UserPatch!) {
@@ -4845,6 +4852,7 @@ fragment PermissionsFields on Permissions {
   clipLimit
   clipStorage
   clipLinks
+  offlineDownloads
 }
 fragment Viewer on User {
   ...Person

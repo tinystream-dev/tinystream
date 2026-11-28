@@ -1734,6 +1734,7 @@ export type PermissionOverrides = {
   libraries?: Maybe<Array<Scalars['String']['output']>>;
   manageRequests?: Maybe<Scalars['Boolean']['output']>;
   manageShows?: Maybe<Scalars['Boolean']['output']>;
+  offlineDownloads?: Maybe<Scalars['Boolean']['output']>;
   request?: Maybe<Scalars['Boolean']['output']>;
   requestLimit?: Maybe<Scalars['Int']['output']>;
   shareLinks?: Maybe<Scalars['Boolean']['output']>;
@@ -1753,6 +1754,7 @@ export type PermissionOverridesInput = {
   libraries?: InputMaybe<Array<Scalars['String']['input']>>;
   manageRequests?: InputMaybe<Scalars['Boolean']['input']>;
   manageShows?: InputMaybe<Scalars['Boolean']['input']>;
+  offlineDownloads?: InputMaybe<Scalars['Boolean']['input']>;
   request?: InputMaybe<Scalars['Boolean']['input']>;
   requestLimit?: InputMaybe<Scalars['Int']['input']>;
   shareLinks?: InputMaybe<Scalars['Boolean']['input']>;
@@ -1772,6 +1774,7 @@ export type Permissions = {
   libraries: Array<Scalars['String']['output']>;
   manageRequests: Scalars['Boolean']['output'];
   manageShows: Scalars['Boolean']['output'];
+  offlineDownloads: Scalars['Boolean']['output'];
   request: Scalars['Boolean']['output'];
   requestLimit: Scalars['Int']['output'];
   shareLinks: Scalars['Boolean']['output'];
@@ -1791,6 +1794,7 @@ export type PermissionsInput = {
   libraries: Array<Scalars['String']['input']>;
   manageRequests: Scalars['Boolean']['input'];
   manageShows: Scalars['Boolean']['input'];
+  offlineDownloads: Scalars['Boolean']['input'];
   request: Scalars['Boolean']['input'];
   requestLimit: Scalars['Int']['input'];
   shareLinks: Scalars['Boolean']['input'];
