@@ -63,6 +63,7 @@ fn describe(index: &Index, key: Key) -> (String, String, Option<String>) {
             let name = v["name"].as_str().or(v["label"].as_str()).map_or_else(|| title.clone(), str::to_owned);
             let about = match v["label"].as_str() {
                 Some(label) if title != name => format!("{title} · {label}"),
+                _ if title == name && v["title"]["kind"] == "MOVIE" => "Film".to_owned(),
                 _ => title,
             };
             (name, about, v["still"].as_str().map(str::to_owned))
@@ -71,7 +72,10 @@ fn describe(index: &Index, key: Key) -> (String, String, Option<String>) {
         Key::Album(_) => (s(&v["name"]), s(&v["artist"]), v["cover"].as_str().map(str::to_owned)),
         Key::Playlist(_) => (
             s(&v["name"]),
-            format!("{} songs", v["trackCount"].as_i64().unwrap_or(0)),
+            match v["trackCount"].as_i64().unwrap_or(0) {
+                1 => "1 song".to_owned(),
+                n => format!("{n} songs"),
+            },
             v["covers"][0].as_str().map(str::to_owned),
         ),
     }
@@ -103,8 +107,7 @@ fn state<'a>(status: Status, error: Option<&str>, look: &Look) -> View<'a> {
         Status::Paused => badge("Paused", Tone::Quiet, look),
         Status::Downloading(_) => badge("Downloading", Tone::Live, look),
         Status::Failed => badge(error.map_or_else(|| "Failed".to_owned(), str::to_owned), Tone::Danger, look),
-        Status::Done => badge("Downloaded", Tone::Ok, look),
-        Status::Missing => space().boxed(),
+        Status::Done | Status::Missing => space().boxed(),
     }
 }
 
@@ -138,7 +141,7 @@ fn row_for<'a>(app: &'a App, key: Key, look: &Look) -> View<'a> {
             let done = parts.iter().filter(|p| d.status(**p) == Status::Done).count();
             words.push(format!("{done} of {} songs", parts.len()));
         },
-        _ if item.size > 0 => words.push(size(parts_size(index, key))),
+        _ if parts_size(index, key) > 0 => words.push(size(parts_size(index, key))),
         _ => {},
     }
     if video && let Some(duration) = answer(index, key).and_then(|v| v["media"]["duration"].as_f64()) {
@@ -277,7 +280,11 @@ pub fn page<'a>(app: &'a App, look: &Look) -> View<'a> {
         match key {
             Key::Video(_) => {
                 let v = answer(index, key);
-                let title = v.and_then(|v| v["title"]["name"].as_str()).unwrap_or_default().to_owned();
+                let title = match v {
+                    Some(v) if v["title"]["kind"] == "MOVIE" => "Films".to_owned(),
+                    Some(v) => v["title"]["name"].as_str().unwrap_or_default().to_owned(),
+                    None => String::new(),
+                };
                 let order = v.and_then(|v| v["label"].as_str()).unwrap_or_default().to_owned();
                 match shows.iter_mut().find(|(name, _)| *name == title) {
                     Some((_, videos)) => videos.push((order, key)),
