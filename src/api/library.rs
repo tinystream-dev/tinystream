@@ -1057,7 +1057,16 @@ impl LibraryMutation {
         Title::load(state, &access, id).await?.ok_or_else(|| ApiError::not_found("title"))
     }
 
-    async fn save_progress(&self, ctx: &Context<'_>, video_id: i64, position: f64, duration: f64) -> ApiResult<Video> {
+    /// Where someone got to, now or `at` (unix seconds) for an app catching up on what was watched
+    /// offline; an older position never replaces a newer one.
+    async fn save_progress(
+        &self,
+        ctx: &Context<'_>,
+        video_id: i64,
+        position: f64,
+        duration: f64,
+        at: Option<i64>,
+    ) -> ApiResult<Video> {
         let (state, access) = (ctx.state(), ctx.access()?);
         let video = Video::load(state, &access, video_id).await?.ok_or_else(|| ApiError::not_found("video"))?;
 
@@ -1065,22 +1074,7 @@ impl LibraryMutation {
             return Err(ApiError::bad_request("bad position"));
         }
 
-        let finished = position / duration >= 0.92 || duration - position <= 30.0;
-
-        sqlx::query(
-            "INSERT INTO progress (user_id, media_path, position, duration, finished, updated_at) VALUES (?, ?, ?, ?, ?, ?)
-             ON CONFLICT(user_id, media_path) DO UPDATE SET position = excluded.position, duration = excluded.duration,
-                finished = MAX(excluded.finished, CASE WHEN excluded.position < 5 THEN 0 ELSE progress.finished END),
-                updated_at = excluded.updated_at",
-        )
-        .bind(access.person().id)
-        .bind(&video.ep.path)
-        .bind(position)
-        .bind(duration)
-        .bind(finished)
-        .bind(now())
-        .execute(&state.db)
-        .await?;
+        record_progress(&state.db, access.person().id, &video.ep.path, position, duration, at).await?;
 
         Video::load(state, &access, video_id).await?.ok_or_else(|| ApiError::not_found("video"))
     }
@@ -1180,6 +1174,37 @@ impl LibraryMutation {
     }
 }
 
+/// Saves where someone got to in `path`, as of `at` (unix seconds, now if missing): an older
+/// position, like one an app kept while offline, never replaces a newer one.
+async fn record_progress(
+    db: &sqlx::SqlitePool,
+    user_id: i64,
+    path: &str,
+    position: f64,
+    duration: f64,
+    at: Option<i64>,
+) -> sqlx::Result<()> {
+    let finished = position / duration >= 0.92 || duration - position <= 30.0;
+
+    sqlx::query(
+        "INSERT INTO progress (user_id, media_path, position, duration, finished, updated_at) VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT(user_id, media_path) DO UPDATE SET position = excluded.position, duration = excluded.duration,
+            finished = MAX(excluded.finished, CASE WHEN excluded.position < 5 THEN 0 ELSE progress.finished END),
+            updated_at = excluded.updated_at
+         WHERE excluded.updated_at >= progress.updated_at",
+    )
+    .bind(user_id)
+    .bind(path)
+    .bind(position)
+    .bind(duration)
+    .bind(finished)
+    .bind(at.map_or(now(), |at| at.min(now())))
+    .execute(db)
+    .await?;
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod fuzzy_tests {
     use super::Fuzzy;
@@ -1266,5 +1291,31 @@ mod tests {
 
         eps[1].position = Some(3.0);
         assert_eq!(next_up(&eps).map(|(e, resume)| (e.id, resume)), Some((2, false)));
+    }
+
+    #[tokio::test]
+    async fn an_older_position_never_replaces_a_newer_one() {
+        let db = sqlx::sqlite::SqlitePoolOptions::new().max_connections(1).connect("sqlite::memory:").await.unwrap();
+        sqlx::raw_sql(
+            "CREATE TABLE progress (user_id INTEGER, media_path TEXT, position REAL, duration REAL, finished INTEGER,
+                updated_at INTEGER, PRIMARY KEY (user_id, media_path))",
+        )
+        .execute(&db)
+        .await
+        .unwrap();
+        let saved = || async {
+            sqlx::query_as::<_, (f64, i64)>("SELECT position, updated_at FROM progress").fetch_one(&db).await.unwrap()
+        };
+
+        record_progress(&db, 1, "a.mkv", 600.0, 1400.0, Some(2_000)).await.unwrap();
+        record_progress(&db, 1, "a.mkv", 300.0, 1400.0, Some(1_000)).await.unwrap();
+        assert_eq!(saved().await, (600.0, 2_000));
+
+        record_progress(&db, 1, "a.mkv", 900.0, 1400.0, Some(3_000)).await.unwrap();
+        assert_eq!(saved().await, (900.0, 3_000));
+
+        record_progress(&db, 1, "a.mkv", 60.0, 1400.0, Some(i64::MAX)).await.unwrap();
+        assert!(saved().await.1 <= now());
+        assert_eq!(saved().await.0, 60.0);
     }
 }

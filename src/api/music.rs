@@ -1003,11 +1003,12 @@ impl MusicMutation {
         Ok(true)
     }
 
-    /// Someone listened to (most of) a track.
-    async fn played(&self, ctx: &Context<'_>, track_id: i64) -> ApiResult<bool> {
+    /// Someone listened to (most of) a track, now or `at` (unix seconds) for an app catching up
+    /// on what it played offline.
+    async fn played(&self, ctx: &Context<'_>, track_id: i64, at: Option<i64>) -> ApiResult<bool> {
         let (state, user) = (ctx.state(), ctx.user()?);
         let t = visible_track(state, user, track_id).await?;
-        catalog::record_play(&state.db, user.id, &t.path, now()).await?;
+        catalog::record_play(&state.db, user.id, &t.path, at.map_or(now(), |at| at.min(now()))).await?;
         Ok(true)
     }
 

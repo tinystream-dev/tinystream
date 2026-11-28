@@ -1015,7 +1015,11 @@ type Mutation {
 	removeAvatar(userId: Int): User!
 	setWatched(videoIds: [Int!]!, watched: Boolean!): [Video!]!
 	setTitleWatched(id: Int!, watched: Boolean!): Title!
-	saveProgress(videoId: Int!, position: Float!, duration: Float!): Video!
+	"""
+	Where someone got to, now or `at` (unix seconds) for an app catching up on what was watched
+	offline; an older position never replaces a newer one.
+	"""
+	saveProgress(videoId: Int!, position: Float!, duration: Float!, at: Int): Video!
 	matchTitle(id: Int!, provider: Provider!, providerId: String!): Title!
 	setTitleArtwork(id: Int!, kind: TitleArtwork!, image: Upload): Title!
 	setVideoArtwork(videoId: Int!, image: Upload): Video!
@@ -1026,9 +1030,10 @@ type Mutation {
 	"""
 	rate(kind: MusicKind!, id: Int!, rating: Int!): Boolean!
 	"""
-	Someone listened to (most of) a track.
+	Someone listened to (most of) a track, now or `at` (unix seconds) for an app catching up
+	on what it played offline.
 	"""
-	played(trackId: Int!): Boolean!
+	played(trackId: Int!, at: Int): Boolean!
 	"""
 	What's playing in tinystream's own player right now (the web's, or `client`, the app's), so
 	other apps see it; no track means it stopped.
