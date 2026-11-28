@@ -6,8 +6,8 @@ query Playback($id: Int!) {
   viewer { id permissions { clip watchTogether } }
 }
 
-mutation SaveProgress($videoId: Int!, $position: Float!, $duration: Float!) {
-  saveProgress(videoId: $videoId, position: $position, duration: $duration) { id }
+mutation SaveProgress($videoId: Int!, $position: Float!, $duration: Float!, $at: Int) {
+  saveProgress(videoId: $videoId, position: $position, duration: $duration, at: $at) { id }
 }
 
 mutation TakeScreenshot($input: NewScreenshot!) {

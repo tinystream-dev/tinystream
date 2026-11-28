@@ -11,7 +11,7 @@ query MusicQueue { playQueue { tracks { ...MusicTrack } current position shuffle
 query MusicLyrics($trackId: Int!) { lyrics(trackId: $trackId) { synced lines { start text } } }
 mutation MusicSave($input: QueueInput!) { savePlayQueue(input: $input, client: "Desktop") { updatedAt } }
 mutation MusicPlaying($trackId: Int, $position: Float!, $paused: Boolean!) { nowPlaying(trackId: $trackId, position: $position, paused: $paused, client: "Desktop") }
-mutation MusicPlayed($trackId: Int!) { played(trackId: $trackId) }
+mutation MusicPlayed($trackId: Int!, $at: Int) { played(trackId: $trackId, at: $at) }
 mutation MusicMeasure($trackId: Int!) { measureLoudness(trackId: $trackId) { ...MusicTrack } }
 mutation MusicStar($kind: MusicKind!, $id: Int!, $starred: Boolean!) { star(kind: $kind, id: $id, starred: $starred) }
 mutation MusicCreatePlaylist($name: String!, $tracks: [Int!]!) { createPlaylist(name: $name, tracks: $tracks) { ...PlaylistCard } }

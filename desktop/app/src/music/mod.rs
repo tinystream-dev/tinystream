@@ -419,9 +419,11 @@ impl Music {
                     };
                     self.request::<api::MusicSave>(api::music_save::Variables { input }, Message::Done, effects);
                 },
-                Do::Played(track_id) => {
-                    self.request::<api::MusicPlayed>(api::music_played::Variables { track_id }, Message::Done, effects)
-                },
+                Do::Played(track_id) => self.request::<api::MusicPlayed>(
+                    api::music_played::Variables { track_id, at: None },
+                    Message::Done,
+                    effects,
+                ),
                 Do::NowPlaying(track_id, position, paused) => self.request::<api::MusicPlaying>(
                     api::music_playing::Variables { track_id, position, paused },
                     Message::Done,

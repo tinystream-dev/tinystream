@@ -1448,8 +1448,9 @@ impl Player {
         }
         let (api, video_id, position) = (self.api.clone(), self.id, self.time);
         self.request(effects, async move {
-            let result =
-                api.request::<api::SaveProgress>(save_progress::Variables { video_id, position, duration }).await;
+            let result = api
+                .request::<api::SaveProgress>(save_progress::Variables { video_id, position, duration, at: None })
+                .await;
             if let Err(error) = result {
                 tracing::debug!("can't save progress: {error}");
             }
@@ -1944,7 +1945,10 @@ pub(crate) mod tests {
                 }
             }
             let requests = request.await.unwrap();
-            assert_eq!(requests[0].1["variables"], serde_json::json!({"videoId":1,"position":123.0,"duration":1800.0}));
+            assert_eq!(
+                requests[0].1["variables"],
+                serde_json::json!({"videoId":1,"position":123.0,"duration":1800.0,"at":null})
+            );
         });
     }
 
