@@ -11,6 +11,7 @@
 /packages/*/node_modules
 /mobile/node_modules
 /mobile/target
+/desktop/target
 /mobile/android
 /mobile/ios
 /mobile/.expo

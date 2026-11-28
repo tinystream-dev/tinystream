@@ -6,6 +6,8 @@ fn main() {
     let version = env!("CARGO_PKG_VERSION").strip_suffix(".0").unwrap_or(env!("CARGO_PKG_VERSION"));
 
     let apple = std::env::var("CARGO_CFG_TARGET_VENDOR").is_ok_and(|v| v == "apple");
+    let nvenc = std::env::var_os("CARGO_FEATURE_NVENC").is_some();
+    let nvdec = std::env::var_os("CARGO_FEATURE_NVDEC").is_some();
 
     let mut deps = vec!["nasm", "dav1d", "x264", "zimg", "opus", "mp3lame"];
 
@@ -13,7 +15,11 @@ fn main() {
         deps.push("va");
     }
 
-    let b = Build::new("ffmpeg", version, &deps);
+    if nvdec {
+        deps.push("ffnvcodec");
+    }
+
+    let b = Build::variant("ffmpeg", version, if nvenc { Some("nvenc") } else { nvdec.then_some("nvdec") }, &deps);
 
     let lame = std::env::var("DEP_MP3LAME_PREFIX").expect("no metadata from lame-src");
 
@@ -29,6 +35,9 @@ fn main() {
         "--enable-libx264".into(),
         "--enable-libdav1d".into(),
         "--disable-libdrm".into(),
+        // Only for bzip2-compressed Matroska tracks, which nothing writes, and Debian's libbz2.so.1.0
+        // is libbz2.so.1 on Fedora, so binaries built on Ubuntu wouldn't start there.
+        "--disable-bzlib".into(),
         "--enable-libzimg".into(),
         "--enable-libopus".into(),
         "--enable-libmp3lame".into(),
@@ -46,6 +55,19 @@ fn main() {
         args.push("--enable-videotoolbox".into());
     } else {
         args.push("--enable-vaapi".into());
+    }
+
+    if nvdec {
+        args.extend(["--enable-ffnvcodec".into(), "--enable-nvdec".into(), "--enable-cuvid".into()]);
+    }
+
+    if nvenc {
+        args.extend([
+            "--enable-nvenc".into(),
+            "--enable-cuda-llvm".into(),
+            "--disable-cuda-nvcc".into(),
+            "--disable-libnpp".into(),
+        ]);
     }
 
     let url = format!("https://ffmpeg.org/releases/ffmpeg-{version}.tar.gz");

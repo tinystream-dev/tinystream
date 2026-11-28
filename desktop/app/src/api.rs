@@ -1,0 +1,647 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+use std::fmt;
+use std::sync::Arc;
+use std::time::Duration;
+
+use futures::{SinkExt, StreamExt};
+use graphql_client::{GraphQLQuery, Response};
+use reqwest::{Client, StatusCode};
+use serde_json::{Value, json};
+use tokio::time::{sleep, timeout};
+use tokio_tungstenite::tungstenite::Message as Frame;
+use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+use url::Url;
+
+#[allow(unused_imports, non_camel_case_types, clippy::all)]
+mod generated {
+    type Duration = String;
+    type JSON = serde_json::Value;
+    type Upload = serde_json::Value;
+    include!(concat!(env!("OUT_DIR"), "/graphql.rs"));
+}
+
+pub use generated::*;
+
+#[derive(Clone)]
+pub struct Token(pub String);
+
+impl fmt::Debug for Token {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("[redacted]")
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct Error {
+    pub unauthorized: bool,
+    pub message: String,
+}
+
+/// What a request says when the server can't be reached at all.
+const UNREACHABLE: &str = "Couldn't reach the server. Check the address and your connection.";
+
+impl Error {
+    pub fn message(message: impl Into<String>) -> Self {
+        Self { unauthorized: false, message: message.into() }
+    }
+
+    /// The server couldn't be reached, rather than saying no.
+    pub fn unreachable(&self) -> bool {
+        self.message == UNREACHABLE
+    }
+
+    pub fn unauthorized() -> Self {
+        Self { unauthorized: true, message: "Your session expired. Sign in again.".into() }
+    }
+}
+
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for Error {}
+
+/// Decodes dynamic variables, including generated unit structs for operations without variables.
+pub(crate) fn variables<V: serde::de::DeserializeOwned>(value: Value) -> Result<V, Error> {
+    let empty = value.as_object().is_some_and(serde_json::Map::is_empty);
+    match serde_json::from_value(value) {
+        Ok(variables) => Ok(variables),
+        Err(_) if empty => {
+            serde_json::from_value(Value::Null).map_err(|e| Error::message(format!("Invalid request: {e}")))
+        },
+        Err(error) => Err(Error::message(format!("Invalid request: {error}"))),
+    }
+}
+
+#[derive(Clone)]
+pub struct Api {
+    pub origin: Url,
+    pub token: Option<Token>,
+    http: Client,
+    /// For media streams, which last as long as playback: no overall timeout, but one on each read
+    /// so a stream that stops sending is noticed (#66).
+    streams: Client,
+}
+
+impl fmt::Debug for Api {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("Api")
+    }
+}
+
+impl Api {
+    pub fn new(origin: Url, token: Option<Token>) -> Result<Self, Error> {
+        let origin = addresses(origin.as_str())?.remove(0);
+        let http = Client::builder()
+            .timeout(Duration::from_secs(15))
+            .redirect(reqwest::redirect::Policy::none())
+            .user_agent(concat!("tinystream-desktop/", env!("CARGO_PKG_VERSION")))
+            .build()
+            .map_err(|_| Error::message("Couldn't start the network client."))?;
+        let streams = Client::builder()
+            .connect_timeout(Duration::from_secs(15))
+            .read_timeout(Duration::from_secs(20))
+            .redirect(reqwest::redirect::Policy::none())
+            .user_agent(concat!("tinystream-desktop/", env!("CARGO_PKG_VERSION")))
+            .build()
+            .map_err(|_| Error::message("Couldn't start the network client."))?;
+        Ok(Self { origin, token, http, streams })
+    }
+
+    /// Authenticated media requests are restricted to this server's origin.
+    pub fn media(&self, path: &str) -> Result<reqwest::RequestBuilder, Error> {
+        self.get(&self.http, path)
+    }
+
+    /// Artwork may live on a metadata provider; only our server receives credentials.
+    pub fn image(&self, path: &str) -> Result<reqwest::RequestBuilder, Error> {
+        let url = self.origin.join(path).map_err(|_| Error::message("Invalid image address."))?;
+        if !matches!(url.scheme(), "http" | "https") {
+            return Err(Error::message("Invalid image address."));
+        }
+        if url.origin() == self.origin.origin() { self.media(path) } else { Ok(self.http.get(url)) }
+    }
+
+    /// Like [`Api::media`], for a stream read while it plays.
+    pub fn stream(&self, path: &str) -> Result<reqwest::RequestBuilder, Error> {
+        self.get(&self.streams, path)
+    }
+
+    /// Like [`Api::media`], for only what the server would send about it.
+    pub fn head(&self, path: &str) -> Result<reqwest::RequestBuilder, Error> {
+        self.at(&self.http, reqwest::Method::HEAD, path)
+    }
+
+    fn get(&self, client: &Client, path: &str) -> Result<reqwest::RequestBuilder, Error> {
+        self.at(client, reqwest::Method::GET, path)
+    }
+
+    fn at(&self, client: &Client, method: reqwest::Method, path: &str) -> Result<reqwest::RequestBuilder, Error> {
+        let url = self.origin.join(path).map_err(|_| Error::message("Invalid media address."))?;
+        if url.origin() != self.origin.origin() {
+            return Err(Error::message("Invalid media address."));
+        }
+        let request = client.request(method, url);
+        Ok(match &self.token {
+            Some(token) => request.bearer_auth(&token.0),
+            None => request,
+        })
+    }
+
+    pub async fn request<Q: GraphQLQuery>(&self, variables: Q::Variables) -> Result<Q::ResponseData, Error> {
+        self.request_data::<Q, Q::ResponseData>(variables).await
+    }
+
+    /// Like [`Api::request`], from the server's own page: the server makes passkeys for the
+    /// request's `Origin`, as it would for a browser there.
+    pub async fn passkey<Q: GraphQLQuery>(&self, variables: Q::Variables) -> Result<Q::ResponseData, Error> {
+        self.send::<Q, Q::ResponseData>(variables, true).await
+    }
+
+    /// Uses a shared view model for selections appearing in several generated operations.
+    pub async fn request_data<Q: GraphQLQuery, T: serde::de::DeserializeOwned>(
+        &self,
+        variables: Q::Variables,
+    ) -> Result<T, Error> {
+        self.send::<Q, T>(variables, false).await
+    }
+
+    async fn send<Q: GraphQLQuery, T: serde::de::DeserializeOwned>(
+        &self,
+        variables: Q::Variables,
+        page: bool,
+    ) -> Result<T, Error> {
+        let body = Q::build_query(variables);
+        let operation = body.operation_name;
+        let offline = crate::offline::Offline::new(&self.origin);
+        let asked = offline.as_ref().map(|_| serde_json::to_value(&body.variables).unwrap_or_default());
+        let answer = |offline: &crate::offline::Offline| -> Option<T> {
+            offline.answer(operation, asked.as_ref()?).and_then(|data| serde_json::from_value(data).ok())
+        };
+        if let Some(offline) = offline.as_ref().filter(|offline| offline.away())
+            && let Some(data) = answer(offline)
+        {
+            return Ok(data);
+        }
+        let mut request = self.http.post(self.origin.join("api/graphql").expect("validated origin")).json(&body);
+        if let Some(token) = &self.token {
+            request = request.bearer_auth(&token.0);
+        }
+        if page {
+            request = request.header(reqwest::header::ORIGIN, self.origin.origin().ascii_serialization());
+        }
+        let response = match request.send().await {
+            Ok(response) if !gone(response.status()) => response,
+            _ => {
+                if let Some(offline) = &offline {
+                    offline.left();
+                    if let Some(data) = answer(offline) {
+                        return Ok(data);
+                    }
+                    offline.report(operation, serde_json::to_value(&body).unwrap_or_default());
+                }
+                return Err(Error::message(UNREACHABLE));
+            },
+        };
+        if response.status() == StatusCode::UNAUTHORIZED {
+            return Err(Error::unauthorized());
+        }
+        if !response.status().is_success() {
+            return Err(Error::message(format!("The server returned HTTP {}.", response.status().as_u16())));
+        }
+        if let Some(offline) = &offline {
+            offline.back();
+        }
+        let bytes = response.bytes().await.map_err(|_| Error::message("The server sent something unexpected."))?;
+        let body: Response<T> = serde_json::from_slice(&bytes).map_err(|error| {
+            let at = bytes.len().min(
+                bytes.split(|b| *b == b'\n').take(error.line().saturating_sub(1)).map(|l| l.len() + 1).sum::<usize>()
+                    + error.column(),
+            );
+            let near = String::from_utf8_lossy(&bytes[at.saturating_sub(80)..(at + 40).min(bytes.len())]).into_owned();
+            tracing::warn!(operation, %error, near, "can't read the server's response");
+            Error::message("The server sent something unexpected.")
+        })?;
+        decode(body)
+    }
+
+    /// Sends a request made earlier (`body`, as JSON) as it is, for what was done offline. Only
+    /// a server that can't be reached is an error: one that says no won't say yes later.
+    pub async fn resend(&self, body: &Value) -> Result<(), Error> {
+        let mut request = self.http.post(self.origin.join("api/graphql").expect("validated origin")).json(body);
+        if let Some(token) = &self.token {
+            request = request.bearer_auth(&token.0);
+        }
+        match request.send().await {
+            Ok(response) if response.status() == StatusCode::UNAUTHORIZED => Err(Error::unauthorized()),
+            Ok(response) if !gone(response.status()) => Ok(()),
+            _ => Err(Error::message(UNREACHABLE)),
+        }
+    }
+
+    pub async fn artwork(&self, id: i64, kind: Option<String>, reset: bool) -> Result<(), Error> {
+        let operation = if let Some(kind) = kind {
+            let variables = serde_json::from_value(json!({"id":id,"kind":kind,"image":null}))
+                .map_err(|_| Error::message("Invalid artwork target."))?;
+            serde_json::to_value(BrowseTitleArtwork::build_query(variables))
+        } else {
+            let variables = serde_json::from_value(json!({"videoId":id,"image":null}))
+                .map_err(|_| Error::message("Invalid artwork target."))?;
+            serde_json::to_value(BrowseVideoArtwork::build_query(variables))
+        }
+        .map_err(|_| Error::message("Couldn't prepare the picture upload."))?;
+        self.upload_picture(operation, reset).await
+    }
+
+    pub async fn avatar(&self, user: Option<i64>, reset: bool) -> Result<(), Error> {
+        use graphql_client::GraphQLQuery;
+        let operation = if reset {
+            serde_json::to_value(SettingsRemoveAvatar::build_query(settings_remove_avatar::Variables { user_id: user }))
+        } else {
+            serde_json::to_value(SettingsSetAvatar::build_query(settings_set_avatar::Variables {
+                user_id: user,
+                image: Value::Null,
+            }))
+        }
+        .map_err(|_| Error::message("Couldn't prepare the picture upload."))?;
+        self.upload_picture(operation, reset).await
+    }
+
+    async fn upload_picture(&self, operation: Value, reset: bool) -> Result<(), Error> {
+        use crate::platform::{Current, Desktop};
+        let mut request = self.http.post(self.origin.join("api/graphql").expect("validated origin"));
+        if let Some(token) = &self.token {
+            request = request.bearer_auth(&token.0);
+        }
+        if reset {
+            request = request.json(&operation);
+        } else {
+            let Some(path) = Current::choose_image().await.map_err(Error::message)? else {
+                return Ok(());
+            };
+            let metadata =
+                tokio::fs::metadata(&path).await.map_err(|_| Error::message("Couldn't read that picture."))?;
+            if metadata.len() > 8 * 1024 * 1024 {
+                return Err(Error::message("That picture is too big (8 MB at most)."));
+            }
+            let bytes = tokio::fs::read(path).await.map_err(|_| Error::message("Couldn't read that picture."))?;
+            if bytes.len() > 8 * 1024 * 1024 {
+                return Err(Error::message("That picture is too big (8 MB at most)."));
+            }
+            let format =
+                image::guess_format(&bytes).map_err(|_| Error::message("Choose a PNG, JPEG, WebP or GIF picture."))?;
+            let mime = match format {
+                image::ImageFormat::Png => "image/png",
+                image::ImageFormat::Jpeg => "image/jpeg",
+                image::ImageFormat::WebP => "image/webp",
+                image::ImageFormat::Gif => "image/gif",
+                _ => return Err(Error::message("Choose a PNG, JPEG, WebP or GIF picture.")),
+            };
+            let boundary = format!(
+                "tinystream{}",
+                std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos()
+            );
+            let mut body = format!("--{boundary}\r\nContent-Disposition: form-data; name=\"operations\"\r\n\r\n{operation}\r\n--{boundary}\r\nContent-Disposition: form-data; name=\"map\"\r\n\r\n{{\"0\":[\"variables.image\"]}}\r\n--{boundary}\r\nContent-Disposition: form-data; name=\"0\"; filename=\"artwork\"\r\nContent-Type: {mime}\r\n\r\n").into_bytes();
+            body.extend(bytes);
+            body.extend(format!("\r\n--{boundary}--\r\n").as_bytes());
+            request = request.header("Content-Type", format!("multipart/form-data; boundary={boundary}")).body(body);
+        }
+        let response = request.send().await.map_err(|_| Error::message("Couldn't upload the picture."))?;
+        if response.status() == StatusCode::UNAUTHORIZED {
+            return Err(Error::unauthorized());
+        }
+        if !response.status().is_success() {
+            return Err(Error::message(format!("The server returned HTTP {}.", response.status().as_u16())));
+        }
+        let body: Response<Value> =
+            response.json().await.map_err(|_| Error::message("The server sent something unexpected."))?;
+        decode(body).map(|_| ())
+    }
+
+    pub async fn connection(&self) -> Result<connection::ResponseData, Error> {
+        let data = self.request::<Connection>(connection::Variables).await?;
+        if self.token.is_some() && data.viewer.is_none() {
+            return Err(Error::unauthorized());
+        }
+        Ok(data)
+    }
+
+    /// Emits a full invalidation on each acknowledgement, including after reconnecting.
+    pub async fn events(&self, send: impl Fn(Live) + Send + Sync) {
+        let mut delay = 1;
+        loop {
+            match self.follow(&send).await {
+                Err(error) if error.unauthorized => {
+                    send(Live::Unauthorized);
+                    return;
+                },
+                _ => send(Live::Offline),
+            }
+            sleep(Duration::from_secs(delay)).await;
+            delay = (delay * 2).min(30);
+        }
+    }
+
+    async fn follow(&self, send: &impl Fn(Live)) -> Result<(), Error> {
+        let mut url = self.origin.join("api/graphql").expect("validated origin");
+        url.set_scheme(if self.origin.scheme() == "https" { "wss" } else { "ws" }).expect("websocket scheme");
+        let mut request = url.as_str().into_client_request().map_err(|_| Error::message("Invalid live connection."))?;
+        request.headers_mut().insert("Sec-WebSocket-Protocol", "graphql-transport-ws".parse().unwrap());
+        let (mut socket, _) = timeout(Duration::from_secs(15), tokio_tungstenite::connect_async(request))
+            .await
+            .map_err(|_| Error::message("Live connection timed out."))?
+            .map_err(|error| match error {
+                tokio_tungstenite::tungstenite::Error::Http(response) if response.status().as_u16() == 401 => {
+                    Error::unauthorized()
+                },
+                _ => Error::message("Live connection interrupted."),
+            })?;
+        socket
+            .send(Frame::Text(
+                json!({"type":"connection_init", "payload":{"token":self.token.as_ref().map(|t| &t.0)}})
+                    .to_string()
+                    .into(),
+            ))
+            .await
+            .map_err(|_| Error::message("Live connection interrupted."))?;
+        let mut acknowledged = false;
+        let mut waiting_for_pong = false;
+        loop {
+            let frame = match timeout(
+                Duration::from_secs(if acknowledged && !waiting_for_pong { 30 } else { 15 }),
+                socket.next(),
+            )
+            .await
+            {
+                Ok(frame) => frame,
+                Err(_) if acknowledged && !waiting_for_pong => {
+                    socket
+                        .send(Frame::Text(json!({"type":"ping"}).to_string().into()))
+                        .await
+                        .map_err(|_| Error::message("Live connection interrupted."))?;
+                    waiting_for_pong = true;
+                    continue;
+                },
+                Err(_) => return Err(Error::message("Live connection timed out.")),
+            }
+            .ok_or_else(|| Error::message("Live connection closed."))?
+            .map_err(|_| Error::message("Live connection interrupted."))?;
+            match frame {
+                Frame::Text(text) => {
+                    let value: Value =
+                        serde_json::from_str(&text).map_err(|_| Error::message("Invalid live event."))?;
+                    match value["type"].as_str() {
+                        Some("connection_ack") if !acknowledged => {
+                            acknowledged = true;
+                            socket.send(Frame::Text(json!({"id":"events", "type":"subscribe", "payload":Events::build_query(events::Variables)}).to_string().into())).await.map_err(|_| Error::message("Live connection interrupted."))?;
+                            send(Live::Connected);
+                        },
+                        Some("next") if acknowledged && value["id"] == "events" => {
+                            let response: Response<events::ResponseData> =
+                                serde_json::from_value(value["payload"].clone())
+                                    .map_err(|_| Error::message("Invalid live event."))?;
+                            send(Live::Event(Arc::new(decode(response)?)));
+                        },
+                        Some("pong") => waiting_for_pong = false,
+                        Some("ping") => {
+                            socket
+                                .send(Frame::Text(
+                                    json!({"type":"pong", "payload":value["payload"]}).to_string().into(),
+                                ))
+                                .await
+                                .map_err(|_| Error::message("Live connection interrupted."))?;
+                        },
+                        Some("error") => {
+                            if value["payload"].as_array().is_some_and(|errors| {
+                                errors.iter().any(|e| e["extensions"]["code"] == "UNAUTHENTICATED")
+                            }) {
+                                return Err(Error::unauthorized());
+                            }
+                            return Err(Error::message("Live subscription failed."));
+                        },
+                        Some("complete") => return Ok(()),
+                        _ => {},
+                    }
+                },
+                Frame::Ping(bytes) => {
+                    socket
+                        .send(Frame::Pong(bytes))
+                        .await
+                        .map_err(|_| Error::message("Live connection interrupted."))?;
+                },
+                Frame::Close(frame) => {
+                    if frame.is_some_and(|f| matches!(u16::from(f.code), 4401 | 4403)) {
+                        return Err(Error::unauthorized());
+                    }
+                    return Ok(());
+                },
+                _ => {},
+            }
+        }
+    }
+}
+
+#[derive(Clone)]
+pub enum Live {
+    Connected,
+    Offline,
+    Unauthorized,
+    Event(Arc<events::ResponseData>),
+}
+
+/// What a proxy says when the server behind it is down.
+fn gone(status: StatusCode) -> bool {
+    matches!(status, StatusCode::BAD_GATEWAY | StatusCode::SERVICE_UNAVAILABLE | StatusCode::GATEWAY_TIMEOUT)
+}
+
+fn decode<T>(response: Response<T>) -> Result<T, Error> {
+    if let Some(errors) = response.errors {
+        if let Some(error) = errors.iter().find(|error| {
+            error.extensions.as_ref().and_then(|e| e.get("code")).and_then(Value::as_str) == Some("UNAUTHENTICATED")
+        }) {
+            return Err(Error { unauthorized: true, message: error.message.clone() });
+        }
+        if let Some(error) = errors.into_iter().next() {
+            return Err(Error::message(error.message));
+        }
+    }
+    response.data.ok_or_else(|| Error::message("The server sent nothing back."))
+}
+
+/// Bare addresses try HTTPS first. Explicit schemes are respected.
+pub fn addresses(input: &str) -> Result<Vec<Url>, Error> {
+    let input = input.trim();
+    if input.is_empty() {
+        return Err(Error::message("Enter a server address."));
+    }
+    let candidates = if input.contains("://") {
+        vec![input.to_owned()]
+    } else {
+        vec![format!("https://{input}"), format!("http://{input}")]
+    };
+    candidates
+        .into_iter()
+        .map(|candidate| {
+            let mut url =
+                Url::parse(&candidate).map_err(|_| Error::message("Enter a host, host:port, or an HTTP(S) URL."))?;
+            if !matches!(url.scheme(), "https" | "http")
+                || url.host_str().is_none()
+                || !url.username().is_empty()
+                || url.password().is_some()
+                || url.query().is_some()
+                || url.fragment().is_some()
+                || !matches!(url.path(), "" | "/")
+            {
+                return Err(Error::message(
+                    "Use the server's HTTP(S) address without a path, password, query, or fragment.",
+                ));
+            }
+            url.set_path("/");
+            Ok(url)
+        })
+        .collect()
+}
+
+pub async fn probe(input: &str) -> Result<(Api, connection::ResponseData), Error> {
+    let mut last = Error::message("This address isn't a tinystream server.");
+    for origin in addresses(input)? {
+        let api = Api::new(origin, None)?;
+        match api.connection().await {
+            Ok(data) if semver::Version::parse(data.server.version.trim_start_matches('v')).is_ok() => {
+                return Ok((api, data));
+            },
+            Ok(_) => last = Error::message("This address isn't a tinystream server."),
+            Err(error) => last = error,
+        }
+    }
+    Err(last)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dynamic_variables_accept_unit_and_optional_structs_without_hiding_invalid_inputs() {
+        let _: settings_settings::Variables = variables(json!({})).unwrap();
+        let _: settings_settings_engine::Variables = variables(json!({})).unwrap();
+        let folders: settings_folders::Variables = variables(json!({})).unwrap();
+        assert!(folders.path.is_none());
+        let folders: settings_folders::Variables = variables(json!({"path":"/media"})).unwrap();
+        assert_eq!(folders.path.as_deref(), Some("/media"));
+        assert!(variables::<settings_change_password::Variables>(json!({})).is_err());
+        assert!(variables::<settings_folders::Variables>(json!({"path":42})).is_err());
+    }
+
+    #[test]
+    fn normalizes_addresses_and_rejects_credentials_and_paths() {
+        let candidates = addresses(" localhost:3000 ").unwrap();
+        assert_eq!(
+            candidates.iter().map(Url::as_str).collect::<Vec<_>>(),
+            ["https://localhost:3000/", "http://localhost:3000/"]
+        );
+        assert_eq!(addresses("http://[::1]:3000").unwrap().len(), 1);
+        for invalid in [
+            "",
+            "ftp://example.com",
+            "https://user:password@example.com",
+            "https://example.com/subpath",
+            "https://example.com/#secret",
+        ] {
+            assert!(addresses(invalid).is_err());
+        }
+    }
+
+    #[test]
+    fn graphql_auth_errors_sign_out_even_with_partial_data() {
+        let response: Response<Value> = serde_json::from_value(
+            json!({"data":{},"errors":[{"message":"sign in","extensions":{"code":"UNAUTHENTICATED"}}]}),
+        )
+        .unwrap();
+        let error = decode(response).unwrap_err();
+        assert!(error.unauthorized);
+        assert_eq!(error.message, "sign in");
+        assert_eq!(format!("{:?}", Token("secret".into())), "[redacted]");
+    }
+}
+
+#[cfg(test)]
+mod transport_tests {
+    use super::*;
+    use crate::test_support::{self, run};
+
+    #[test]
+    fn provider_artwork_does_not_receive_server_credentials() {
+        let api = Api::new(Url::parse("https://server.example/").unwrap(), Some(Token("test-session".into()))).unwrap();
+        let external = api.image("https://image.tmdb.org/t/p/w500/poster.jpg").unwrap().build().unwrap();
+        assert_eq!(external.url().host_str(), Some("image.tmdb.org"));
+        assert!(!external.headers().contains_key(reqwest::header::AUTHORIZATION));
+        let local = api.image("/api/images/poster").unwrap().build().unwrap();
+        assert_eq!(local.headers()[reqwest::header::AUTHORIZATION], "Bearer test-session");
+        assert!(api.image("file:///tmp/poster").is_err());
+        assert!(api.media("https://image.tmdb.org/t/p/w500/poster.jpg").is_err());
+    }
+
+    #[test]
+    fn http_uses_bearer_auth_and_detects_a_revoked_session() {
+        run(async {
+            let (origin, server) = test_support::http(1, |_| test_support::connection(false)).await;
+            let api = Api::new(origin, Some(Token("test-session".into()))).unwrap();
+            assert!(matches!(api.connection().await, Err(Error { unauthorized: true, .. })));
+            let requests = server.await.unwrap();
+            assert!(requests[0].0.to_lowercase().contains("authorization: bearer test-session"));
+            assert_eq!(requests[0].1["operationName"], "Connection");
+            assert!(api.media("https://elsewhere.example/api/media/1/stream").is_err());
+        });
+    }
+
+    #[test]
+    #[allow(clippy::result_large_err)]
+    fn websocket_authenticates_reconnects_and_delivers_events() {
+        run(async {
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let origin = Url::parse(&format!("http://{}/", listener.local_addr().unwrap())).unwrap();
+            let server = tokio::spawn(async move {
+                for round in 0..2 {
+                    let (stream, _) = listener.accept().await.unwrap();
+                    let mut socket = tokio_tungstenite::accept_hdr_async(stream, |request: &tokio_tungstenite::tungstenite::handshake::server::Request, mut response: tokio_tungstenite::tungstenite::handshake::server::Response| {
+                        assert_eq!(request.headers()["Sec-WebSocket-Protocol"], "graphql-transport-ws");
+                        response.headers_mut().insert("Sec-WebSocket-Protocol", "graphql-transport-ws".parse().unwrap());
+                        Ok(response)
+                    }).await.unwrap();
+                    let init: Value =
+                        serde_json::from_str(socket.next().await.unwrap().unwrap().to_text().unwrap()).unwrap();
+                    assert_eq!(init["payload"]["token"], "test-session");
+                    socket.send(Frame::Text(json!({"type":"connection_ack"}).to_string().into())).await.unwrap();
+                    let subscribe: Value =
+                        serde_json::from_str(socket.next().await.unwrap().unwrap().to_text().unwrap()).unwrap();
+                    assert_eq!(subscribe["payload"]["operationName"], "Events");
+                    if round == 0 {
+                        socket.send(Frame::Text(json!({"id":"events","type":"next","payload":{"data":{"events":{"__typename":"ConfigChanged"}}}}).to_string().into())).await.unwrap();
+                        socket
+                            .send(Frame::Text(json!({"type":"ping","payload":{"test":true}}).to_string().into()))
+                            .await
+                            .unwrap();
+                        let pong: Value =
+                            serde_json::from_str(socket.next().await.unwrap().unwrap().to_text().unwrap()).unwrap();
+                        assert_eq!(pong, json!({"type":"pong","payload":{"test":true}}));
+                        socket.close(None).await.unwrap();
+                    } else {
+                        socket.send(Frame::Text(json!({"id":"events","type":"error","payload":[{"message":"sign in","extensions":{"code":"UNAUTHENTICATED"}}]}).to_string().into())).await.unwrap();
+                    }
+                }
+            });
+            let events = std::sync::Mutex::new(vec![]);
+            let api = Api::new(origin, Some(Token("test-session".into()))).unwrap();
+            timeout(Duration::from_secs(8), api.events(|event| events.lock().unwrap().push(event))).await.unwrap();
+            server.await.unwrap();
+            let events = events.into_inner().unwrap();
+            assert_eq!(events.iter().filter(|e| matches!(e, Live::Connected)).count(), 2);
+            assert_eq!(events.iter().filter(|e| matches!(e, Live::Event(_))).count(), 1);
+            assert!(matches!(events.last(), Some(Live::Unauthorized)));
+        });
+    }
+}

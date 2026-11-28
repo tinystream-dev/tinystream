@@ -1572,7 +1572,7 @@ fn filename(r: &Row) -> String {
     format!("{}.{ext}", name.split_whitespace().collect::<Vec<_>>().join(" "))
 }
 
-fn content_disposition(kind: &str, name: &str) -> String {
+pub(super) fn content_disposition(kind: &str, name: &str) -> String {
     let ascii: String = name.chars().map(|c| if c.is_ascii() && c != '"' && c != '\\' { c } else { '_' }).collect();
     let mut encoded = String::new();
 

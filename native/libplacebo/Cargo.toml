@@ -1,0 +1,14 @@
+[package]
+name = "libplacebo-src"
+# The version of libplacebo it builds.
+version = "7.360.1"
+edition = "2024"
+description = "A static libplacebo with only its OpenGL backend, for mpv"
+license = "AGPL-3.0-or-later"
+authors = ["Phrolova <me@phrolova.moe>"]
+repository = "https://github.com/phrolova/tinystream"
+publish = false
+links = "placebo"
+
+[build-dependencies]
+native-support = { path = "../support" }

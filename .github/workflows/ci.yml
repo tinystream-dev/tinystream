@@ -9,6 +9,7 @@ on:
       - '.github/ISSUE_TEMPLATE/**'
     branches: [main]
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
     paths-ignore:
       - '**.md'
       - '.agents/**'
@@ -26,7 +27,7 @@ env:
   CARGO_PROFILE_DEV_DEBUG: "0"
 
 jobs:
-  # The server (Rust), web UI and app build independently: each only when its own files change. The
+  # The server (Rust), web UI and apps build independently: each only when its own files change. The
   # server embeds the web UI, so its jobs take the UI from the web job, but a UI change alone doesn't
   # rebuild the server.
   changes:
@@ -36,6 +37,7 @@ jobs:
       server: ${{ steps.filter.outputs.server }}
       web: ${{ steps.filter.outputs.web }}
       mobile: ${{ steps.filter.outputs.mobile }}
+      desktop: ${{ steps.filter.outputs.desktop }}
     steps:
       - uses: actions/checkout@v4
       - uses: dorny/paths-filter@v3
@@ -46,6 +48,7 @@ jobs:
             server:
               - '**'
               - '!mobile/**'
+              - '!desktop/**'
               - '!web/**'
               - '!packages/**/!(schema.graphql)'
               - '!package.json'
@@ -53,13 +56,23 @@ jobs:
               - '!bunfig.toml'
               - '!.github/actions/android/**'
             web:
-              - '{web,packages}/**'
+              - '{web,packages,subtitles}/**'
               - '{package.json,bun.lock,bunfig.toml}'
               - '.github/workflows/ci.yml'
             mobile:
               - '{mobile,packages}/**'
               - '{package.json,bun.lock,bunfig.toml}'
               - '.github/actions/android/**'
+              - '.github/workflows/ci.yml'
+            desktop:
+              - 'desktop/**'
+              - 'native/**'
+              - '.github/actions/native-deps/**'
+              - '{theme,squircle,subtitles}/**'
+              - 'assets/fonts/**'
+              - 'packages/shared/{schema.graphql,fragments.graphql,src/logo.ts}'
+              - '{rust-toolchain.toml,rustfmt.toml}'
+              - '.github/actions/rust/**'
               - '.github/workflows/ci.yml'
 
   fmt:
@@ -96,9 +109,10 @@ jobs:
       # The workspace is installed from the root; web only needs its own packages.
       - run: bun install --frozen-lockfile --filter tinystream-web --filter @tinystream/shared
         working-directory: .
-      - run: cargo test -p tinystream-subtitles --locked
+      - run: cargo test -p tinystream-subtitle-renderer -p tinystream-subtitles --locked
         working-directory: .
       - run: bun run typecheck
+      - run: bun run test
       - run: bun run build
       - uses: actions/upload-artifact@v4
         with:
@@ -145,6 +159,55 @@ jobs:
           cd android && ./gradlew assembleDebug -PreactNativeArchitectures=arm64-v8a
       - name: Check 16 KB alignment
         run: "$ANDROID_HOME/build-tools/36.0.0/zipalign -c -P 16 -v 4 mobile/android/app/build/outputs/apk/debug/app-debug.apk > /dev/null"
+
+  desktop:
+    name: Desktop app
+    needs: changes
+    if: needs.changes.outputs.desktop == 'true' && !github.event.pull_request.draft
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/native-deps
+        with:
+          cache: native-desktop
+      # winit and wgpu load Wayland, X11 and Vulkan at runtime; the headers are for x11-dl's build
+      # script and the tests. libmpv links EGL, PipeWire and ALSA, libdisplay-info reads hwdata's
+      # PNP IDs, and the mpv tests render on Mesa's software EGL.
+      - name: System packages
+        run: |
+          sudo apt-get install -y --no-install-recommends pkg-config libwayland-dev libxkbcommon-dev libx11-dev libvulkan-dev \
+            libegl-dev libpipewire-0.3-dev libasound2-dev hwdata libegl-mesa0 libgl1-mesa-dri
+      - uses: ./.github/actions/rust
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - run: cargo --locked fmt --check
+      - run: cargo clippy --locked --all-targets
+      - run: cargo test --locked
+      - run: cargo build --locked
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-about
+      - name: Package desktop test build
+        working-directory: .
+        run: |
+          name=tinystream-desktop-linux-x86_64-test
+          mkdir -p "dist/$name"
+          cp desktop/target/debug/tinystream-desktop LICENSE desktop/docs/player-validation.md "dist/$name/"
+          licenses/collect.sh .native x86_64-unknown-linux-gnu desktop > "dist/$name/THIRD_PARTY_LICENSES"
+          printf 'Commit: %s\nProfile: debug (unoptimized)\n' "$GITHUB_SHA" > "dist/$name/BUILD.txt"
+          tar -C dist -czf "dist/$name.tar.gz" "$name"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-linux-x86_64-test-${{ github.sha }}
+          path: dist/tinystream-desktop-linux-x86_64-test.tar.gz
+          retention-days: 14
 
   # One job for the server: the feature sets share the build's dependencies, native libraries and
   # cache, so checking each alone after it costs little more than the server itself.

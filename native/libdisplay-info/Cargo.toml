@@ -1,0 +1,14 @@
+[package]
+name = "libdisplay-info-src"
+# The version of libdisplay-info it builds.
+version = "0.3.0"
+edition = "2024"
+description = "A static libdisplay-info, which mpv's DRM support needs"
+license = "AGPL-3.0-or-later"
+authors = ["Phrolova <me@phrolova.moe>"]
+repository = "https://github.com/phrolova/tinystream"
+publish = false
+links = "display-info"
+
+[build-dependencies]
+native-support = { path = "../support" }

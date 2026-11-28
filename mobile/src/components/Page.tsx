@@ -26,6 +26,7 @@ import { haptic } from '../../modules/haptics'
 import { Glass, ScreenBlurArea } from '../effects/Glass'
 import { withAlpha } from '../theme/materials'
 import { useTheme } from '../theme/ThemeProvider'
+import { useMusicSpace } from '../music/context'
 import { useTabBarSpace } from './TabBar'
 import { Spinner } from './ui'
 
@@ -76,7 +77,7 @@ export function Page<T>(props: ScrollPage | ListPage<T>) {
   const { title, large = true, hero, right, header, onRefresh, inset = 20, pinned, pinnedHeight = 0, footer } = props
   const insets = useSafeAreaInsets()
   const navigation = useNavigation()
-  const bottom = useTabBarSpace()
+  const bottom = useTabBarSpace() + useMusicSpace()
   const y = useSharedValue(0)
   const [collapse, setCollapse] = useState(hero ? 240 : 48)
   const own = useRef<GestureScrollView & GestureFlatList<T>>(null)

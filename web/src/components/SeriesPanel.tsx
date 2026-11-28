@@ -2,14 +2,14 @@
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
-import { CalendarClock, CircleAlert, EllipsisVertical, RefreshCw, RotateCcw, Search, SlidersHorizontal, Trash2 } from 'lucide-react'
+import { CalendarClock, CircleAlert, Ellipsis, RefreshCw, RotateCcw, Search, SlidersHorizontal, Trash2 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { graphql } from '../gql'
 import type { SeedingInput } from '../gql/graphql'
 import { type Item, type Monitor, type Seeding, type Series, request, settingsQuery } from '../lib/api'
-import { airs, countdown, episodeCode, relative, useNow } from '../lib/downloads'
+import { airs, countdown, episodeCode, monitorLabels, relative, useNow } from '../lib/downloads'
 import { useMe } from '../lib/hooks'
-import { DeleteItems, MonitorPicker, ReleaseDialog, useDeleteDownloaded, useLookForAgain } from './downloads'
+import { DeleteItems, ReleaseDialog, useDeleteDownloaded, useLookForAgain } from './downloads'
 import { ask, toastError } from './feedback'
 import { Squircle } from './Squircle'
 import { Button, Dialog, Field, IconButton, Input, MenuItem, Panel, Popover, Segmented, Select } from './ui'
@@ -102,8 +102,8 @@ export function NextEpisode({ series }: { series: Pick<Series, 'next' | 'status'
   if (!n?.airAt) return null
   const soon = n.airAt * 1000 - now < 86400 * 1000
   return (
-    <p className="mt-4 flex items-center gap-2 text-sm text-ink-2">
-      <CalendarClock className="size-4 text-ink-3" />
+    <p className="flex items-start gap-2 text-sm text-ink-2">
+      <CalendarClock className="mt-0.5 size-4 shrink-0 text-ink-3" />
       <span>
         <span className="text-ink">{n.name ? `${episodeCode(n.season, n.episode)} “${n.name}”` : `Episode ${n.episode}`}</span> airs{' '}
         {airs(n.airAt, now).replace(/^Today/, 'today').replace(/^Tomorrow/, 'tomorrow')}
@@ -113,7 +113,7 @@ export function NextEpisode({ series }: { series: Pick<Series, 'next' | 'status'
   )
 }
 
-/** An admin's controls for downloading a show automatically. */
+/** An admin's controls for downloading a show automatically, as a card beside the episodes. */
 export function SeriesPanel({ item, series, season }: { item: Item; series: Series | null; season: number | null }) {
   const qc = useQueryClient()
   const [settings, setSettings] = useState(false)
@@ -139,17 +139,40 @@ export function SeriesPanel({ item, series, season }: { item: Item; series: Seri
   const unmatched = !item.providerId
   const monitor = series?.monitor ?? 'NONE'
   const c = series?.counts
+  const status = !c || c.total === 0
+    ? null
+    : c.grabbed > 0
+      ? { tone: 'bg-info', text: `${c.grabbed} downloading` }
+      : c.missing > 0
+        ? { tone: 'bg-danger', text: `${c.missing} missing` }
+        : c.wanted > 0
+          ? { tone: 'bg-warn', text: `${c.wanted} to find` }
+          : c.have >= c.total
+            ? { tone: 'bg-ok', text: `All ${c.total} episodes are in the library` }
+            : { tone: 'bg-ink-3', text: `${c.have} of ${c.total} in the library` }
+  const more = c
+    ? [
+        (c.grabbed > 0 || c.missing > 0 || c.wanted > 0) && c.have < c.total && `${c.have} of ${c.total} in the library`,
+        c.grabbed > 0 && c.wanted > 0 && `${c.wanted} to find`,
+        c.upcoming > 0 && `${c.upcoming} not aired yet`,
+        c.skipped > 0 && `${c.skipped} skipped`,
+      ].filter(Boolean)
+    : []
 
   return (
-    <Squircle radius={18} edge className="mt-8 max-w-3xl bg-raised/80 p-4 backdrop-blur-xl">
-      <div className="flex flex-wrap items-center gap-3">
-        <div className="min-w-0 flex-1">
-          <p className="text-sm font-medium">Download automatically</p>
-          {unmatched && <p className="text-xs text-ink-3">Match this show to AniList or TMDB first.</p>}
+    <Squircle radius={16} edge className="bg-raised p-4">
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-sm font-medium">Downloads</p>
+        <div className="w-40">
+          <Select
+            value={monitor}
+            options={(['NONE', 'FUTURE', 'MISSING'] as const).map((m) => ({ value: m, label: monitorLabels[m].label }))}
+            onChange={(m) => manage.mutate(m)}
+          />
         </div>
-        <MonitorPicker value={monitor} onChange={(m) => manage.mutate(m)} />
       </div>
-      {manage.error && <p className="mt-2 text-xs text-danger">{(manage.error as Error).message}</p>}
+      {unmatched && <p className="mt-3 text-xs text-ink-3">Match this show to AniList or TMDB first.</p>}
+      {manage.error && <p className="mt-3 text-xs text-danger">{(manage.error as Error).message}</p>}
 
       {series && (
         <>
@@ -159,59 +182,54 @@ export function SeriesPanel({ item, series, season }: { item: Item; series: Seri
               {series.library} isn't managed; can't import.
             </p>
           )}
-          <div className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-2 border-t border-line pt-3 text-xs text-ink-3 tabular">
-            {c && c.total > 0 && (
-              <span>
-                <span className="text-ink-2">{c.have}</span> of {c.total} in library
-              </span>
-            )}
-            {c && c.grabbed > 0 && <span className="text-info">{c.grabbed} downloading</span>}
-            {c && c.wanted > 0 && <span className="text-warn">{c.wanted} to find</span>}
-            {c && c.missing > 0 && <span className="text-danger">{c.missing} missing</span>}
-            {c && c.upcoming > 0 && <span>{c.upcoming} not aired yet</span>}
-            {c && c.skipped > 0 && <span>{c.skipped} skipped</span>}
-            <span>{series.effectiveProfile}</span>
-            {series.scheduleAt && <span>schedule {relative(series.scheduleAt)}</span>}
-            <span className="flex-1" />
-            <IconButton label="Refresh the schedule" onClick={() => schedule.mutate()} disabled={schedule.isPending}>
-              <RefreshCw className={`size-4 ${schedule.isPending ? 'animate-spin' : ''}`} />
+          {status && (
+            <p className="mt-3 flex items-center gap-2.5 text-[13px] text-ink-2 tabular">
+              <span className={`size-1.5 shrink-0 rounded-full ${status.tone}`} />
+              {status.text}
+            </p>
+          )}
+          {more.length > 0 && <p className="mt-1 pl-4 text-xs text-ink-3 tabular">{more.join(', ')}</p>}
+          <div className="mt-3 flex items-center gap-1 border-t border-line pt-2.5 text-[13px] text-ink-3">
+            <span className="min-w-0 flex-1 truncate">{series.effectiveProfile}</span>
+            <IconButton label="Search for releases" onClick={() => setSearching(true)} disabled={season === null}>
+              <Search className="size-4" />
             </IconButton>
-            <Button size="sm" onClick={() => setSearching(true)} disabled={season === null}>
-              <Search className="size-3.5" /> Search
-            </Button>
-            <Button size="sm" onClick={() => setSettings(true)}>
-              <SlidersHorizontal className="size-3.5" /> Settings
-            </Button>
-            {(canDelete || (c && c.skipped > 0)) && (
-              <Popover
-                portal
-                trigger={({ toggle }) => (
-                  <IconButton label="More" onClick={toggle}>
-                    <EllipsisVertical className="size-4" />
-                  </IconButton>
-                )}
-              >
-                {(close) => (
-                  <Panel className="w-64 p-1.5">
-                    {c && c.skipped > 0 && (
-                      <MenuItem onClick={() => (close(), lookAgain.mutate({ seriesId: series.id }))}>
-                        <span className="flex items-center gap-2">
-                          <RotateCcw className="size-3.5 shrink-0" /> Look for skipped episodes again
-                        </span>
-                      </MenuItem>
-                    )}
-                    {c && c.skipped > 0 && canDelete && <div className="my-1 h-px bg-line" />}
-                    {canDelete && (
-                      <DeleteItems
-                        target={{ seriesId: series.id, show: series.name, season }}
-                        onDelete={deleteDownloaded}
-                        close={close}
-                      />
-                    )}
-                  </Panel>
-                )}
-              </Popover>
-            )}
+            <IconButton label="Settings" onClick={() => setSettings(true)}>
+              <SlidersHorizontal className="size-4" />
+            </IconButton>
+            <Popover
+              portal
+              trigger={({ toggle }) => (
+                <IconButton label="More" onClick={toggle}>
+                  {schedule.isPending ? <RefreshCw className="size-4 animate-spin" /> : <Ellipsis className="size-4" />}
+                </IconButton>
+              )}
+            >
+              {(close) => (
+                <Panel className="w-64 p-1.5">
+                  <MenuItem onClick={() => (close(), schedule.mutate())} hint={series.scheduleAt ? relative(series.scheduleAt) : undefined}>
+                    <span className="flex items-center gap-2">
+                      <RefreshCw className="size-3.5 shrink-0" /> Refresh the schedule
+                    </span>
+                  </MenuItem>
+                  {c && c.skipped > 0 && (
+                    <MenuItem onClick={() => (close(), lookAgain.mutate({ seriesId: series.id }))}>
+                      <span className="flex items-center gap-2">
+                        <RotateCcw className="size-3.5 shrink-0" /> Look for skipped episodes again
+                      </span>
+                    </MenuItem>
+                  )}
+                  {canDelete && <div className="my-1 h-px bg-line" />}
+                  {canDelete && (
+                    <DeleteItems
+                      target={{ seriesId: series.id, show: series.name, season }}
+                      onDelete={deleteDownloaded}
+                      close={close}
+                    />
+                  )}
+                </Panel>
+              )}
+            </Popover>
           </div>
           {schedule.error && <p className="mt-2 text-xs text-danger">{(schedule.error as Error).message}</p>}
         </>

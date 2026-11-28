@@ -7,7 +7,7 @@ import { graphql } from '../gql'
 import { request } from '../lib/api'
 import type { TitleArtwork } from '../gql/graphql'
 import { toastError } from './feedback'
-import { Button, IconButton } from './ui'
+import { IconButton } from './ui'
 
 const SetTitleArtwork = graphql(`
   mutation SetTitleArtwork($id: Int!, $kind: TitleArtwork!, $image: Upload) {
@@ -25,14 +25,14 @@ const SetVideoArtwork = graphql(`
   }
 `)
 
-type Target = { titleId: number; kind: TitleArtwork } | { videoId: number }
+export type Target = { titleId: number; kind: TitleArtwork } | { videoId: number }
 
-export function ArtworkEditor({ target, custom, label, compact = false }: {
-  target: Target
-  custom: boolean
-  label: string
-  compact?: boolean
-}) {
+/**
+ * Changes or resets a picture: `pick` opens the file chooser and `input` is
+ * the hidden field it uses, which has to stay rendered until a file is chosen
+ * (so not inside a menu that closes on click).
+ */
+export function useArtwork(target: Target) {
   const input = useRef<HTMLInputElement>(null)
   const qc = useQueryClient()
   const save = useMutation({
@@ -47,28 +47,11 @@ export function ArtworkEditor({ target, custom, label, compact = false }: {
     },
     onError: toastError,
   })
-  return (
-    <div className="flex items-center gap-1">
-      {compact ? (
-        <IconButton label={`Change ${label}`} disabled={save.isPending} onClick={() => input.current?.click()}>
-          <ImageUp className="size-4.5" />
-        </IconButton>
-      ) : (
-        <Button disabled={save.isPending} onClick={() => input.current?.click()}>
-          <ImageUp className="size-4" /> {save.isPending ? 'Saving…' : `Change ${label}`}
-        </Button>
-      )}
-      {custom && (
-        compact ? (
-          <IconButton label={`Reset ${label}`} disabled={save.isPending} onClick={() => save.mutate(null)}>
-            <RotateCcw className="size-4" />
-          </IconButton>
-        ) : (
-          <Button variant="plain" disabled={save.isPending} onClick={() => save.mutate(null)}>
-            Reset {label}
-          </Button>
-        )
-      )}
+  return {
+    pending: save.isPending,
+    pick: () => input.current?.click(),
+    reset: () => save.mutate(null),
+    input: (
       <input ref={input} type="file" accept="image/png,image/jpeg,image/webp,image/gif" hidden onChange={(e) => {
         const file = e.target.files?.[0]
         e.target.value = ''
@@ -79,6 +62,23 @@ export function ArtworkEditor({ target, custom, label, compact = false }: {
         }
         save.mutate(file)
       }} />
+    ),
+  }
+}
+
+export function ArtworkEditor({ target, custom, label }: { target: Target; custom: boolean; label: string }) {
+  const art = useArtwork(target)
+  return (
+    <div className="flex items-center gap-1">
+      <IconButton label={`Change ${label}`} disabled={art.pending} onClick={art.pick}>
+        <ImageUp className="size-4.5" />
+      </IconButton>
+      {custom && (
+        <IconButton label={`Reset ${label}`} disabled={art.pending} onClick={art.reset}>
+          <RotateCcw className="size-4" />
+        </IconButton>
+      )}
+      {art.input}
     </div>
   )
 }

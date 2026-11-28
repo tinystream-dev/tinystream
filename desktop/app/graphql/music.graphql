@@ -1,0 +1,25 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+query MusicAlbums($library: String, $sort: AlbumSort!) { albums(library: $library, sort: $sort, limit: 5000) { ...AlbumCard } }
+query MusicArtists($library: String) { artists(library: $library) { ...ArtistCard } }
+query MusicSongs($library: String, $query: String!) { songs(library: $library, query: $query, limit: 300) { ...MusicTrack } }
+query MusicPlaylists { playlists { ...PlaylistCard } }
+query MusicAlbum($id: Int!) { album(id: $id) { ...AlbumCard coverTint releaseDate originalDate genres releaseTypes labels discTitles { disc title } tracks { ...MusicTrack } } }
+query MusicMore($id: Int!) { artist(id: $id) { albums { ...AlbumCard } } }
+query MusicArtist($id: Int!) { artist(id: $id) { ...ArtistCard coverTint albums { ...AlbumCard releaseTypes } appearsOn { ...AlbumCard } tracks: topTracks(count: 200) { ...MusicTrack } } }
+query MusicPlaylist($id: Int!) { playlist(id: $id) { ...PlaylistCard tracks { ...MusicTrack } } }
+query MusicQueue { playQueue { tracks { ...MusicTrack } current position shuffled repeat changedBy updatedAt } }
+query MusicLyrics($trackId: Int!) { lyrics(trackId: $trackId) { synced lines { start text } } }
+mutation MusicSave($input: QueueInput!) { savePlayQueue(input: $input, client: "Desktop") { updatedAt } }
+mutation MusicPlaying($trackId: Int, $position: Float!, $paused: Boolean!) { nowPlaying(trackId: $trackId, position: $position, paused: $paused, client: "Desktop") }
+mutation MusicPlayed($trackId: Int!, $at: Int) { played(trackId: $trackId, at: $at) }
+mutation MusicMeasure($trackId: Int!) { measureLoudness(trackId: $trackId) { ...MusicTrack } }
+mutation MusicStar($kind: MusicKind!, $id: Int!, $starred: Boolean!) { star(kind: $kind, id: $id, starred: $starred) }
+mutation MusicCreatePlaylist($name: String!, $tracks: [Int!]!) { createPlaylist(name: $name, tracks: $tracks) { ...PlaylistCard } }
+mutation MusicAddToPlaylist($id: Int!, $tracks: [Int!]!) { addToPlaylist(id: $id, tracks: $tracks) { id name } }
+query MusicPlaylistNames { playlists { id name mine } }
+mutation MusicUpdatePlaylist($id: Int!, $input: PlaylistInput!) { updatePlaylist(id: $id, input: $input) { ...PlaylistCard } }
+mutation MusicDeletePlaylist($id: Int!) { deletePlaylist(id: $id) }
+mutation MusicStartRoom($input: NewListenRoom!) { startListenRoom(input: $input) { code } }
+query MusicRoom($code: String!) { listenRoom(code: $code) { code hostName signedIn isHost canShare canInvite tracks { ...MusicTrack } } }
+query MusicPeople { users { id username } }
+query MusicTrack($id: Int!) { track(id: $id) { ...MusicTrack } }

@@ -43,6 +43,8 @@ pub struct Permissions {
     pub clip_storage: u32,
 
     pub clip_links: bool,
+
+    pub offline_downloads: bool,
 }
 
 impl Default for Permissions {
@@ -64,6 +66,7 @@ impl Default for Permissions {
             clip_limit: 50,
             clip_storage: 2048,
             clip_links: false,
+            offline_downloads: false,
         }
     }
 }
@@ -87,6 +90,7 @@ impl Permissions {
             clip_limit: 0,
             clip_storage: 0,
             clip_links: true,
+            offline_downloads: true,
         }
     }
 
@@ -144,6 +148,8 @@ pub struct Overrides {
     pub clip_storage: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub clip_links: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub offline_downloads: Option<bool>,
 }
 
 impl Overrides {
@@ -173,6 +179,7 @@ impl Overrides {
             clip_limit: self.clip_limit.unwrap_or(d.clip_limit),
             clip_storage: self.clip_storage.unwrap_or(d.clip_storage),
             clip_links: self.clip_links.unwrap_or(d.clip_links),
+            offline_downloads: self.offline_downloads.unwrap_or(d.offline_downloads),
         }
     }
 }

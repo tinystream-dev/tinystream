@@ -82,6 +82,12 @@ fn mtime(path: &Path) -> i64 {
         .unwrap_or(0)
 }
 
+fn with_sidecars(info: &MediaInfo, path: &Path) -> Arc<MediaInfo> {
+    let mut info = info.clone();
+    info.subtitles.extend(subs::sidecars(path));
+    Arc::new(info)
+}
+
 impl MediaService {
     pub fn new(cache_dir: PathBuf) -> Self {
         unsafe { ff::ffi::av_log_set_level(ff::ffi::AV_LOG_ERROR as i32) };
@@ -100,12 +106,13 @@ impl MediaService {
     pub async fn probe(&self, path: &Path) -> anyhow::Result<Arc<MediaInfo>> {
         let key = (path.to_path_buf(), mtime(path));
 
-        if let Some(info) = self.probes.lock().unwrap().get(&key) {
-            return Ok(info.clone());
+        let cached = self.probes.lock().unwrap().get(&key).cloned();
+        if let Some(info) = cached {
+            return Ok(with_sidecars(&info, path));
         }
 
         let p = path.to_path_buf();
-        let info = Arc::new(tokio::task::spawn_blocking(move || probe::probe(&p)).await??);
+        let info = Arc::new(tokio::task::spawn_blocking(move || probe::embedded(&p)).await??);
         let mut probes = self.probes.lock().unwrap();
 
         if probes.len() > 512 {
@@ -113,7 +120,7 @@ impl MediaService {
         }
 
         probes.insert(key, info.clone());
-        Ok(info)
+        Ok(with_sidecars(&info, path))
     }
 
     pub async fn thumbnail(&self, path: &Path) -> anyhow::Result<PathBuf> {
@@ -217,5 +224,38 @@ impl MediaService {
 
         self.extractions.lock().unwrap().remove(path);
         result.map_err(anyhow::Error::msg)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn cached_probes_refresh_external_subtitles() {
+        let dir = std::env::temp_dir().join(format!("tinystream-probe-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let video = dir.join("Movie.mkv");
+        let service = MediaService::new(dir.clone());
+        service.probes.lock().unwrap().insert(
+            (video.clone(), mtime(&video)),
+            Arc::new(MediaInfo {
+                duration: None,
+                video: None,
+                audio: vec![],
+                subtitles: vec![],
+                fonts: vec![],
+                chapters: vec![],
+            }),
+        );
+        assert!(service.probe(&video).await.unwrap().subtitles.is_empty());
+        let sub = dir.join("Movie.en.srt");
+        std::fs::write(&sub, "English").unwrap();
+        assert_eq!(service.probe(&video).await.unwrap().subtitles.len(), 1);
+        std::fs::rename(&sub, dir.join("Movie.de.srt")).unwrap();
+        assert_eq!(service.probe(&video).await.unwrap().subtitles[0].language.as_deref(), Some("de"));
+        std::fs::remove_file(dir.join("Movie.de.srt")).unwrap();
+        assert!(service.probe(&video).await.unwrap().subtitles.is_empty());
+        std::fs::remove_dir_all(dir).unwrap();
     }
 }

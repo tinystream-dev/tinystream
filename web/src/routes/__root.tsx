@@ -17,6 +17,7 @@ import { useFavicon } from '../lib/logo'
 import { bootstrap } from '../lib/theme'
 import { followRemote, music, refreshFromServer, restore } from '../music/player'
 import { queryClient } from '../router'
+import { refreshLibrary } from '../lib/live'
 import appCss from '../styles.css?url'
 
 export const Route = createRootRoute({
@@ -117,7 +118,12 @@ function useLiveUpdates(enabled: boolean) {
     if (!enabled) return
     const invalidate = (...keys: unknown[][]) => keys.forEach((queryKey) => void qc.invalidateQueries({ queryKey }))
     // Anything that arrived while disconnected.
-    const onConnected = () => refreshNotifications(qc)
+    let connected = false
+    const onConnected = () => {
+      if (connected) void qc.invalidateQueries()
+      connected = true
+      void refreshNotifications(qc)
+    }
     return subscribe(
       EventsSubscription,
       {},
@@ -125,7 +131,7 @@ function useLiveUpdates(enabled: boolean) {
         switch (e.__typename) {
           case 'LibraryChanged':
           case 'ScanFinished':
-            invalidate(['home'], ['libraries'], ['library', e.library], ['settings'], ['music'], ['books', 'library', e.library], ['books', 'home'], ['books', 'book'])
+            void refreshLibrary(qc, e.library)
             break
           case 'QueueChanged':
             // Another app moved the queue on; follow it unless we're the ones playing.

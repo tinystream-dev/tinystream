@@ -1,0 +1,102 @@
+name: Desktop app
+
+# The desktop app's tarball and AppImage. Releases call this from release.yml; manual runs upload the
+# same files as workflow artifacts, so testers can try a branch.
+on:
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  package:
+    name: Package x86_64-linux
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    concurrency:
+      group: desktop-${{ github.ref }}
+      cancel-in-progress: ${{ github.ref_type != 'tag' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/native-deps
+        with:
+          cache: native-desktop
+      - name: System packages
+        run: |
+          sudo apt-get install -y --no-install-recommends pkg-config libwayland-dev libxkbcommon-dev libx11-dev libvulkan-dev \
+            libegl-dev libpipewire-0.3-dev libasound2-dev hwdata librsvg2-bin desktop-file-utils appstream xdg-utils
+      - uses: ./.github/actions/rust
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop
+          key: release
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-about
+
+      - name: Version
+        id: version
+        run: |
+          version="$(sed -n 's/^version = "\(.*\)"/\1/p' desktop/Cargo.toml)"
+          if [ "$GITHUB_REF_TYPE" = tag ]; then
+            if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+              echo "desktop/Cargo.toml is $version, but the tag is $GITHUB_REF_NAME" >&2
+              exit 1
+            fi
+          else
+            version="$version-${GITHUB_SHA::7}"
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Build
+        working-directory: desktop
+        run: cargo build --release --locked
+
+      - name: Check linked libraries
+        run: |
+          desktop/packaging/check-libs.sh desktop/target/release/tinystream-desktop
+          ldd desktop/target/release/tinystream-desktop
+
+      - name: Package
+        run: |
+          licenses/collect.sh .native x86_64-unknown-linux-gnu desktop > "$RUNNER_TEMP/THIRD_PARTY_LICENSES"
+          desktop/packaging/package.sh desktop/target/release/tinystream-desktop "$RUNNER_TEMP/THIRD_PARTY_LICENSES" \
+            "${{ steps.version.outputs.version }}" dist
+
+      # What the release promises: install.sh puts the app in the menu and claims tinystream:// links.
+      - name: Check install.sh
+        run: |
+          name="tinystream-desktop-${{ steps.version.outputs.version }}-x86_64-linux"
+          home="$RUNNER_TEMP/home"
+          mkdir -p "$home" "$RUNNER_TEMP/tarball"
+          tar -C "$RUNNER_TEMP/tarball" -xzf "dist/$name.tar.gz"
+          export HOME="$home" XDG_DATA_HOME="$home/.local/share" XDG_CONFIG_HOME="$home/.config" XDG_CURRENT_DESKTOP=X-Generic
+          "$RUNNER_TEMP/tarball/$name/install.sh"
+          test -x "$home/.local/bin/tinystream-desktop"
+          test -f "$home/.local/share/icons/hicolor/256x256/apps/dev.tinystream.app.png"
+          handler="$(xdg-mime query default x-scheme-handler/tinystream)"
+          if [ "$handler" != dev.tinystream.app.desktop ]; then
+            echo "tinystream:// opens with '$handler', not the app" >&2
+            exit 1
+          fi
+          "$RUNNER_TEMP/tarball/$name/install.sh" --uninstall
+          if [ -n "$(find "$home/.local" -type f ! -name mimeinfo.cache)" ]; then
+            echo "--uninstall left files behind:" >&2
+            find "$home/.local" -type f >&2
+            exit 1
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tinystream-desktop-x86_64-linux
+          path: |
+            dist/*.tar.gz
+            dist/*.tar.gz.sha256
+            dist/*.AppImage
+            dist/*.AppImage.sha256

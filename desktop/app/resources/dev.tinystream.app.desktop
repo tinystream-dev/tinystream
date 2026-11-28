@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=tinystream
+Comment=Watch and listen together
+Exec=tinystream-desktop %U
+Icon=dev.tinystream.app
+Terminal=false
+Categories=AudioVideo;Player;
+MimeType=x-scheme-handler/tinystream;
+StartupWMClass=dev.tinystream.app
+DBusActivatable=false

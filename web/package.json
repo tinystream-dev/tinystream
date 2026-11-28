@@ -1,10 +1,11 @@
 {
   "name": "tinystream-web",
-  "version": "0.39.0",
+  "version": "0.40.0",
   "license": "AGPL-3.0-or-later",
   "private": true,
   "type": "module",
   "scripts": {
+    "test": "bun test tests",
     "dev": "bun run wasm && vite dev --port 5173",
     "build": "bun run wasm && vite build",
     "wasm": "bun scripts/wasm.ts",

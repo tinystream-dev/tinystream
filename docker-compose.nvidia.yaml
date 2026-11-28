@@ -1,0 +1,14 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Requires the NVIDIA Container Toolkit on the host.
+# docker compose -f docker-compose.yaml -f docker-compose.nvidia.yaml up -d
+services:
+  tinystream:
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu, video, compute]
+    environment:
+      NVIDIA_DRIVER_CAPABILITIES: compute,video,utility

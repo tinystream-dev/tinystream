@@ -9,6 +9,7 @@ import { graphql } from '../gql'
 import { useFollow } from '../nav'
 import { receive, refresh as refreshNotifications } from '../notifications'
 import { useMe } from '../queries'
+import { useMusic } from '../music/context'
 import { useApi } from '../session'
 import { toast } from './Feedback'
 
@@ -43,6 +44,8 @@ const EventsSubscription = graphql(`
           ...NotificationFields
         }
       }
+      ... on QueueChanged { by }
+      ... on PlaybackChanged { client trackId position paused }
       ... on ClipChanged {
         clipId
       }
@@ -52,6 +55,7 @@ const EventsSubscription = graphql(`
 
 export function LiveUpdates() {
   const api = useApi()
+  const music = useMusic()
   const qc = useQueryClient()
   const signedIn = !!useMe()
   // The latest, without subscribing again each time the app goes somewhere.
@@ -63,12 +67,18 @@ export function LiveUpdates() {
     if (!signedIn) return
     const invalidate = (...keys: unknown[][]) => keys.forEach((queryKey) => void qc.invalidateQueries({ queryKey }))
     // Anything that arrived while disconnected.
-    const onConnected = () => refreshNotifications(qc)
+    const onConnected = () => { refreshNotifications(qc); void music.refreshFromServer().catch(console.warn) }
     return api.subscribe(
       EventsSubscription,
       {},
       ({ events: e }) => {
         switch (e.__typename) {
+          case 'QueueChanged':
+            if (e.by !== 'Android') void music.refreshFromServer().catch(console.warn)
+            break
+          case 'PlaybackChanged':
+            if (e.client !== 'Android') void music.followRemote(e.client, e.trackId ?? null, e.position, e.paused).catch(console.warn)
+            break
           case 'LibraryChanged':
           case 'ScanFinished':
             invalidate(['home'], ['libraries'], ['library', e.library], ['settings'], ['music'], ['books', 'library', e.library], ['books', 'home'], ['books', 'book'])
@@ -124,7 +134,7 @@ export function LiveUpdates() {
       },
       onConnected,
     )
-  }, [api, qc, signedIn])
+  }, [api, qc, signedIn, music])
 
   return null
 }

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+import { MusicOverlay } from '../../src/music/NowPlaying'
 import { useQuery } from '@tanstack/react-query'
 import { House, Library, type LucideIcon, Music, Search, UserRound } from 'lucide-react-native'
 import { haptic } from '../../modules/haptics'
@@ -45,7 +46,7 @@ function useAttention() {
     refetchInterval: 30_000,
   })
   const pending = data?.requests?.filter((r) => r.state === 'PENDING').length ?? 0
-  const failing = data?.downloads?.filter((d) => d.state === 'FAILED' || d.importState === 'FAILED').length ?? 0
+  const failing = data?.downloads?.filter((d) => d.state === 'FAILED' || d.importState === 'FAILED' || d.importState === 'PARTIAL').length ?? 0
   return (inbox?.unread ?? 0) + pending + failing
 }
 
@@ -73,6 +74,7 @@ export default function TabsLayout() {
           }}
         />
       </Tabs>
+      <MusicOverlay />
     </GlassScope>
   )
 }

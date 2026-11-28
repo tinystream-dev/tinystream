@@ -152,6 +152,7 @@ export type Expose =
 
 export type Hardware =
   | 'AUTO'
+  | 'NVENC'
   | 'SOFTWARE'
   | 'VAAPI';
 
@@ -164,6 +165,7 @@ export type ImportMode =
 export type ImportState =
   | 'DONE'
   | 'FAILED'
+  | 'PARTIAL'
   | 'PENDING'
   | 'SKIPPED';
 
@@ -338,6 +340,7 @@ export type PermissionOverridesInput = {
   libraries?: Array<string> | null | undefined;
   manageRequests?: boolean | null | undefined;
   manageShows?: boolean | null | undefined;
+  offlineDownloads?: boolean | null | undefined;
   request?: boolean | null | undefined;
   requestLimit?: number | null | undefined;
   shareLinks?: boolean | null | undefined;
@@ -357,6 +360,7 @@ export type PermissionsInput = {
   libraries: Array<string>;
   manageRequests: boolean;
   manageShows: boolean;
+  offlineDownloads: boolean;
   request: boolean;
   requestLimit: number;
   shareLinks: boolean;
@@ -584,6 +588,7 @@ export type TracksInput = {
 };
 
 export type TranscodeConfigInput = {
+  cudaDevice: number;
   hardware: Hardware;
   vaapiDevice: string;
 };
@@ -597,9 +602,9 @@ export type UserPatch = {
 
 export type PersonFragment = { id: number, username: string, avatar: string | null };
 
-export type PermissionsFieldsFragment = { allLibraries: boolean, libraries: Array<string>, request: boolean, autoApprove: boolean, requestLimit: number, manageRequests: boolean, manageShows: boolean, downloads: boolean, editMetadata: boolean, watchTogether: boolean, shareLinks: boolean, clip: boolean, clipMaxLength: number, clipLimit: number, clipStorage: number, clipLinks: boolean };
+export type PermissionsFieldsFragment = { allLibraries: boolean, libraries: Array<string>, request: boolean, autoApprove: boolean, requestLimit: number, manageRequests: boolean, manageShows: boolean, downloads: boolean, editMetadata: boolean, watchTogether: boolean, shareLinks: boolean, clip: boolean, clipMaxLength: number, clipLimit: number, clipStorage: number, clipLinks: boolean, offlineDownloads: boolean };
 
-export type ViewerFragment = { isAdmin: boolean, id: number, username: string, avatar: string | null, permissions: { allLibraries: boolean, libraries: Array<string>, request: boolean, autoApprove: boolean, requestLimit: number, manageRequests: boolean, manageShows: boolean, downloads: boolean, editMetadata: boolean, watchTogether: boolean, shareLinks: boolean, clip: boolean, clipMaxLength: number, clipLimit: number, clipStorage: number, clipLinks: boolean } };
+export type ViewerFragment = { isAdmin: boolean, id: number, username: string, avatar: string | null, permissions: { allLibraries: boolean, libraries: Array<string>, request: boolean, autoApprove: boolean, requestLimit: number, manageRequests: boolean, manageShows: boolean, downloads: boolean, editMetadata: boolean, watchTogether: boolean, shareLinks: boolean, clip: boolean, clipMaxLength: number, clipLimit: number, clipStorage: number, clipLinks: boolean, offlineDownloads: boolean } };
 
 export type CardFragment = { id: number, kind: TitleKind, library: string, name: string, year: number | null, poster: string | null, backdrop: string | null, watchedCount: number, videoCount: number, progress: number | null, freshCount: number };
 
@@ -609,7 +614,7 @@ export type TitleDetailFragment = { posterTint: string | null, backdropTint: str
 
 export type PlaybackFragment = { id: number, still: string, label: string | null, name: string | null, position: number | null, finished: boolean | null, title: { id: number, kind: TitleKind, name: string, backdrop: string | null }, previous: { id: number, label: string | null, name: string | null } | null, next: { id: number, still: string, label: string | null, name: string | null } | null, media: { duration: number | null, video: { index: number, codec: string, codecString: string | null, width: number, height: number, fps: number, bitDepth: number, hdr: boolean } | null, audio: Array<{ index: number, codec: string, codecString: string | null, channels: number, language: string | null, title: string | null, default: boolean }>, subtitles: Array<{ id: string, codec: string, language: string | null, title: string | null, default: boolean, forced: boolean, supported: boolean }>, fonts: Array<{ index: number, filename: string }>, chapters: Array<{ start: number, end: number, title: string | null }> } };
 
-export type TranscodingFieldsFragment = { vaapi: string | null, vaapiError: string | null, softwareH264: boolean };
+export type TranscodingFieldsFragment = { vaapi: string | null, vaapiError: string | null, nvenc: string | null, nvencError: string | null, softwareH264: boolean };
 
 export type DiscoverResultFieldsFragment = { category: MediaCategory, provider: Provider, id: string, name: string, romaji: string | null, year: number | null, poster: string | null, overview: string | null, library: string, titleId: number | null, seriesId: number | null, monitor: Monitor | null, requestState: RequestState | null, because: string | null };
 
@@ -633,7 +638,7 @@ export type ReleaseCandidateFieldsFragment = { batch: boolean, release: { title:
 
 export type CalendarEntryFieldsFragment = { seriesId: number, library: string, show: string, poster: string | null, backdrop: string | null, backdropTint: string | null, monitor: Monitor, season: number, episode: number, absolute: number | null, name: string | null, airAt: number, state: EpisodeState, title: { id: number } | null, video: { id: number } | null, download: { stage: TorrentStage, progress: number, downloadRate: number, eta: number | null } | null };
 
-export type SettingsFieldsFragment = { publicUrl: string | null, raw: string, error: string | null, network: { host: string, port: number, cors: Array<string>, trustedProxies: Array<string>, publicUrl: string | null }, log: { level: string }, scan: { watch: boolean, interval: string | null }, metadata: { tmdbApiKey: string | null, language: string }, transcode: { hardware: Hardware, vaapiDevice: string }, clips: { enabled: boolean, path: string | null, publicLinks: boolean, concurrency: number, maxStorage: number, fontsDir: string | null, defaultFont: string | null }, music: { onlineLyrics: boolean, lyricsUrl: string, analyzeLoudness: boolean }, downloads: { path: string | null, import: ImportMode, port: number, upnp: boolean, dht: boolean, maxActive: number, downloadLimit: number, uploadLimit: number, slowDownloadLimit: number, slowUploadLimit: number, slowFrom: string | null, slowTo: string | null, bindInterface: string | null, proxy: string | null, seeding: { ratio: number | null, time: string | null, idle: string | null, then: SeedAction } }, automation: { defaultMonitor: Monitor, rssInterval: string, renameSuggestions: boolean, retry: Array<{ every: string, until: string }> }, requests: { monitor: Monitor }, signIn: { style: SignInStyle, publicProfiles: boolean }, smtp: { host: string | null, port: number | null, security: SmtpSecurity, username: string | null, password: string | null, from: string | null }, tailscale: { detect: boolean, socket: string | null, expose: Expose, httpsPort: number }, tailscaleStatus: { state: TailscaleState, dnsName: string | null, ips: Array<string>, https: boolean, funnel: boolean, url: string | null, warning: string | null, serveError: string | null }, sources: Array<{ name: string, kind: SourceKind, url: string, feed: string | null, apiKey: string | null, categories: Array<number>, enabled: boolean, downloadPath: string | null, seeding: { ratio: number | null, time: string | null, idle: string | null, then: SeedAction } | null }>, profiles: Array<{ name: string, resolutions: Array<string>, groups: Array<string>, require: Array<string>, reject: Array<string>, minSize: number | null, maxSize: number | null, codecs: Array<string>, preferDualAudio: boolean, batches: boolean, minSeeders: number }>, libraries: Array<{ name: string, path: string, kind: LibraryKind, metadataProvider: Provider | null, managed: boolean, profile: string | null, downloadPath: string | null, resolvedPath: string | null, exists: boolean, error: string | null, titleCount: number, skippedCount: number }>, paths: { config: string, data: string, log: string } };
+export type SettingsFieldsFragment = { publicUrl: string | null, raw: string, error: string | null, network: { host: string, port: number, cors: Array<string>, trustedProxies: Array<string>, publicUrl: string | null }, log: { level: string }, scan: { watch: boolean, interval: string | null }, metadata: { tmdbApiKey: string | null, language: string }, transcode: { hardware: Hardware, vaapiDevice: string, cudaDevice: number }, clips: { enabled: boolean, path: string | null, publicLinks: boolean, concurrency: number, maxStorage: number, fontsDir: string | null, defaultFont: string | null }, music: { onlineLyrics: boolean, lyricsUrl: string, analyzeLoudness: boolean }, downloads: { path: string | null, import: ImportMode, port: number, upnp: boolean, dht: boolean, maxActive: number, downloadLimit: number, uploadLimit: number, slowDownloadLimit: number, slowUploadLimit: number, slowFrom: string | null, slowTo: string | null, bindInterface: string | null, proxy: string | null, seeding: { ratio: number | null, time: string | null, idle: string | null, then: SeedAction } }, automation: { defaultMonitor: Monitor, rssInterval: string, renameSuggestions: boolean, retry: Array<{ every: string, until: string }> }, requests: { monitor: Monitor }, signIn: { style: SignInStyle, publicProfiles: boolean }, smtp: { host: string | null, port: number | null, security: SmtpSecurity, username: string | null, password: string | null, from: string | null }, tailscale: { detect: boolean, socket: string | null, expose: Expose, httpsPort: number }, tailscaleStatus: { state: TailscaleState, dnsName: string | null, ips: Array<string>, https: boolean, funnel: boolean, url: string | null, warning: string | null, serveError: string | null }, sources: Array<{ name: string, kind: SourceKind, url: string, feed: string | null, apiKey: string | null, categories: Array<number>, enabled: boolean, downloadPath: string | null, seeding: { ratio: number | null, time: string | null, idle: string | null, then: SeedAction } | null }>, profiles: Array<{ name: string, resolutions: Array<string>, groups: Array<string>, require: Array<string>, reject: Array<string>, minSize: number | null, maxSize: number | null, codecs: Array<string>, preferDualAudio: boolean, batches: boolean, minSeeders: number }>, libraries: Array<{ name: string, path: string, kind: LibraryKind, metadataProvider: Provider | null, managed: boolean, profile: string | null, downloadPath: string | null, resolvedPath: string | null, exists: boolean, error: string | null, titleCount: number, skippedCount: number }>, paths: { config: string, data: string, log: string } };
 
 export type MusicTrackFragment = { id: number, title: string, artist: string, album: string, albumId: number | null, albumArtist: string | null, library: string, disc: number | null, number: number | null, year: number | null, duration: number, codec: string, suffix: string, lossless: boolean, bitrate: number | null, sampleRate: number | null, bitDepth: number | null, channels: number | null, size: number, file: string, flac: string, cover: string | null, coverTint: string | null, starred: boolean, rating: number | null, playCount: number, artists: Array<{ id: number, name: string }>, gains: { trackGain: number | null, trackPeak: number | null, albumGain: number | null, albumPeak: number | null, pending: boolean } };
 
@@ -1083,19 +1088,19 @@ export type DeleteAppPasswordMutation = { deleteAppPassword: boolean };
 export type UsersQueryVariables = Exact<{ [key: string]: never; }>;
 
 
-export type UsersQuery = { users: Array<{ createdAt: number, lastSeen: number | null, isAdmin: boolean, id: number, username: string, avatar: string | null, overrides: { allLibraries: boolean | null, libraries: Array<string> | null, request: boolean | null, autoApprove: boolean | null, requestLimit: number | null, manageRequests: boolean | null, manageShows: boolean | null, downloads: boolean | null, editMetadata: boolean | null, watchTogether: boolean | null, shareLinks: boolean | null, clip: boolean | null, clipMaxLength: number | null, clipLimit: number | null, clipStorage: number | null, clipLinks: boolean | null }, permissions: { allLibraries: boolean, libraries: Array<string>, request: boolean, autoApprove: boolean, requestLimit: number, manageRequests: boolean, manageShows: boolean, downloads: boolean, editMetadata: boolean, watchTogether: boolean, shareLinks: boolean, clip: boolean, clipMaxLength: number, clipLimit: number, clipStorage: number, clipLinks: boolean } }> };
+export type UsersQuery = { users: Array<{ createdAt: number, lastSeen: number | null, isAdmin: boolean, id: number, username: string, avatar: string | null, overrides: { allLibraries: boolean | null, libraries: Array<string> | null, request: boolean | null, autoApprove: boolean | null, requestLimit: number | null, manageRequests: boolean | null, manageShows: boolean | null, downloads: boolean | null, editMetadata: boolean | null, watchTogether: boolean | null, shareLinks: boolean | null, clip: boolean | null, clipMaxLength: number | null, clipLimit: number | null, clipStorage: number | null, clipLinks: boolean | null, offlineDownloads: boolean | null }, permissions: { allLibraries: boolean, libraries: Array<string>, request: boolean, autoApprove: boolean, requestLimit: number, manageRequests: boolean, manageShows: boolean, downloads: boolean, editMetadata: boolean, watchTogether: boolean, shareLinks: boolean, clip: boolean, clipMaxLength: number, clipLimit: number, clipStorage: number, clipLinks: boolean, offlineDownloads: boolean } }> };
 
 export type PermissionDefaultsQueryVariables = Exact<{ [key: string]: never; }>;
 
 
-export type PermissionDefaultsQuery = { permissionDefaults: { allLibraries: boolean, libraries: Array<string>, request: boolean, autoApprove: boolean, requestLimit: number, manageRequests: boolean, manageShows: boolean, downloads: boolean, editMetadata: boolean, watchTogether: boolean, shareLinks: boolean, clip: boolean, clipMaxLength: number, clipLimit: number, clipStorage: number, clipLinks: boolean } };
+export type PermissionDefaultsQuery = { permissionDefaults: { allLibraries: boolean, libraries: Array<string>, request: boolean, autoApprove: boolean, requestLimit: number, manageRequests: boolean, manageShows: boolean, downloads: boolean, editMetadata: boolean, watchTogether: boolean, shareLinks: boolean, clip: boolean, clipMaxLength: number, clipLimit: number, clipStorage: number, clipLinks: boolean, offlineDownloads: boolean } };
 
 export type SetPermissionDefaultsMutationVariables = Exact<{
   permissions: PermissionsInput;
 }>;
 
 
-export type SetPermissionDefaultsMutation = { setPermissionDefaults: { allLibraries: boolean, libraries: Array<string>, request: boolean, autoApprove: boolean, requestLimit: number, manageRequests: boolean, manageShows: boolean, downloads: boolean, editMetadata: boolean, watchTogether: boolean, shareLinks: boolean, clip: boolean, clipMaxLength: number, clipLimit: number, clipStorage: number, clipLinks: boolean } };
+export type SetPermissionDefaultsMutation = { setPermissionDefaults: { allLibraries: boolean, libraries: Array<string>, request: boolean, autoApprove: boolean, requestLimit: number, manageRequests: boolean, manageShows: boolean, downloads: boolean, editMetadata: boolean, watchTogether: boolean, shareLinks: boolean, clip: boolean, clipMaxLength: number, clipLimit: number, clipStorage: number, clipLinks: boolean, offlineDownloads: boolean } };
 
 export type UpdateUserMutationVariables = Exact<{
   id: number;
@@ -1257,7 +1262,7 @@ export type LibrariesQuery = { libraries: Array<{ name: string, kind: LibraryKin
 export type SettingsQueryVariables = Exact<{ [key: string]: never; }>;
 
 
-export type SettingsQuery = { settings: { publicUrl: string | null, raw: string, error: string | null, network: { host: string, port: number, cors: Array<string>, trustedProxies: Array<string>, publicUrl: string | null }, log: { level: string }, scan: { watch: boolean, interval: string | null }, metadata: { tmdbApiKey: string | null, language: string }, transcode: { hardware: Hardware, vaapiDevice: string }, clips: { enabled: boolean, path: string | null, publicLinks: boolean, concurrency: number, maxStorage: number, fontsDir: string | null, defaultFont: string | null }, music: { onlineLyrics: boolean, lyricsUrl: string, analyzeLoudness: boolean }, downloads: { path: string | null, import: ImportMode, port: number, upnp: boolean, dht: boolean, maxActive: number, downloadLimit: number, uploadLimit: number, slowDownloadLimit: number, slowUploadLimit: number, slowFrom: string | null, slowTo: string | null, bindInterface: string | null, proxy: string | null, seeding: { ratio: number | null, time: string | null, idle: string | null, then: SeedAction } }, automation: { defaultMonitor: Monitor, rssInterval: string, renameSuggestions: boolean, retry: Array<{ every: string, until: string }> }, requests: { monitor: Monitor }, signIn: { style: SignInStyle, publicProfiles: boolean }, smtp: { host: string | null, port: number | null, security: SmtpSecurity, username: string | null, password: string | null, from: string | null }, tailscale: { detect: boolean, socket: string | null, expose: Expose, httpsPort: number }, tailscaleStatus: { state: TailscaleState, dnsName: string | null, ips: Array<string>, https: boolean, funnel: boolean, url: string | null, warning: string | null, serveError: string | null }, sources: Array<{ name: string, kind: SourceKind, url: string, feed: string | null, apiKey: string | null, categories: Array<number>, enabled: boolean, downloadPath: string | null, seeding: { ratio: number | null, time: string | null, idle: string | null, then: SeedAction } | null }>, profiles: Array<{ name: string, resolutions: Array<string>, groups: Array<string>, require: Array<string>, reject: Array<string>, minSize: number | null, maxSize: number | null, codecs: Array<string>, preferDualAudio: boolean, batches: boolean, minSeeders: number }>, libraries: Array<{ name: string, path: string, kind: LibraryKind, metadataProvider: Provider | null, managed: boolean, profile: string | null, downloadPath: string | null, resolvedPath: string | null, exists: boolean, error: string | null, titleCount: number, skippedCount: number }>, paths: { config: string, data: string, log: string } }, server: { transcoding: { vaapi: string | null, vaapiError: string | null, softwareH264: boolean } } };
+export type SettingsQuery = { settings: { publicUrl: string | null, raw: string, error: string | null, network: { host: string, port: number, cors: Array<string>, trustedProxies: Array<string>, publicUrl: string | null }, log: { level: string }, scan: { watch: boolean, interval: string | null }, metadata: { tmdbApiKey: string | null, language: string }, transcode: { hardware: Hardware, vaapiDevice: string, cudaDevice: number }, clips: { enabled: boolean, path: string | null, publicLinks: boolean, concurrency: number, maxStorage: number, fontsDir: string | null, defaultFont: string | null }, music: { onlineLyrics: boolean, lyricsUrl: string, analyzeLoudness: boolean }, downloads: { path: string | null, import: ImportMode, port: number, upnp: boolean, dht: boolean, maxActive: number, downloadLimit: number, uploadLimit: number, slowDownloadLimit: number, slowUploadLimit: number, slowFrom: string | null, slowTo: string | null, bindInterface: string | null, proxy: string | null, seeding: { ratio: number | null, time: string | null, idle: string | null, then: SeedAction } }, automation: { defaultMonitor: Monitor, rssInterval: string, renameSuggestions: boolean, retry: Array<{ every: string, until: string }> }, requests: { monitor: Monitor }, signIn: { style: SignInStyle, publicProfiles: boolean }, smtp: { host: string | null, port: number | null, security: SmtpSecurity, username: string | null, password: string | null, from: string | null }, tailscale: { detect: boolean, socket: string | null, expose: Expose, httpsPort: number }, tailscaleStatus: { state: TailscaleState, dnsName: string | null, ips: Array<string>, https: boolean, funnel: boolean, url: string | null, warning: string | null, serveError: string | null }, sources: Array<{ name: string, kind: SourceKind, url: string, feed: string | null, apiKey: string | null, categories: Array<number>, enabled: boolean, downloadPath: string | null, seeding: { ratio: number | null, time: string | null, idle: string | null, then: SeedAction } | null }>, profiles: Array<{ name: string, resolutions: Array<string>, groups: Array<string>, require: Array<string>, reject: Array<string>, minSize: number | null, maxSize: number | null, codecs: Array<string>, preferDualAudio: boolean, batches: boolean, minSeeders: number }>, libraries: Array<{ name: string, path: string, kind: LibraryKind, metadataProvider: Provider | null, managed: boolean, profile: string | null, downloadPath: string | null, resolvedPath: string | null, exists: boolean, error: string | null, titleCount: number, skippedCount: number }>, paths: { config: string, data: string, log: string } }, server: { transcoding: { vaapi: string | null, vaapiError: string | null, nvenc: string | null, nvencError: string | null, softwareH264: boolean } } };
 
 export type SchemeFieldsFragment = { id: string, name: string, builtIn: boolean, published: boolean, editable: boolean, code: string, shareCode: string, forkedFrom: { id: string | null, name: string } | null, palette: { seeds: Array<{ name: string, value: string }>, overrides: Array<{ name: string, value: string }>, tokens: Array<{ name: string, value: string }>, warnings: Array<{ foreground: string, background: string, ratio: number, minimum: number }> } };
 
@@ -1281,7 +1286,7 @@ export type RenderingClipsQuery = { clips: Array<{ id: number, kind: ClipKind, s
 export type StatusQueryVariables = Exact<{ [key: string]: never; }>;
 
 
-export type StatusQuery = { server: { setupRequired: boolean, clips: boolean, downloads: boolean, sources: number, smtp: boolean, email: boolean, publicUrl: string | null }, viewer: { isAdmin: boolean, id: number, username: string, avatar: string | null, permissions: { allLibraries: boolean, libraries: Array<string>, request: boolean, autoApprove: boolean, requestLimit: number, manageRequests: boolean, manageShows: boolean, downloads: boolean, editMetadata: boolean, watchTogether: boolean, shareLinks: boolean, clip: boolean, clipMaxLength: number, clipLimit: number, clipStorage: number, clipLinks: boolean } } | null };
+export type StatusQuery = { server: { setupRequired: boolean, clips: boolean, downloads: boolean, sources: number, smtp: boolean, email: boolean, publicUrl: string | null }, viewer: { isAdmin: boolean, id: number, username: string, avatar: string | null, permissions: { allLibraries: boolean, libraries: Array<string>, request: boolean, autoApprove: boolean, requestLimit: number, manageRequests: boolean, manageShows: boolean, downloads: boolean, editMetadata: boolean, watchTogether: boolean, shareLinks: boolean, clip: boolean, clipMaxLength: number, clipLimit: number, clipStorage: number, clipLinks: boolean, offlineDownloads: boolean } } | null };
 
 export type PeopleQueryVariables = Exact<{ [key: string]: never; }>;
 
@@ -1471,7 +1476,7 @@ export type PlaybackQueryVariables = Exact<{
 }>;
 
 
-export type PlaybackQuery = { video: { id: number, still: string, label: string | null, name: string | null, position: number | null, finished: boolean | null, title: { id: number, kind: TitleKind, name: string, backdrop: string | null }, previous: { id: number, label: string | null, name: string | null } | null, next: { id: number, still: string, label: string | null, name: string | null } | null, media: { duration: number | null, video: { index: number, codec: string, codecString: string | null, width: number, height: number, fps: number, bitDepth: number, hdr: boolean } | null, audio: Array<{ index: number, codec: string, codecString: string | null, channels: number, language: string | null, title: string | null, default: boolean }>, subtitles: Array<{ id: string, codec: string, language: string | null, title: string | null, default: boolean, forced: boolean, supported: boolean }>, fonts: Array<{ index: number, filename: string }>, chapters: Array<{ start: number, end: number, title: string | null }> } } | null, server: { transcoding: { vaapi: string | null, vaapiError: string | null, softwareH264: boolean } } };
+export type PlaybackQuery = { video: { id: number, still: string, label: string | null, name: string | null, position: number | null, finished: boolean | null, title: { id: number, kind: TitleKind, name: string, backdrop: string | null }, previous: { id: number, label: string | null, name: string | null } | null, next: { id: number, still: string, label: string | null, name: string | null } | null, media: { duration: number | null, video: { index: number, codec: string, codecString: string | null, width: number, height: number, fps: number, bitDepth: number, hdr: boolean } | null, audio: Array<{ index: number, codec: string, codecString: string | null, channels: number, language: string | null, title: string | null, default: boolean }>, subtitles: Array<{ id: string, codec: string, language: string | null, title: string | null, default: boolean, forced: boolean, supported: boolean }>, fonts: Array<{ index: number, filename: string }>, chapters: Array<{ start: number, end: number, title: string | null }> } } | null, server: { transcoding: { vaapi: string | null, vaapiError: string | null, nvenc: string | null, nvencError: string | null, softwareH264: boolean } } };
 
 export type RoomPlaybackQueryVariables = Exact<{
   code: string;
@@ -1479,7 +1484,7 @@ export type RoomPlaybackQueryVariables = Exact<{
 }>;
 
 
-export type RoomPlaybackQuery = { room: { video: { id: number, still: string, label: string | null, name: string | null, position: number | null, finished: boolean | null, title: { id: number, kind: TitleKind, name: string, backdrop: string | null }, previous: { id: number, label: string | null, name: string | null } | null, next: { id: number, still: string, label: string | null, name: string | null } | null, media: { duration: number | null, video: { index: number, codec: string, codecString: string | null, width: number, height: number, fps: number, bitDepth: number, hdr: boolean } | null, audio: Array<{ index: number, codec: string, codecString: string | null, channels: number, language: string | null, title: string | null, default: boolean }>, subtitles: Array<{ id: string, codec: string, language: string | null, title: string | null, default: boolean, forced: boolean, supported: boolean }>, fonts: Array<{ index: number, filename: string }>, chapters: Array<{ start: number, end: number, title: string | null }> } } | null }, server: { transcoding: { vaapi: string | null, vaapiError: string | null, softwareH264: boolean } } };
+export type RoomPlaybackQuery = { room: { video: { id: number, still: string, label: string | null, name: string | null, position: number | null, finished: boolean | null, title: { id: number, kind: TitleKind, name: string, backdrop: string | null }, previous: { id: number, label: string | null, name: string | null } | null, next: { id: number, still: string, label: string | null, name: string | null } | null, media: { duration: number | null, video: { index: number, codec: string, codecString: string | null, width: number, height: number, fps: number, bitDepth: number, hdr: boolean } | null, audio: Array<{ index: number, codec: string, codecString: string | null, channels: number, language: string | null, title: string | null, default: boolean }>, subtitles: Array<{ id: string, codec: string, language: string | null, title: string | null, default: boolean, forced: boolean, supported: boolean }>, fonts: Array<{ index: number, filename: string }>, chapters: Array<{ start: number, end: number, title: string | null }> } } | null }, server: { transcoding: { vaapi: string | null, vaapiError: string | null, nvenc: string | null, nvencError: string | null, softwareH264: boolean } } };
 
 export type SaveProgressMutationVariables = Exact<{
   videoId: number;
@@ -1967,6 +1972,13 @@ export type RefreshTitleMutationVariables = Exact<{
 
 export type RefreshTitleMutation = { refreshTitle: { id: number } };
 
+export type StartTitleRoomMutationVariables = Exact<{
+  input: NewRoom;
+}>;
+
+
+export type StartTitleRoomMutation = { startRoom: { code: string } };
+
 export type MatchTitleMutationVariables = Exact<{
   id: number;
   provider: Provider;
@@ -1979,7 +1991,7 @@ export type MatchTitleMutation = { matchTitle: { id: number } };
 export type WantedQueryVariables = Exact<{ [key: string]: never; }>;
 
 
-export type WantedQuery = { wanted: Array<{ seriesId: number, show: string, season: number, episode: number, name: string | null, airAt: number | null, aired: boolean, state: EpisodeState, attempts: number, searchedAt: number | null, nextSearch: number | null, title: { id: number } | null }> };
+export type WantedQuery = { wanted: Array<{ seriesId: number, show: string, season: number, episode: number, name: string | null, airAt: number | null, aired: boolean, state: EpisodeState, attempts: number, searchedAt: number | null, nextSearch: number | null, title: { id: number, poster: string | null, backdrop: string | null } | null }> };
 
 export class TypedDocumentString<TResult, TVariables>
   extends String
@@ -2024,6 +2036,7 @@ export const PermissionsFieldsFragmentDoc = new TypedDocumentString(`
   clipLimit
   clipStorage
   clipLinks
+  offlineDownloads
 }
     `, {"fragmentName":"PermissionsFields"}) as unknown as TypedDocumentString<PermissionsFieldsFragment, unknown>;
 export const ViewerFragmentDoc = new TypedDocumentString(`
@@ -2056,6 +2069,7 @@ fragment PermissionsFields on Permissions {
   clipLimit
   clipStorage
   clipLinks
+  offlineDownloads
 }`, {"fragmentName":"Viewer"}) as unknown as TypedDocumentString<ViewerFragment, unknown>;
 export const CardFragmentDoc = new TypedDocumentString(`
     fragment Card on Title {
@@ -2223,6 +2237,8 @@ export const TranscodingFieldsFragmentDoc = new TypedDocumentString(`
     fragment TranscodingFields on Transcoding {
   vaapi
   vaapiError
+  nvenc
+  nvencError
   softwareH264
 }
     `, {"fragmentName":"TranscodingFields"}) as unknown as TypedDocumentString<TranscodingFieldsFragment, unknown>;
@@ -2578,6 +2594,7 @@ export const SettingsFieldsFragmentDoc = new TypedDocumentString(`
   transcode {
     hardware
     vaapiDevice
+    cudaDevice
   }
   clips {
     enabled
@@ -3866,6 +3883,7 @@ export const UsersDocument = new TypedDocumentString(`
       clipLimit
       clipStorage
       clipLinks
+      offlineDownloads
     }
   }
 }
@@ -3891,6 +3909,7 @@ fragment PermissionsFields on Permissions {
   clipLimit
   clipStorage
   clipLinks
+  offlineDownloads
 }
 fragment Viewer on User {
   ...Person
@@ -3922,6 +3941,7 @@ export const PermissionDefaultsDocument = new TypedDocumentString(`
   clipLimit
   clipStorage
   clipLinks
+  offlineDownloads
 }`) as unknown as TypedDocumentString<PermissionDefaultsQuery, PermissionDefaultsQueryVariables>;
 export const SetPermissionDefaultsDocument = new TypedDocumentString(`
     mutation SetPermissionDefaults($permissions: PermissionsInput!) {
@@ -3946,6 +3966,7 @@ export const SetPermissionDefaultsDocument = new TypedDocumentString(`
   clipLimit
   clipStorage
   clipLinks
+  offlineDownloads
 }`) as unknown as TypedDocumentString<SetPermissionDefaultsMutation, SetPermissionDefaultsMutationVariables>;
 export const UpdateUserDocument = new TypedDocumentString(`
     mutation UpdateUser($id: Int!, $input: UserPatch!) {
@@ -4462,6 +4483,8 @@ export const SettingsDocument = new TypedDocumentString(`
     fragment TranscodingFields on Transcoding {
   vaapi
   vaapiError
+  nvenc
+  nvencError
   softwareH264
 }
 fragment SeedingFields on Seeding {
@@ -4492,6 +4515,7 @@ fragment SettingsFields on Settings {
   transcode {
     hardware
     vaapiDevice
+    cudaDevice
   }
   clips {
     enabled
@@ -4829,6 +4853,7 @@ fragment PermissionsFields on Permissions {
   clipLimit
   clipStorage
   clipLinks
+  offlineDownloads
 }
 fragment Viewer on User {
   ...Person
@@ -5667,6 +5692,8 @@ export const PlaybackDocument = new TypedDocumentString(`
 fragment TranscodingFields on Transcoding {
   vaapi
   vaapiError
+  nvenc
+  nvencError
   softwareH264
 }`) as unknown as TypedDocumentString<PlaybackQuery, PlaybackQueryVariables>;
 export const RoomPlaybackDocument = new TypedDocumentString(`
@@ -5750,6 +5777,8 @@ export const RoomPlaybackDocument = new TypedDocumentString(`
 fragment TranscodingFields on Transcoding {
   vaapi
   vaapiError
+  nvenc
+  nvencError
   softwareH264
 }`) as unknown as TypedDocumentString<RoomPlaybackQuery, RoomPlaybackQueryVariables>;
 export const SaveProgressDocument = new TypedDocumentString(`
@@ -7394,6 +7423,13 @@ export const RefreshTitleDocument = new TypedDocumentString(`
   }
 }
     `) as unknown as TypedDocumentString<RefreshTitleMutation, RefreshTitleMutationVariables>;
+export const StartTitleRoomDocument = new TypedDocumentString(`
+    mutation StartTitleRoom($input: NewRoom!) {
+  startRoom(input: $input) {
+    code
+  }
+}
+    `) as unknown as TypedDocumentString<StartTitleRoomMutation, StartTitleRoomMutationVariables>;
 export const MatchTitleDocument = new TypedDocumentString(`
     mutation MatchTitle($id: Int!, $provider: Provider!, $providerId: String!) {
   matchTitle(id: $id, provider: $provider, providerId: $providerId) {
@@ -7407,6 +7443,8 @@ export const WantedDocument = new TypedDocumentString(`
     seriesId
     title {
       id
+      poster
+      backdrop
     }
     show
     season

@@ -1,0 +1,42 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+query Playback($id: Int!) {
+  video(id: $id) { ...Playback }
+  server { clips transcoding { ...TranscodingFields } }
+  viewer { id permissions { clip watchTogether } }
+}
+
+mutation SaveProgress($videoId: Int!, $position: Float!, $duration: Float!, $at: Int) {
+  saveProgress(videoId: $videoId, position: $position, duration: $duration, at: $at) { id }
+}
+
+mutation TakeScreenshot($input: NewScreenshot!) {
+  takeScreenshot(input: $input) { id poster }
+}
+
+query PlayerSchedule($id: Int!) {
+  title(id: $id) { series { id monitor status next { ...SeriesEpisodeFields } } }
+}
+
+query PlayerOverview($id: Int!, $videoId: Int!) {
+  title(id: $id) { overview }
+  video(id: $videoId) { overview }
+}
+
+query Room($code: String!) {
+  room(code: $code) { code signedIn isHost canShare canInvite title { id name backdrop } }
+}
+
+query RoomPlayback($code: String!, $id: Int!) {
+  room(code: $code) { video(id: $id) { ...Playback } }
+  server { clips transcoding { ...TranscodingFields } }
+  viewer { id permissions { clip watchTogether } }
+}
+
+mutation StartRoom($input: NewRoom!) {
+  startRoom(input: $input) { code }
+}
+
+query People {
+  users { id username avatar }
+}

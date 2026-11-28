@@ -248,12 +248,16 @@ export function createPlayer<T extends MusicTrack>(host: MusicHost<T>, codecs: I
     timers = [setInterval(tick, 1000), setInterval(() => state.playing && void save(0), 30_000)]
     engine.on('track', (key) => {
       const i = state.queue.findIndex((e) => e.uid === key)
-      if (i >= 0 && i !== state.index) set({ index: i, resumeAt: 0 })
+      if (i >= 0 && i !== state.index) {
+        set({ index: i, resumeAt: 0 })
+        // The decoder only knows a few tracks ahead.
+        lineUp()
+      }
       started(current())
     })
     engine.on('ended', () => {
-      if (state.repeat === 'ALL' && state.queue.length) {
-        void jump(0, true)
+      if (state.repeat !== 'OFF' && state.queue.length && !room) {
+        void jump(state.repeat === 'ONE' ? state.index : 0, true)
       } else {
         set({ playing: false, resumeAt: 0 })
         engine?.pause()

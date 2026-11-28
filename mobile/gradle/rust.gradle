@@ -15,6 +15,7 @@ def workspace = buildscript.sourceFile.parentFile.parentFile
 def targetDir = new File(workspace, 'target')
 def jniLibs = layout.buildDirectory.dir('rust/jniLibs')
 def kotlin = layout.buildDirectory.dir('rust/kotlin')
+def rustRelease = gradle.startParameter.taskNames.any { it.toLowerCase().contains('release') }
 def abis = (findProperty('reactNativeArchitectures') ?: 'arm64-v8a').split(',').collect { it.trim() }.findAll()
 
 android.ndkVersion = rootProject.ext.ndkVersion
@@ -29,7 +30,7 @@ def cargoNdk = { String crate ->
         environment 'RUSTFLAGS', '-C link-arg=-Wl,-z,max-page-size=16384'
         commandLine(['cargo', 'ndk', '--platform', '34', '--output-dir', jniLibs.get().asFile.absolutePath]
             + abis.collectMany { ['--target', it] }
-            + ['build', '--release', '--locked', '--package', crate])
+            + ['build', '--locked', '--package', crate] + (rustRelease ? ['--release'] : []))
         outputs.dir jniLibs
         outputs.upToDateWhen { false }
     }

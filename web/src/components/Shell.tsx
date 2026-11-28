@@ -890,6 +890,7 @@ const SHORTCUTS: { group: string; keys: [string, string][] }[] = [
       ['G then H', 'Home'],
       ['G then C', 'Calendar'],
       ['G then A', 'Add shows'],
+      ['G then R', 'Requests'],
       ['G then D', 'Downloads'],
       ['G then W', 'Wanted'],
       ['G then X', 'Clips'],

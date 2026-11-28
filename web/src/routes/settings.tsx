@@ -829,7 +829,7 @@ function Server() {
       <Card
         title="Transcoding"
         description={
-          t.vaapi ? `VA-API: ${t.vaapi}` : t.vaapiError ? `VA-API unavailable: ${t.vaapiError}` : undefined
+          t.vaapi ? `VA-API: ${t.vaapi}` : t.nvenc ? `NVENC: ${t.nvenc}` : [t.vaapiError, t.nvencError].filter(Boolean).join(" · ") || undefined
         }
       >
         <div className="grid gap-4 sm:grid-cols-2">
@@ -838,11 +838,15 @@ function Server() {
               value={draft.transcode.hardware}
               options={[
                 { value: 'AUTO', label: 'GPU, falling back to CPU' },
-                { value: 'VAAPI', label: 'GPU (VA-API) only' },
+                { value: 'VAAPI', label: 'GPU (VA-API)' },
+                { value: 'NVENC', label: 'NVIDIA (NVENC)' },
                 { value: 'SOFTWARE', label: 'CPU only' },
               ]}
               onChange={(v) => set((c) => void (c.transcode.hardware = v))}
             />
+          </Field>
+          <Field label="CUDA device index">
+            <Input type="number" min={0} value={draft.transcode.cudaDevice} onChange={(e) => set((c) => void (c.transcode.cudaDevice = Number(e.target.value)))} />
           </Field>
           <Field label="GPU device">
             <Input

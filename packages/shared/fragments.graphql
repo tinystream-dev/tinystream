@@ -24,6 +24,7 @@ fragment PermissionsFields on Permissions {
   clipLimit
   clipStorage
   clipLinks
+  offlineDownloads
 }
 
 fragment Viewer on User {
@@ -168,6 +169,8 @@ fragment Playback on Video {
 fragment TranscodingFields on Transcoding {
   vaapi
   vaapiError
+  nvenc
+  nvencError
   softwareH264
 }
 
@@ -503,6 +506,7 @@ fragment SettingsFields on Settings {
   transcode {
     hardware
     vaapiDevice
+    cudaDevice
   }
   clips {
     enabled

@@ -100,7 +100,7 @@ function CalendarPage() {
           return (
             <div key={t} className={`min-w-0 ${list.length === 0 ? 'hidden md:block' : ''}`}>
               <div className="mb-2 flex items-baseline gap-2 px-1">
-                <span className={`text-xs font-medium tracking-wide uppercase ${isToday ? 'text-ink' : 'text-ink-3'}`}>
+                <span className={`text-[13px] font-medium ${isToday ? 'text-ink' : 'text-ink-3'}`}>
                   {d.toLocaleDateString(undefined, { weekday: 'short' })}
                 </span>
                 <span
@@ -109,7 +109,7 @@ function CalendarPage() {
                   {d.getDate()}
                 </span>
               </div>
-              <Squircle radius={16} className={`min-h-28 space-y-1.5 p-1.5 md:min-h-[26rem] ${isToday ? 'bg-raised ring-1 ring-line-strong' : 'bg-raised/50'}`}>
+              <Squircle radius={16} className={`min-h-28 space-y-1.5 p-1.5 md:min-h-[26rem] ${list.length === 0 ? 'bg-raised/20' : isToday ? 'bg-raised' : 'bg-raised/50'}`}>
                 {list.map((e) => (
                   <DayCard key={`${e.seriesId}-${e.season}-${e.episode}`} e={e} now={now} />
                 ))}
@@ -274,7 +274,7 @@ function UpNext({ entry: e, now, later }: { entry: CalendarEntry; now: number; l
         )}
         <div className="relative flex h-full min-h-52 items-end gap-8 p-6 md:p-8">
           <div className="min-w-0 flex-1">
-            <p className="flex items-center gap-2 text-xs font-medium tracking-wide text-ink-2 uppercase">
+            <p className="flex items-center gap-2 text-[13px] font-medium text-ink-2">
               {stage === 'ready' ? (
                 <Play className="size-3.5 fill-current text-ok" />
               ) : stage === 'downloading' ? (
@@ -333,7 +333,7 @@ function UpNext({ entry: e, now, later }: { entry: CalendarEntry; now: number; l
           </div>
           {later.length > 0 && (
             <div className="hidden w-64 shrink-0 space-y-2 lg:block">
-              <p className="text-2xs font-medium tracking-wide text-ink-3 uppercase">Then</p>
+              <p className="text-xs font-medium text-ink-3">Then</p>
               {later.map((l) => (
                 <div key={`${l.seriesId}-${l.season}-${l.episode}`} className="min-w-0">
                   <p className="truncate text-[13px] font-medium">{l.show}</p>

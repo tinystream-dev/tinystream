@@ -2,6 +2,7 @@
 
 import '../global.css'
 import '../src/background'
+import '../src/music/background'
 import { QueryClientProvider, focusManager } from '@tanstack/react-query'
 import { Stack, useRouter } from 'expo-router'
 import { useEffect, useRef } from 'react'
@@ -16,6 +17,7 @@ import { UpdateSheet } from '../src/components/UpdateSheet'
 import { startBackgroundChecks } from '../src/background'
 import { installLogging } from '../src/log'
 import { apiOf, cacheOf, tokenOf, useServers } from '../src/servers'
+import { MusicProvider } from '../src/music/context'
 import { SessionProvider } from '../src/session'
 import { ThemeProvider, useTheme } from '../src/theme/ThemeProvider'
 
@@ -67,7 +69,13 @@ function App() {
   }, [at, token, router])
 
   const stack = (
-    <Stack key={active?.id ?? 'none'} screenOptions={{ headerShown: false, contentStyle: { backgroundColor: tokens.canvas } }}>
+    <Stack
+      key={active?.id ?? 'none'}
+      screenOptions={{
+        headerShown: false,
+        contentStyle: { backgroundColor: tokens.canvas },
+      }}
+    >
       <Stack.Protected guard={!!token}>
         <Stack.Screen name="(tabs)" />
         <Stack.Screen name="debug" />
@@ -83,9 +91,11 @@ function App() {
   return (
     <QueryClientProvider key={active.id} client={cacheOf(active.id)}>
       <SessionProvider server={active} api={apiOf(active)} token={token}>
-        <ServerSync />
-        {token && <LiveUpdates />}
-        {stack}
+        <MusicProvider>
+          <ServerSync />
+          {token && <LiveUpdates />}
+          {stack}
+        </MusicProvider>
         <Feedback bottom={bar + 10} />
       </SessionProvider>
     </QueryClientProvider>

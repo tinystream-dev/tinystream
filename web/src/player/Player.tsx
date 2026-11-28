@@ -404,7 +404,7 @@ export function Player({ mediaId, room, editClip, startAt }: { mediaId: number; 
     engine.current = e
     void e.start(start).then(() => {
       if (!wasPaused) video.play().catch(() => setPlaying(false))
-    })
+    }).catch(() => {})
     return () => {
       // Until the stream has loaded, the video's own time and paused state
       // don't reflect where we meant to be, so carry the intent over instead.
@@ -468,7 +468,10 @@ export function Player({ mediaId, room, editClip, startAt }: { mediaId: number; 
     clearTimeout(idleTimer.current)
     idleTimer.current = setTimeout(() => setIdle(true), 2600)
   }, [])
-  useEffect(() => () => clearTimeout(idleTimer.current), [])
+  useEffect(() => {
+    poke()
+    return () => clearTimeout(idleTimer.current)
+  }, [poke])
 
   /** Plays or pauses (toggles without `play`); returns whether it's now playing. */
   const setPlayback = useCallback(
@@ -494,16 +497,17 @@ export function Player({ mediaId, room, editClip, startAt }: { mediaId: number; 
   const seek = useCallback(
     (t: number) => {
       const v = videoRef.current
-      if (!v) return
+      if (!v) return false
       const to = Math.max(0, Math.min(duration || Infinity, t))
       if (room) {
         const s = room.client.getSnapshot()
-        if (!s.room || !canControl(s.room, s.you)) return
+        if (!s.room || !canControl(s.room, s.you)) return false
         room.client.seek(to)
       }
       v.currentTime = to
       setTime(to)
       poke()
+      return true
     },
     [duration, poke, room],
   )
@@ -511,8 +515,7 @@ export function Player({ mediaId, room, editClip, startAt }: { mediaId: number; 
     (delta: number) => {
       const v = videoRef.current
       if (!v) return
-      seek(v.currentTime + delta)
-      flash({ kind: 'seek', amount: delta })
+      if (seek(v.currentTime + delta)) flash({ kind: 'seek', amount: delta })
     },
     [seek, flash],
   )
@@ -685,6 +688,7 @@ export function Player({ mediaId, room, editClip, startAt }: { mediaId: number; 
         handled()
         const x = Math.max(0, v.volume - 0.05)
         setVolume(x)
+        setMuted(false)
         flash({ kind: 'volume', amount: x })
       } else if (k === 'm') (handled(), setMuted((x) => !x), flash({ kind: 'volume', amount: v.muted ? v.volume : 0 }))
       else if (e.key === '?') (handled(), setHelp((h) => !h))
@@ -695,7 +699,7 @@ export function Player({ mediaId, room, editClip, startAt }: { mediaId: number; 
       else if (e.key === 'S' && canClip) (handled(), void takeScreenshot())
       else if (k === 'f') (handled(), toggleFullscreen())
       else if (k === 'n' && pb?.next) (handled(), goTo(pb.next.id))
-      else if (k === 's' && skippable) (handled(), seek(skippable.end))
+      else if (e.key === 's' && skippable) (handled(), seek(skippable.end))
       else if (k === 'c' && pb) {
         handled()
         const usable = pb.media.subtitles.filter((s) => s.supported)

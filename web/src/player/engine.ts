@@ -12,6 +12,8 @@ import type { Playback } from '../lib/api'
 
 const BUFFER_AHEAD = 60
 const KEEP_BEHIND = 30
+const END_SLACK = 5
+const READ_TIMEOUT = 15_000
 /** Largest single appendBuffer call, well under any browser's quota. */
 const APPEND_SIZE = 1 << 20
 
@@ -130,7 +132,7 @@ export function plan(pb: Playback, audioIndex: number | null, maxHeight: number 
     mime = `video/mp4; codecs="${vCodec}, ${TRANSCODED_AUDIO}"`
   }
 
-  const hw = pb.transcoding.vaapi ? 'VA-API' : 'software'
+  const hw = pb.transcoding.vaapi ? 'VA-API' : pb.transcoding.nvenc ? 'NVENC' : 'software'
   const why = maxHeight === 'auto' && v && issue && issue !== 'unsupported' ? `, as ${videoKind(v)} didn’t play directly here` : ''
   const describe =
     video === 'copy'
@@ -194,17 +196,29 @@ export class StreamEngine {
 
   /** Attaches to the video and starts streaming from `start` seconds. */
   async start(start: number) {
-    const opened = new Promise<void>((resolve) => this.ms.addEventListener('sourceopen', () => resolve(), { once: true }))
-    this.video.src = this.objectUrl
-    await opened
-    if (this.destroyed) return
-    if (this.duration) this.ms.duration = this.duration
-    this.sb = this.ms.addSourceBuffer(this.streamPlan.mime)
-    this.video.addEventListener('seeking', this.onSeeking)
-    this.video.addEventListener('error', this.onError)
-    this.video.currentTime = start
-    this.watchFrames()
-    void this.load(start)
+    try {
+      const opened = new Promise<void>((resolve) => this.ms.addEventListener('sourceopen', () => resolve(), { once: true }))
+      this.video.src = this.objectUrl
+      await opened
+      if (this.destroyed) return
+      if (this.duration) this.ms.duration = this.duration
+      this.sb = this.ms.addSourceBuffer(this.streamPlan.mime)
+      this.video.addEventListener('seeking', this.onSeeking)
+      this.video.addEventListener('error', this.onError)
+      this.video.currentTime = start
+      this.watchFrames()
+      void this.load(start)
+    } catch (error) {
+      if (!this.destroyed) {
+        this.ctrl?.abort()
+        this.video.removeEventListener('seeking', this.onSeeking)
+        this.video.removeEventListener('error', this.onError)
+        this.video.removeAttribute('src')
+        this.video.load()
+        this.fail({ kind: 'demux', message: (error as Error).message || 'Could not set up playback' })
+      }
+      throw error
+    }
   }
 
   destroy() {
@@ -409,8 +423,33 @@ export class StreamEngine {
     return `${this.base}/stream?${q}`
   }
 
+  private async read(reader: ReadableStreamDefaultReader<Uint8Array>, signal: AbortSignal) {
+    let timer: ReturnType<typeof setTimeout> | undefined
+    let abort = () => {}
+    const deadline = new Promise<never>((_, reject) => {
+      abort = () => reject(new DOMException('Stream cancelled', 'AbortError'))
+      signal.addEventListener('abort', abort, { once: true })
+      const check = () => {
+        if (this.video.paused || this.bufferedAhead() > 1) {
+          timer = setTimeout(check, READ_TIMEOUT)
+        } else {
+          const error = new Error('The stream stopped sending data. Try again or choose another quality.')
+          error.name = 'TimeoutError'
+          reject(error)
+        }
+      }
+      timer = setTimeout(check, READ_TIMEOUT)
+    })
+    try {
+      return await Promise.race([reader.read(), deadline])
+    } finally {
+      clearTimeout(timer)
+      signal.removeEventListener('abort', abort)
+    }
+  }
+
   /** (Re)starts the stream at `start`, abandoning any stream in flight. */
-  private async load(start: number) {
+  private async load(start: number, retries = 0) {
     const gen = ++this.generation
     this.activeFrom = start
     this.front = null
@@ -437,7 +476,7 @@ export class StreamEngine {
       const reader = res.body.getReader()
       // Backpressure lives in append(): while it waits, we don't read.
       while (gen === this.generation) {
-        const { done, value } = await reader.read()
+        const { done, value } = await this.read(reader, ctrl.signal)
         if (done) break
         stage = 'demux'
         await this.append(value, gen)
@@ -445,13 +484,22 @@ export class StreamEngine {
       }
       reader.cancel().catch(() => {})
       if (gen === this.generation) {
+        if (this.duration && (this.front ?? start) < this.duration - END_SLACK) {
+          throw new Error('The stream ended before the video finished. Try again or choose another quality.')
+        }
         this.activeFrom = null
         this.endReached = true
         await this.exclusive(() => gen === this.generation && this.ms.readyState === 'open' && this.ms.endOfStream())
       }
     } catch (e) {
       if (gen !== this.generation || (e as Error).name === 'AbortError') return
+      ctrl.abort()
       this.activeFrom = null
+      if ((e as Error).name === 'TimeoutError' && retries < 3) {
+        await sleep(1000 * 2 ** retries)
+        if (gen === this.generation && !this.destroyed) await this.load(this.video.currentTime, retries + 1)
+        return
+      }
       // An append fails once the video has, so the video knows better why.
       this.fail(this.video.error ? mediaFailure(this.video.error) : { kind: stage, message: (e as Error).message || 'playback failed' })
     }
@@ -459,7 +507,7 @@ export class StreamEngine {
 
   /** Whether the stream has run out for good: it reached the file's end and nothing's left to play here. */
   exhausted() {
-    return this.endReached && !this.isBuffered(this.video.currentTime)
+    return this.endReached && (!this.duration || this.video.currentTime >= this.duration - END_SLACK) && !this.isBuffered(this.video.currentTime)
   }
 
   /** Called when the video stalls; restarts the stream if ours has ended early. */

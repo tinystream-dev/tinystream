@@ -24,10 +24,20 @@ pub fn video_codec_string(par: &ffi::AVCodecParameters) -> Option<String> {
             format!("hvc1.{profile}.{compat}.L{level}.B0")
         })),
         ffi::AV_CODEC_ID_AV1 => Some(av1(extradata).unwrap_or_else(|| format!("av01.0.08M.{:02}", bit_depth(par)))),
-        ffi::AV_CODEC_ID_VP9 => Some(match bit_depth(par) {
-            8 => "vp09.00.40.08".into(),
-            depth => format!("vp09.02.40.{depth:02}"),
-        }),
+        ffi::AV_CODEC_ID_VP9 => {
+            let desc = unsafe { ffi::av_pix_fmt_desc_get(par.format) };
+            if desc.is_null()
+                || !(0..=3).contains(&par.profile)
+                || ![10, 11, 20, 21, 30, 31, 40, 41, 50, 51, 52, 60, 61, 62].contains(&par.level)
+            {
+                return None;
+            }
+            let depth = unsafe { (*desc).comp[0].depth };
+            if ![8, 10, 12].contains(&depth) {
+                return None;
+            }
+            Some(format!("vp09.{:02}.{:02}.{depth:02}", par.profile, par.level))
+        },
         _ => None,
     }
 }
@@ -124,6 +134,21 @@ mod tests {
     use super::*;
 
     #[test]
+    fn vp9_uses_source_parameters_and_declines_unknown_levels() {
+        let mut par: ffi::AVCodecParameters = unsafe { std::mem::zeroed() };
+        par.codec_id = ffi::AV_CODEC_ID_VP9;
+        par.profile = 2;
+        par.level = 41;
+        par.format = ffi::AV_PIX_FMT_YUV420P10LE;
+        assert_eq!(video_codec_string(&par).as_deref(), Some("vp09.02.41.10"));
+        par.level = -99;
+        assert_eq!(video_codec_string(&par), None);
+        par.level = 40;
+        par.format = ffi::AV_PIX_FMT_NONE;
+        assert_eq!(video_codec_string(&par), None);
+    }
+
+    #[test]
     fn hevc_main10() {
         let ed = [1u8, 0x02, 0x20, 0, 0, 0, 0x90, 0, 0, 0, 0, 0, 153];
         assert_eq!(hevc(&ed).unwrap(), "hvc1.2.4.L153.90");
@@ -140,8 +165,6 @@ mod tests {
         par.format = ffi::AV_PIX_FMT_YUV420P10LE;
         par.codec_id = ffi::AV_CODEC_ID_AV1;
         assert_eq!(video_codec_string(&par).unwrap(), "av01.0.08M.10");
-        par.codec_id = ffi::AV_CODEC_ID_VP9;
-        assert_eq!(video_codec_string(&par).unwrap(), "vp09.02.40.10");
     }
 
     #[test]

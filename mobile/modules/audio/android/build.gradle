@@ -1,0 +1,21 @@
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+group = 'dev.tinystream.audio'
+android {
+  namespace 'dev.tinystream.audio'
+  defaultConfig { versionCode 1; versionName '1.0'; testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner' }
+}
+dependencies {
+  implementation 'com.facebook.react:react-android'
+  implementation 'androidx.media3:media3-common:1.11.1'
+  implementation 'androidx.media3:media3-session:1.11.1'
+  implementation 'androidx.media3:media3-datasource:1.11.1'
+  implementation 'com.squareup.okhttp3:okhttp:4.9.2'
+  androidTestImplementation 'androidx.test:runner:1.6.2'
+  androidTestImplementation 'androidx.test.ext:junit:1.2.1'
+  testImplementation 'junit:junit:4.13.2'
+}
+apply from: '../../../gradle/rust.gradle'
+rust.crate('tinystream-decoder-android')

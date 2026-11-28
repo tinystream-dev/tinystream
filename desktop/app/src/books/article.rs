@@ -1,0 +1,676 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+use std::sync::Arc;
+
+use iced_core::text::{self, Paragraph as _, Renderer as _};
+use iced_core::widget::{Tree, tree};
+use iced_core::{
+    Color, Event, Font, Length, Point, Rectangle, Size, Theme, Vector, Widget, alignment, font, layout, mouse, overlay,
+    renderer, window,
+};
+use iced_widget::image::Handle;
+use iced_widget::{Element, Renderer};
+
+use super::model::{self, Document, Range};
+use super::{Books, Message};
+use crate::ui::overlay::EDGE;
+
+type Paragraph = <Renderer as text::Renderer>::Paragraph;
+
+#[derive(Default)]
+pub struct Metrics {
+    pub tops: Vec<f32>,
+    pub heights: Vec<f32>,
+    pub total: f32,
+}
+impl Metrics {
+    pub fn y(&self, doc: &Document, position: usize) -> f32 {
+        let (i, fraction) = doc.locate(position);
+        self.tops.get(i).copied().unwrap_or(0.0) + self.heights.get(i).copied().unwrap_or(0.0) * fraction
+    }
+
+    pub fn position(&self, doc: &Document, y: f32, viewport: f32, anchor: f32) -> usize {
+        if y > 0.0 && y + viewport >= self.total - 4.0 {
+            return doc.length;
+        }
+        let i = self.tops.partition_point(|top| *top <= y + anchor).saturating_sub(1);
+        let fraction = (y + anchor - self.tops.get(i).copied().unwrap_or(0.0))
+            / self.heights.get(i).copied().unwrap_or(1.0).max(1.0);
+        doc.position_of(i, fraction)
+    }
+}
+
+struct Piece {
+    range: Range,
+    underline: bool,
+    strike: bool,
+    href: Option<String>,
+    to: Option<usize>,
+}
+struct Row {
+    paragraph: Paragraph,
+    pieces: Vec<Piece>,
+    text: String,
+    x: f32,
+    y: f32,
+    width: f32,
+    height: f32,
+}
+#[derive(Default)]
+struct State {
+    key: Option<(usize, u32, u32, usize)>,
+    viewport: f32,
+    focused: bool,
+    rows: Vec<Row>,
+    drag: Option<(usize, Point)>,
+    click: Option<mouse::Click>,
+    layout_changed: bool,
+    images: usize,
+}
+
+pub struct Article<'a> {
+    pub books: &'a Books,
+    /// What can be done with the selection, floated under where it ends.
+    pub menu: Option<Element<'a, Message>>,
+    pub ink: Color,
+    pub secondary: Color,
+    pub highlight: Color,
+}
+impl iced_core::widget::Meta for Article<'_> {}
+
+impl Widget<Message, Theme, Renderer> for Article<'_> {
+    fn tag(&self) -> tree::Tag {
+        tree::Tag::of::<State>()
+    }
+
+    fn state(&self) -> tree::State {
+        tree::State::new(State::default())
+    }
+
+    fn diff(&mut self, tree: &mut Tree) {
+        if tree.children.len() != 1 {
+            tree.children = vec![Tree::empty()];
+        }
+    }
+
+    fn size(&self) -> Size<Length> {
+        Size::new(Length::Fill, Length::Shrink)
+    }
+
+    fn layout(&mut self, tree: &mut Tree, _renderer: &Renderer, limits: &layout::Limits) {
+        let Some(doc) = &self.books.document else { return };
+        let width = limits.max.width;
+        let size = self.books.size();
+        let text_width = (width - 48.0).min(size * 38.0 - 48.0).max(80.0);
+        let state = tree.state.downcast_mut::<State>();
+        let key = (Arc::as_ptr(doc) as usize, width.to_bits(), size.to_bits(), self.books.quotes().len());
+        if state.viewport != self.books.viewport || state.focused != self.books.focused {
+            state.viewport = self.books.viewport;
+            state.focused = self.books.focused;
+            state.layout_changed = true;
+        }
+        if state.key != Some(key) {
+            state.key = Some(key);
+            state.rows = doc
+                .blocks
+                .iter()
+                .map(|block| {
+                    let indent = match block.k.as_str() {
+                        "li" => block.l.max(1) as f32 * size * 1.25,
+                        "quote" => block.l.max(1) as f32 * size,
+                        _ => 0.0,
+                    };
+                    let heading = block.k == "h";
+                    let em = if heading {
+                        match block.l {
+                            0 | 1 => 1.6,
+                            2 => 1.35,
+                            _ => 1.15,
+                        }
+                    } else if block.k == "pre" {
+                        0.85
+                    } else {
+                        1.0
+                    };
+                    let mut spans: Vec<text::Span<'_, ()>> = Vec::new();
+                    let mut pieces = Vec::new();
+                    let mut at = block.at;
+                    let marks = self.books.quotes().iter().filter_map(|q| q.range()).collect::<Vec<_>>();
+                    let styled = model::pieces(block, &marks);
+                    for (span, _) in &styled {
+                        let mut from = 0;
+                        for (end, c) in span.t.char_indices().map(|(i, c)| (i + c.len_utf8(), c)) {
+                            if c.is_whitespace() || end == span.t.len() {
+                                let word = &span.t[from..end];
+                                let mut font = Font::DEFAULT;
+                                if span.f & model::BOLD != 0 || heading {
+                                    font.weight = font::Weight::Semibold;
+                                }
+                                if span.f & model::ITALIC != 0 {
+                                    font.style = font::Style::Italic;
+                                }
+                                if span.f & model::CODE != 0 || block.k == "pre" {
+                                    font.family = font::Family::Monospace;
+                                }
+                                let small = span.f & (model::SUP | model::SUB) != 0;
+                                spans.push(
+                                    text::Span::new(word).font(font).size(size * em * if small { 0.75 } else { 1.0 }),
+                                );
+                                let end = at + word.chars().count();
+                                pieces.push(Piece {
+                                    range: Range { start: at, end },
+                                    underline: span.f & model::UNDERLINE != 0
+                                        || span.href.is_some()
+                                        || span.to.is_some(),
+                                    strike: span.f & model::STRIKE != 0,
+                                    href: span.href.clone(),
+                                    to: span.to,
+                                });
+                                at = end;
+                                from += word.len();
+                            }
+                        }
+                    }
+                    if block.k == "img" && spans.is_empty() {
+                        spans.push(text::Span::new(block.alt.as_deref().unwrap_or("Loading image…")));
+                    }
+                    let paragraph = Paragraph::with_spans(text::Text {
+                        content: &spans,
+                        bounds: Size::new((text_width - indent).max(40.0), f32::INFINITY),
+                        size: (size * em).into(),
+                        line_height: text::LineHeight::Relative(if heading { 1.35 } else { 1.75 }),
+                        font: Font::DEFAULT,
+                        align_x: if block.c { text::Alignment::Center } else { text::Alignment::Default },
+                        align_y: alignment::Vertical::Top,
+                        shaping: text::Shaping::Advanced,
+                        wrapping: text::Wrapping::WordOrGlyph,
+                        ellipsis: text::Ellipsis::None,
+                        hint_factor: None,
+                    });
+                    let height = paragraph.min_height().max(size);
+                    Row {
+                        paragraph,
+                        pieces,
+                        text: block.text(),
+                        x: (width - text_width) / 2.0 + indent,
+                        y: 0.0,
+                        width: text_width - indent,
+                        height,
+                    }
+                })
+                .collect();
+            state.layout_changed = true;
+        }
+        if state.images != self.books.images.len() {
+            state.images = self.books.images.len();
+            state.layout_changed = true;
+        }
+        let mut y = if self.books.focused { self.books.viewport * 0.18 } else { 40.0 };
+        let mut metrics = self.books.metrics.lock().unwrap();
+        metrics.tops.clear();
+        metrics.heights.clear();
+        for (i, row) in state.rows.iter_mut().enumerate() {
+            let block = &doc.blocks[i];
+            if block.k == "h" {
+                y += size * 0.8;
+            }
+            row.y = y;
+            let height = if block.k == "img" {
+                self.books
+                    .images
+                    .get(&i.to_string())
+                    .and_then(|handle| match handle {
+                        Handle::Rgba { width: w, height: h, .. } => {
+                            Some((text_width * *h as f32 / (*w).max(1) as f32).min(self.books.viewport * 0.85))
+                        },
+                        _ => None,
+                    })
+                    .unwrap_or(240.0)
+            } else if block.k == "hr" {
+                size * 3.0
+            } else {
+                row.paragraph.min_height().max(size)
+            };
+            row.height = height;
+            metrics.tops.push(y);
+            metrics.heights.push(height + size * 0.9);
+            y += height + size * 0.9;
+        }
+        metrics.total = y + self.books.viewport * 0.4;
+        tree.size = Size::new(width, metrics.total);
+    }
+
+    fn draw(
+        &self,
+        tree: &Tree,
+        renderer: &mut Renderer,
+        _theme: &Theme,
+        _style: &renderer::Style,
+        layout: layout::Layout,
+        _cursor: mouse::Cursor,
+        viewport: &Rectangle,
+    ) {
+        use iced_core::Renderer as _;
+        use iced_core::image::Renderer as _;
+        let Some(doc) = &self.books.document else { return };
+        let state = tree.state.downcast_ref::<State>();
+        let origin = layout.bounds().position();
+        for (i, row) in state.rows.iter().enumerate() {
+            let point = origin + Vector::new(row.x, row.y);
+            let bounds = Rectangle::new(point, Size::new(row.width, row.height));
+            if !bounds.intersects(viewport) {
+                continue;
+            }
+            let block = &doc.blocks[i];
+            if block.k == "img" {
+                if let Some(handle) = self.books.images.get(&i.to_string()) {
+                    let (w, h) = match handle {
+                        Handle::Rgba { width, height, .. } => (*width as f32, *height as f32),
+                        _ => (row.width, row.height),
+                    };
+                    let scale = (row.width / w).min(row.height / h).min(1.0);
+                    let image_bounds = Rectangle::new(
+                        Point::new(point.x + (row.width - w * scale) / 2.0, point.y),
+                        Size::new(w * scale, h * scale),
+                    );
+                    renderer.draw_image(iced_core::image::Image::new(handle), image_bounds, *viewport);
+                } else {
+                    renderer.fill_paragraph(&row.paragraph, point, self.secondary, *viewport);
+                }
+                continue;
+            }
+            if block.k == "hr" {
+                renderer.fill_quad(
+                    renderer::Quad {
+                        bounds: Rectangle::new(
+                            Point::new(point.x + row.width / 2.0 - 32.0, point.y + row.height / 2.0),
+                            Size::new(64.0, 1.0),
+                        ),
+                        ..Default::default()
+                    },
+                    self.secondary.scale_alpha(0.4),
+                );
+                continue;
+            }
+            if block.k == "quote" {
+                renderer.fill_quad(
+                    renderer::Quad {
+                        bounds: Rectangle::new(
+                            Point::new(point.x - self.books.size() * 0.7, point.y),
+                            Size::new(2.0, row.height),
+                        ),
+                        ..Default::default()
+                    },
+                    self.secondary.scale_alpha(0.4),
+                );
+            }
+            for (span, piece) in row.pieces.iter().enumerate() {
+                let selected = self.books.selection.is_some_and(|r| overlaps(r, piece.range));
+                let mark =
+                    self.books.quotes().iter().any(|q| q.mine && q.range().is_some_and(|r| overlaps(r, piece.range)));
+                let shared =
+                    self.books.quotes().iter().any(|q| !q.mine && q.range().is_some_and(|r| overlaps(r, piece.range)));
+                if selected || mark || shared || piece.underline || piece.strike {
+                    for rect in row.paragraph.span_bounds(span) {
+                        let rect = rect + Vector::new(point.x, point.y);
+                        if selected || mark {
+                            renderer.fill_quad(
+                                renderer::Quad { bounds: rect, ..Default::default() },
+                                self.highlight.scale_alpha(if selected { 0.45 } else { 0.23 }),
+                            );
+                        }
+                        for y in [
+                            (piece.underline || shared).then_some(rect.y + rect.height - 1.0),
+                            piece.strike.then_some(rect.y + rect.height * 0.55),
+                        ]
+                        .into_iter()
+                        .flatten()
+                        {
+                            renderer.fill_quad(
+                                renderer::Quad {
+                                    bounds: Rectangle::new(Point::new(rect.x, y), Size::new(rect.width, 1.0)),
+                                    ..Default::default()
+                                },
+                                self.secondary,
+                            );
+                        }
+                    }
+                }
+            }
+            renderer.fill_paragraph(
+                &row.paragraph,
+                point,
+                if block.k == "quote" { self.secondary } else { self.ink },
+                *viewport,
+            );
+        }
+    }
+
+    fn update(
+        &mut self,
+        tree: &mut Tree,
+        event: &Event,
+        layout: layout::Layout,
+        cursor: mouse::Cursor,
+        _renderer: &Renderer,
+        shell: &mut iced_core::Shell<'_, Message>,
+        viewport: &Rectangle,
+    ) {
+        let Some(doc) = &self.books.document else { return };
+        let state = tree.state.downcast_mut::<State>();
+        if matches!(event, Event::Window(window::Event::RedrawRequested(_))) {
+            if (self.books.viewport - viewport.height).abs() > 1.0 {
+                shell.publish(Message::Viewport(viewport.height));
+            }
+            if state.layout_changed {
+                state.layout_changed = false;
+                shell.publish(Message::LaidOut);
+            }
+            let images: Vec<_> = doc
+                .blocks
+                .iter()
+                .enumerate()
+                .filter(|(i, b)| {
+                    b.k == "img"
+                        && !self.books.images.contains_key(&i.to_string())
+                        && !self.books.image_requests.contains(&i.to_string())
+                        && state.rows.get(*i).is_some_and(|r| {
+                            Rectangle::new(
+                                layout.bounds().position() + Vector::new(r.x, r.y),
+                                Size::new(r.width, r.height),
+                            )
+                            .intersects(viewport)
+                        })
+                })
+                .map(|(i, _)| i)
+                .collect();
+            if !images.is_empty() {
+                shell.publish(Message::Images(images));
+            }
+        }
+        if matches!(event, Event::Mouse(mouse::Event::CursorMoved { .. })) {
+            shell.publish(Message::Poke);
+        }
+        let Some(point) = cursor.position() else { return };
+        let local = point - Vector::new(layout.bounds().x, layout.bounds().y);
+        let row_index = state.rows.partition_point(|r| r.y <= local.y).saturating_sub(1);
+        let Some(row) = state.rows.get(row_index) else { return };
+        let position = row
+            .paragraph
+            .hit_test(Point::new(local.x - row.x, local.y - row.y))
+            .map(|hit| {
+                let before = row.text.split_inclusive('\n').take(hit.line).map(str::len).sum::<usize>();
+                let at = before.saturating_add(hit.index).min(row.text.len());
+                doc.blocks[row_index].at + row.text[..row.text.floor_char_boundary(at)].chars().count()
+            })
+            .unwrap_or(doc.blocks[row_index].at);
+        match event {
+            Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left))
+                if cursor.is_over(*viewport) && cursor.is_over(layout.bounds()) =>
+            {
+                let click = mouse::Click::new(point, mouse::Button::Left, state.click);
+                state.click = Some(click);
+                if click.kind() == mouse::click::Kind::Single {
+                    state.drag = Some((position, point));
+                } else if let Some(word) = doc.word_at(position) {
+                    shell.publish(Message::Select(word, Some(word.end - 1)));
+                }
+                shell.capture_event();
+            },
+            Event::Mouse(mouse::Event::CursorMoved { .. }) if state.drag.is_some() => {
+                let (start, _) = state.drag.unwrap();
+                shell.publish(Message::Select(doc.snap_to_words(start, position), None));
+                shell.capture_event();
+            },
+            Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
+                if let Some((start, origin)) = state.drag.take() {
+                    if (point.x - origin.x).hypot(point.y - origin.y) < 3.0 {
+                        let piece = row
+                            .paragraph
+                            .hit_span(Point::new(local.x - row.x, local.y - row.y))
+                            .and_then(|i| row.pieces.get(i));
+                        if let Some(to) = piece.and_then(|p| p.to) {
+                            shell.publish(Message::Jump(doc.blocks.get(to).map_or(0, |b| b.at)));
+                        } else if let Some(href) = piece.and_then(|p| p.href.clone()) {
+                            shell.publish(Message::Link(href));
+                        } else if let Some(quote) = self
+                            .books
+                            .quotes()
+                            .iter()
+                            .find(|q| q.range().is_some_and(|r| position >= r.start && position < r.end))
+                        {
+                            shell.publish(Message::OpenQuote(quote.id));
+                        } else if self.books.selection.is_some() {
+                            shell.publish(Message::ClearSelection);
+                        }
+                    } else {
+                        let range = doc.snap_to_words(start, position);
+                        let end = if position < start { range.start } else { range.end.saturating_sub(1) };
+                        shell.publish(Message::Select(range, Some(end)));
+                    }
+                    shell.capture_event();
+                }
+            },
+            _ => {},
+        }
+    }
+
+    fn mouse_interaction(
+        &self,
+        _tree: &Tree,
+        layout: layout::Layout,
+        cursor: mouse::Cursor,
+        _viewport: &Rectangle,
+        _renderer: &Renderer,
+    ) -> mouse::Interaction {
+        if self.books.focused && self.books.idle() {
+            mouse::Interaction::Hidden
+        } else if cursor.is_over(layout.bounds()) {
+            mouse::Interaction::Text
+        } else {
+            mouse::Interaction::default()
+        }
+    }
+
+    fn overlay<'b>(
+        &'b mut self,
+        tree: &'b mut Tree,
+        layout: layout::Layout,
+        renderer: &Renderer,
+        viewport: &Rectangle,
+        translation: Vector,
+        window: Size,
+    ) -> Vec<overlay::Element<'b, Message, Theme, Renderer>> {
+        let (Some(content), Some(doc), Some(range), Some(at)) =
+            (self.menu.as_mut(), &self.books.document, self.books.selection, self.books.menu)
+        else {
+            return Vec::new();
+        };
+        let state = tree.state.downcast_ref::<State>();
+        if state.drag.is_some() {
+            return Vec::new();
+        }
+        let Some(word) = word_bounds(state, doc, at).map(|r| r + Vector::new(layout.bounds().x, layout.bounds().y))
+        else {
+            return Vec::new();
+        };
+        if !viewport.intersects(&word) {
+            return Vec::new();
+        }
+        let (word, shown) = (word + translation, *viewport + translation);
+        let tree = &mut tree.children[0];
+        tree.diff::<Message, Theme, Renderer>(content);
+        content.layout(tree, renderer, &layout::Limits::new(Size::ZERO, window));
+        let size = tree.size;
+        let x = if at == range.start { word.x } else { word.x + word.width };
+        let below = word.y + word.height + GAP;
+        let y = if below + size.height <= shown.y + shown.height - EDGE { below } else { word.y - GAP - size.height };
+        let x = (x - size.width / 2.0).min(shown.x + shown.width - size.width - EDGE).max(shown.x + EDGE);
+        let layout = layout::Layout::new(size).move_to(Point::new(x, y));
+        vec![overlay::Element::new(Box::new(Float { content, tree, layout, window }))]
+    }
+}
+
+/// How far the selection's menu keeps from the line it's under.
+const GAP: f32 = 8.0;
+
+/// Where the word holding `position` is drawn, in the article; the whole block for one without words.
+fn word_bounds(state: &State, doc: &Document, position: usize) -> Option<Rectangle> {
+    let i = doc.locate(position).0;
+    let row = state.rows.get(i)?;
+    let rect = row
+        .pieces
+        .iter()
+        .position(|p| p.range.start <= position && position < p.range.end)
+        .and_then(|span| row.paragraph.span_bounds(span).last().copied())
+        .unwrap_or(Rectangle::new(Point::ORIGIN, Size::new(row.width, row.height)));
+    Some(rect + Vector::new(row.x, row.y))
+}
+
+struct Float<'b, 'a> {
+    content: &'b mut Element<'a, Message>,
+    tree: &'b mut Tree,
+    layout: layout::Layout,
+    window: Size,
+}
+impl iced_core::Overlay<Message, Theme, Renderer> for Float<'_, '_> {
+    fn draw(&self, renderer: &mut Renderer, theme: &Theme, style: &renderer::Style, cursor: mouse::Cursor) {
+        self.content.draw(self.tree, renderer, theme, style, self.layout, cursor, &Rectangle::with_size(self.window));
+    }
+
+    fn operate(&mut self, renderer: &Renderer, operation: &mut dyn iced_core::widget::Operation) {
+        self.content.operate(self.tree, self.layout, &self.layout.bounds(), renderer, operation);
+    }
+
+    fn update(
+        &mut self,
+        event: &Event,
+        cursor: mouse::Cursor,
+        renderer: &Renderer,
+        shell: &mut iced_core::Shell<'_, Message>,
+    ) {
+        self.content.update(self.tree, event, self.layout, cursor, renderer, shell, &self.layout.bounds());
+        // A press on the menu between its controls mustn't reach the text under it and clear the selection.
+        if matches!(event, Event::Mouse(mouse::Event::ButtonPressed(_) | mouse::Event::ButtonReleased(_)))
+            && cursor.is_over(self.layout.bounds())
+        {
+            shell.capture_event();
+        }
+    }
+
+    fn mouse_interaction(&self, cursor: mouse::Cursor, renderer: &Renderer) -> mouse::Interaction {
+        self.content.mouse_interaction(self.tree, self.layout, cursor, &self.layout.bounds(), renderer)
+    }
+}
+
+fn overlaps(a: Range, b: Range) -> bool {
+    a.start < b.end && a.end > b.start
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use iced_core::{Event, Point, Size, mouse, window};
+    use iced_wgpu::graphics::Shell;
+    use iced_wgpu::{Engine, Renderer, wgpu};
+    use iced_widget::{Element, Widget as _};
+    use iced_winit::runtime::user_interface::{Cache, UserInterface};
+
+    use super::super::model::Range;
+    use super::super::{Books, Message};
+
+    fn renderer() -> Renderer {
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
+        let adapter = futures::executor::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))
+            .expect("no GPU adapter");
+        let (device, queue) =
+            futures::executor::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())).unwrap();
+        let engine = Engine::new(&adapter, device, queue, wgpu::TextureFormat::Rgba8Unorm, None, Shell::headless());
+        Renderer::new(engine, iced_core::renderer::Settings::default())
+    }
+
+    /// What the reader sends for `steps` of the pointer, the first line of text being at y 40–70.
+    fn press(books: &Books, steps: &[(Point, mouse::Event)]) -> Vec<Message> {
+        let mut renderer = renderer();
+        let waker = iced_core::shell::Waker::new(|| {});
+        let mut cache = Cache::new();
+        let mut sent = Vec::new();
+        for (at, event) in steps {
+            let article: Element<'_, Message> = super::Article {
+                books,
+                menu: None,
+                ink: iced_core::Color::BLACK,
+                secondary: iced_core::Color::BLACK,
+                highlight: iced_core::Color::BLACK,
+            }
+            .boxed();
+            let mut interface = UserInterface::build(article, Size::new(800.0, 600.0), cache, &mut renderer);
+            let mut messages = iced_core::shell::Bus::new();
+            interface.update(
+                &window::Headless,
+                &waker,
+                &[Event::Mouse(*event)],
+                mouse::Cursor::Available(*at),
+                &mut renderer,
+                &mut messages,
+            );
+            cache = interface.into_cache();
+            sent.extend(messages);
+        }
+        sent
+    }
+
+    fn books() -> Books {
+        let text = "The light fell through the open window. We walked beside the river, talking about books.";
+        let document = serde_json::json!({"length": text.chars().count(), "chapters": [], "blocks": [{"k": "p", "at": 0, "s": [{"t": text}]}]});
+        Books { document: Some(Arc::new(serde_json::from_value(document).unwrap())), ..Books::default() }
+    }
+
+    fn click(at: Point) -> [(Point, mouse::Event); 2] {
+        [
+            (at, mouse::Event::ButtonPressed(mouse::Button::Left)),
+            (at, mouse::Event::ButtonReleased(mouse::Button::Left)),
+        ]
+    }
+
+    #[test]
+    #[ignore = "requires Vulkan; selects text headlessly"]
+    fn the_menu_waits_for_the_selection_to_be_made() {
+        let (from, to) = (Point::new(100.0, 50.0), Point::new(300.0, 50.0));
+        let sent = press(
+            &books(),
+            &[
+                (from, mouse::Event::CursorMoved { position: from }),
+                (from, mouse::Event::ButtonPressed(mouse::Button::Left)),
+                (to, mouse::Event::CursorMoved { position: to }),
+                (to, mouse::Event::ButtonReleased(mouse::Button::Left)),
+            ],
+        );
+        let selects: Vec<_> = sent
+            .iter()
+            .filter_map(|m| match m {
+                Message::Select(range, at) => Some((*range, *at)),
+                _ => None,
+            })
+            .collect();
+        assert!(matches!(selects.first(), Some((_, None))), "{sent:?}");
+        assert!(matches!(selects.last(), Some((range, Some(at))) if *at == range.end - 1), "{sent:?}");
+    }
+
+    #[test]
+    #[ignore = "requires Vulkan; clicks text headlessly"]
+    fn a_click_lets_go_of_the_selection_and_a_double_click_picks_a_word() {
+        let at = Point::new(100.0, 50.0);
+        let mut books = books();
+        books.selection = Some(Range { start: 0, end: 9 });
+        let sent = press(&books, &click(at));
+        assert!(matches!(sent.as_slice(), [Message::ClearSelection]), "{sent:?}");
+        books.selection = None;
+        let sent = press(&books, &[click(at), click(at)].concat());
+        assert!(
+            matches!(sent.as_slice(), [Message::Select(word, Some(end))] if *end == word.end - 1 && word.end > word.start),
+            "{sent:?}"
+        );
+    }
+}

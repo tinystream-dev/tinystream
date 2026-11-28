@@ -124,12 +124,25 @@ function positionIn(doc: BookDocument, block: HTMLElement, node: Node, offset: n
 
 export type Picked = { start: number; end: number; rect: DOMRect }
 
-/** What's selected in the text, as whole words, while something is. */
+/** Where a selection ends on screen: the edge of the line it was dragged (or extended) to. */
+function endOf(sel: Selection, range: Range): DOMRect {
+  const backwards = sel.focusNode === range.startContainer && sel.focusOffset === range.startOffset
+  const lines = [...range.getClientRects()].filter((r) => r.width > 0)
+  const line = backwards ? lines[0] : lines[lines.length - 1]
+  if (!line) return range.getBoundingClientRect()
+  return new DOMRect(backwards ? line.left : line.right, line.top, 0, line.height)
+}
+
+/**
+ * What's selected in the text, as whole words, once it's been picked: when the pointer lets go, or
+ * when a selection made with keys has stopped changing.
+ */
 export function useSelectionIn(article: React.RefObject<HTMLElement | null>, doc: BookDocument | undefined): [Picked | null, () => void] {
   const [picked, setPicked] = useState<Picked | null>(null)
   useEffect(() => {
     if (!doc) return
-    let frame = 0
+    let down = false
+    let timer = 0
     const read = () => {
       const sel = getSelection()
       const root = article.current
@@ -146,15 +159,35 @@ export function useSelectionIn(article: React.RefObject<HTMLElement | null>, doc
         ? positionIn(doc, last, range.endContainer, range.endOffset)
         : (doc.blocks[lastIndex + 1]?.at ?? doc.length)
       if (end <= start) return setPicked(null)
-      setPicked({ ...snapToWords(doc, start, end), rect: range.getBoundingClientRect() })
+      setPicked({ ...snapToWords(doc, start, end), rect: endOf(sel, range) })
+    }
+    const onDown = (e: PointerEvent) => {
+      if (e.button !== 0 || !article.current?.contains(e.target as Node)) return
+      down = true
+      clearTimeout(timer)
+      setPicked(null)
+    }
+    const onUp = () => {
+      if (!down) return
+      down = false
+      // After the press's own selection change (a click inside a selection collapses it).
+      timer = window.setTimeout(read)
     }
     const onChange = () => {
-      cancelAnimationFrame(frame)
-      frame = requestAnimationFrame(read)
+      if (down) return
+      clearTimeout(timer)
+      if (getSelection()?.isCollapsed ?? true) return setPicked(null)
+      timer = window.setTimeout(read, 300)
     }
+    document.addEventListener('pointerdown', onDown)
+    document.addEventListener('pointerup', onUp)
+    document.addEventListener('pointercancel', onUp)
     document.addEventListener('selectionchange', onChange)
     return () => {
-      cancelAnimationFrame(frame)
+      clearTimeout(timer)
+      document.removeEventListener('pointerdown', onDown)
+      document.removeEventListener('pointerup', onUp)
+      document.removeEventListener('pointercancel', onUp)
       document.removeEventListener('selectionchange', onChange)
     }
   }, [article, doc])
@@ -162,16 +195,18 @@ export function useSelectionIn(article: React.RefObject<HTMLElement | null>, doc
 }
 
 /**
- * Floats over the page at `rect` (above it, or under it when there's no room), and goes away on a
- * press outside it or Escape.
+ * Floats over the page at `rect` (above it, or under it with `under`, taking the other side when
+ * there's no room), and goes away on a press outside it or Escape.
  */
-function Floating({ rect, onClose, children }: { rect: DOMRect; onClose?: () => void; children: ReactNode }) {
+function Floating({ rect, under = false, onClose, children }: { rect: DOMRect; under?: boolean; onClose?: () => void; children: ReactNode }) {
   const ref = useRef<HTMLDivElement>(null)
-  const [below, setBelow] = useState(false)
+  const [below, setBelow] = useState(under)
+  const [width, setWidth] = useState(0)
   useLayoutEffect(() => {
     const h = ref.current?.offsetHeight ?? 0
-    setBelow(rect.top - h - 10 < 64)
-  }, [rect])
+    setWidth(ref.current?.offsetWidth ?? 0)
+    setBelow(under ? rect.bottom + h + 10 <= innerHeight - 12 || rect.top - h - 10 < 64 : rect.top - h - 10 < 64)
+  })
   useEffect(() => {
     if (!onClose) return
     const onDown = (e: PointerEvent) => !ref.current?.contains(e.target as Node) && onClose()
@@ -189,8 +224,12 @@ function Floating({ rect, onClose, children }: { rect: DOMRect; onClose?: () => 
   }, [onClose])
   // Pinned to the page where it was asked for, so it scrolls with the text.
   const at = useMemo(
-    () => ({ x: Math.max(12, Math.min(innerWidth - 12, rect.left + rect.width / 2)) + scrollX, top: rect.top - 10 + scrollY, bottom: rect.bottom + 10 + scrollY }),
-    [rect],
+    () => ({
+      x: Math.max(12 + width / 2, Math.min(innerWidth - 12 - width / 2, rect.left + rect.width / 2)) + scrollX,
+      top: rect.top - 10 + scrollY,
+      bottom: rect.bottom + 10 + scrollY,
+    }),
+    [rect, width],
   )
   return createPortal(
     <div
@@ -235,7 +274,7 @@ export function SelectionBar({ book, doc, picked, onDone }: { book: number; doc:
     onDone()
   }
   return (
-    <Floating rect={picked.rect}>
+    <Floating rect={picked.rect} under>
       <Panel radius={12} className="p-1">
         {sending ? (
           <div className="flex items-center gap-1.5 p-0.5">

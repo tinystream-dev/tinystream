@@ -97,7 +97,14 @@ fn is_font(filename: &str, mimetype: Option<&str>) -> bool {
         || [".ttf", ".otf", ".ttc", ".woff", ".woff2"].iter().any(|e| f.ends_with(e))
 }
 
+#[cfg(test)]
 pub fn probe(path: &Path) -> anyhow::Result<MediaInfo> {
+    let mut info = embedded(path)?;
+    info.subtitles.extend(super::subs::sidecars(path));
+    Ok(info)
+}
+
+pub(super) fn embedded(path: &Path) -> anyhow::Result<MediaInfo> {
     let input = Input::open(path, true)?;
     let ctx = unsafe { &*input.0 };
 
@@ -186,7 +193,6 @@ pub fn probe(path: &Path) -> anyhow::Result<MediaInfo> {
         });
     }
 
-    info.subtitles.extend(super::subs::sidecars(path));
     Ok(info)
 }
 

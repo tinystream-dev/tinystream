@@ -217,7 +217,7 @@ export function ReleaseDialog({
             {isFetching
               ? 'Asking every source…'
               : data
-                ? `${accepted.length} good match${accepted.length === 1 ? '' : 'es'} out of ${data.length} results`
+                ? `${accepted.length} good match${accepted.length === 1 ? '' : 'es'} out of ${data.length} result${data.length === 1 ? '' : 's'}`
                 : ''}
           </p>
         </div>

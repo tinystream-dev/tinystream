@@ -1,0 +1,12 @@
+[package]
+name = "tinystream-subtitle-renderer"
+description = "Shared rustyass rendering and RGBA composition for tinystream players"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+rustyass = "=0.1.0"

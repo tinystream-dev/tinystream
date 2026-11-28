@@ -1,0 +1,15 @@
+[package]
+name = "ffnvcodec-src"
+# The version of nv-codec-headers it installs (n12.1.14.0 upstream: NVDEC/NVENC with driver 530.41 or
+# newer).
+version = "12.1.14"
+edition.workspace = true
+description = "NVIDIA's nv-codec-headers, for FFmpeg's NVDEC and CUVID; libcuda is loaded at runtime"
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish = false
+links = "ffnvcodec"
+
+[build-dependencies]
+native-support = { path = "../support" }

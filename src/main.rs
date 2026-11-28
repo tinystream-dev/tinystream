@@ -40,7 +40,6 @@ mod notifications;
 mod paths;
 mod state;
 mod tailscale;
-mod theme;
 mod tint;
 mod together;
 #[cfg(feature = "web-ui")]
@@ -51,6 +50,7 @@ use std::sync::Arc;
 use anyhow::Context;
 use axum::serve::ListenerExt;
 use clap::Parser;
+use tinystream_theme as theme;
 use tokio::net::TcpListener;
 
 use crate::cli::{Cli, Command};

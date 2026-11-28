@@ -72,14 +72,19 @@ pub fn spawn(req: StreamRequest, hw: Option<BufferRef>) -> mpsc::Receiver<Chunk>
         .spawn(move || {
             let started = std::time::Instant::now();
             let mut sink = Sink { tx, sent: false };
-            let mut result = run(&req, hw.as_ref(), &mut sink);
+            let mut result = run(&req, hw.as_ref(), true, &mut sink);
+
+            if matches!(result, Err(Stop::Hardware(_))) && hw::is_cuda(hw.as_ref()) {
+                tracing::info!("retrying {} with software decode and NVENC encode", req.path.display());
+                result = run(&req, hw.as_ref(), false, &mut sink);
+            }
 
             if let Err(Stop::Hardware(e)) = &result {
                 tracing::warn!(
                     "hardware transcoding couldn't handle {}: {e:#}; retrying in software",
                     req.path.display()
                 );
-                result = run(&req, None, &mut sink);
+                result = run(&req, None, false, &mut sink);
             }
 
             match result {
@@ -134,7 +139,7 @@ impl Mux {
     }
 }
 
-fn run(req: &StreamRequest, hw: Option<&BufferRef>, sink: &mut Sink) -> Result<(), Stop> {
+fn run(req: &StreamRequest, hw: Option<&BufferRef>, hardware_decode: bool, sink: &mut Sink) -> Result<(), Stop> {
     let mut input = Input::open(&req.path, true)?;
     let v_idx = unsafe { ffi::av_find_best_stream(input.0, ffi::AVMEDIA_TYPE_VIDEO, -1, -1, ptr::null_mut(), 0) };
 
@@ -208,13 +213,17 @@ fn run(req: &StreamRequest, hw: Option<&BufferRef>, sink: &mut Sink) -> Result<(
             }
             Video::Copy { started: false }
         },
-        VideoMode::Transcode { max_height } => Video::Transcode(Box::new(VideoTranscode::new(
-            vst,
-            hw,
-            max_height,
-            (req.start * ff::q2d(ffi::av_inv_q(v_tb))) as i64,
-            unsafe { (*input.0).bit_rate },
-        )?)),
+        VideoMode::Transcode { max_height } => Video::Transcode(Box::new(
+            VideoTranscode::new(
+                vst,
+                hw,
+                hardware_decode,
+                max_height,
+                (req.start * ff::q2d(ffi::av_inv_q(v_tb))) as i64,
+                unsafe { (*input.0).bit_rate },
+            )
+            .map_err(|error| if hw.is_some() { Stop::Hardware(error) } else { Stop::Failed(error) })?,
+        )),
     };
 
     let mut audio = match a_idx {
@@ -356,21 +365,36 @@ struct VideoTranscode {
     first: bool,
 }
 
-pub(super) unsafe extern "C" fn prefer_vaapi(
-    _ctx: *mut ffi::AVCodecContext,
+pub(super) unsafe extern "C" fn prefer_hardware(
+    ctx: *mut ffi::AVCodecContext,
     fmts: *const ffi::AVPixelFormat,
 ) -> ffi::AVPixelFormat {
     let mut p = fmts;
 
     unsafe {
+        let wanted = if !(*ctx).hw_device_ctx.is_null()
+            && (*((*(*ctx).hw_device_ctx).data as *const ffi::AVHWDeviceContext)).type_ == ffi::AV_HWDEVICE_TYPE_CUDA
+        {
+            ffi::AV_PIX_FMT_CUDA
+        } else {
+            ffi::AV_PIX_FMT_VAAPI
+        };
         while *p != ffi::AV_PIX_FMT_NONE {
-            if *p == ffi::AV_PIX_FMT_VAAPI {
+            if *p == wanted {
                 return *p;
             }
 
             p = p.add(1);
         }
 
+        p = fmts;
+        while *p != ffi::AV_PIX_FMT_NONE {
+            let desc = ffi::av_pix_fmt_desc_get(*p);
+            if !desc.is_null() && (*desc).flags & ffi::AV_PIX_FMT_FLAG_HWACCEL as u64 == 0 {
+                return *p;
+            }
+            p = p.add(1);
+        }
         *fmts
     }
 }
@@ -418,6 +442,7 @@ impl VideoTranscode {
     fn new(
         st: &ffi::AVStream,
         hw: Option<&BufferRef>,
+        hardware_decode: bool,
         max_height: i32,
         start_pts: i64,
         container_bitrate: i64,
@@ -426,7 +451,7 @@ impl VideoTranscode {
         let mut decoder = unsafe { ffi::avcodec_find_decoder(par.codec_id) };
 
         if par.codec_id == ffi::AV_CODEC_ID_AV1 {
-            let name = if hw.is_some() && hw::GPU_FRAMES { c"av1" } else { c"libdav1d" };
+            let name = if hardware_decode && hw.is_some() && hw::GPU_FRAMES { c"av1" } else { c"libdav1d" };
             let d = unsafe { ffi::avcodec_find_decoder_by_name(name.as_ptr()) };
 
             if !d.is_null() {
@@ -446,9 +471,9 @@ impl VideoTranscode {
             d.pkt_timebase = st.time_base;
             d.thread_count = 0;
 
-            if let Some(dev) = hw.filter(|_| hw::GPU_FRAMES) {
+            if let Some(dev) = hw.filter(|_| hardware_decode && hw::GPU_FRAMES) {
                 d.hw_device_ctx = dev.new_ref();
-                d.get_format = Some(prefer_vaapi);
+                d.get_format = Some(prefer_hardware);
                 d.extra_hw_frames = 8;
             }
         }
@@ -524,13 +549,31 @@ impl VideoTranscode {
         let height = f.height.min(self.max_height.max(144)) & !1;
         let width = ((f.width as i64 * height as i64 / f.height.max(1) as i64) as i32 + 1) & !1;
 
-        let (desc, device) = match (&self.hw, f.format == ffi::AV_PIX_FMT_VAAPI) {
-            (Some(_), true) => (format!("scale_vaapi=w={width}:h={height}:format=nv12"), None),
-            (Some(dev), false) if hw::GPU_FRAMES => (format!("scale={width}:{height},format=nv12,hwupload"), Some(dev)),
-            (Some(_), false) => (format!("scale={width}:{height}:flags=bicubic,format=nv12"), None),
-            (None, _) => (format!("scale={width}:{height}:flags=bicubic,format=yuv420p"), None),
+        let hdr = matches!(f.color_trc, ffi::AVCOL_TRC_SMPTE2084 | ffi::AVCOL_TRC_ARIB_STD_B67);
+        let on_gpu = matches!(f.format, ffi::AV_PIX_FMT_VAAPI | ffi::AV_PIX_FMT_CUDA);
+        let (desc, device) = if hdr {
+            let download =
+                if on_gpu { format!("hwdownload,format={},", hw::download_format(f)) } else { String::new() };
+            let output = if self.hw.is_some() { "nv12" } else { "yuv420p" };
+            let upload = if self.hw.is_some() && hw::GPU_FRAMES { ",hwupload" } else { "" };
+            (
+                format!("{download}scale={width}:{height}:flags=bicubic,{},format={output}{upload}", hw::SDR_TONEMAP),
+                self.hw.as_ref(),
+            )
+        } else {
+            match (&self.hw, on_gpu) {
+                (Some(dev), gpu) if hw::is_cuda(Some(dev)) => {
+                    let upload = if gpu { "" } else { "format=nv12,hwupload," };
+                    (format!("{upload}scale_cuda=w={width}:h={height}:format=nv12"), Some(dev))
+                },
+                (Some(_), true) => (format!("scale_vaapi=w={width}:h={height}:format=nv12"), None),
+                (Some(dev), false) if hw::GPU_FRAMES => {
+                    (format!("scale={width}:{height},format=nv12,hwupload"), Some(dev))
+                },
+                (Some(_), false) => (format!("scale={width}:{height}:flags=bicubic,format=nv12"), None),
+                (None, _) => (format!("scale={width}:{height}:flags=bicubic,format=yuv420p"), None),
+            }
         };
-
         tracing::debug!(
             "transcoding {}x{} → {width}x{height} via `{desc}` ({} decode)",
             f.width,
@@ -566,7 +609,7 @@ impl VideoTranscode {
         let g = self.graph.as_ref().unwrap();
         let hw_frames = unsafe { ffi::av_buffersink_get_hw_frames_ctx(g.sink) };
         let hardware = if hw::GPU_FRAMES { !hw_frames.is_null() } else { self.hw.is_some() };
-        let name = hw::h264_encoder(hardware);
+        let name = hw::h264_encoder(hardware, self.hw.as_ref());
         let codec = unsafe { ffi::avcodec_find_encoder_by_name(name.as_ptr()) };
 
         if codec.is_null() {
@@ -591,6 +634,11 @@ impl VideoTranscode {
             e.rc_max_rate = bitrate * 3 / 2;
             e.rc_buffer_size = (bitrate * 2) as c_int;
             e.profile = ffi::AV_PROFILE_H264_HIGH as c_int;
+            let frame = self.filtered.get();
+            e.color_primaries = frame.color_primaries;
+            e.color_trc = frame.color_trc;
+            e.colorspace = frame.colorspace;
+            e.color_range = frame.color_range;
             e.flags |= ffi::AV_CODEC_FLAG_GLOBAL_HEADER as c_int;
 
             if !hw_frames.is_null() {
@@ -604,7 +652,13 @@ impl VideoTranscode {
             }
         }
 
-        let mut opts = if hardware { Dict::new(&[]) } else { Dict::new(&[("preset", "veryfast"), ("crf", "21")]) };
+        let mut opts = if hardware && hw::is_cuda(self.hw.as_ref()) {
+            Dict::new(&[("preset", "p4"), ("rc", "vbr"), ("cq", "23")])
+        } else if hardware {
+            Dict::new(&[])
+        } else {
+            Dict::new(&[("preset", "veryfast"), ("crf", "21")])
+        };
 
         if let Err(e) = enc.open(&mut opts) {
             let e = e.context(format!("opening {name:?}"));
@@ -910,6 +964,35 @@ impl AudioTranscode {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    #[ignore = "transcodes TINYSTREAM_TEST_VIDEO (a short HDR fixture)"]
+    async fn hdr_stream_is_encoded_as_sdr() {
+        let path = PathBuf::from(std::env::var("TINYSTREAM_TEST_VIDEO").unwrap());
+        let output = std::env::temp_dir().join(format!("ts-hdr-{}.mp4", uuid::Uuid::new_v4()));
+        let mut rx = spawn(
+            StreamRequest {
+                path,
+                start: 0.0,
+                video: VideoMode::Transcode { max_height: 720 },
+                audio_stream: None,
+                audio: AudioMode::Aac,
+            },
+            None,
+        );
+        let mut bytes = Vec::new();
+        while let Some(chunk) = rx.recv().await {
+            bytes.extend_from_slice(&chunk.unwrap());
+        }
+        std::fs::write(&output, bytes).unwrap();
+        let input = Input::open(&output, true).unwrap();
+        let par = unsafe { &*input.stream(0).unwrap().codecpar };
+        assert_eq!(par.codec_id, ffi::AV_CODEC_ID_H264);
+        assert_eq!(par.color_trc, ffi::AVCOL_TRC_BT709);
+        assert_eq!(par.color_primaries, ffi::AVCOL_PRI_BT709);
+        assert_eq!(par.color_space, ffi::AVCOL_SPC_BT709);
+        std::fs::remove_file(output).unwrap();
+    }
 
     fn source(bitrate: i64, height: i32, h264_factor: f64) -> Option<SourceRate> {
         Some(SourceRate { bitrate, height, h264_factor })

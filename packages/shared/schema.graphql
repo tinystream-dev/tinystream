@@ -755,6 +755,7 @@ type Genre {
 enum Hardware {
 	AUTO
 	VAAPI
+	NVENC
 	SOFTWARE
 }
 
@@ -781,6 +782,7 @@ enum ImportMode {
 }
 
 enum ImportState {
+	PARTIAL
 	PENDING
 	DONE
 	FAILED
@@ -1013,7 +1015,11 @@ type Mutation {
 	removeAvatar(userId: Int): User!
 	setWatched(videoIds: [Int!]!, watched: Boolean!): [Video!]!
 	setTitleWatched(id: Int!, watched: Boolean!): Title!
-	saveProgress(videoId: Int!, position: Float!, duration: Float!): Video!
+	"""
+	Where someone got to, now or `at` (unix seconds) for an app catching up on what was watched
+	offline; an older position never replaces a newer one.
+	"""
+	saveProgress(videoId: Int!, position: Float!, duration: Float!, at: Int): Video!
 	matchTitle(id: Int!, provider: Provider!, providerId: String!): Title!
 	setTitleArtwork(id: Int!, kind: TitleArtwork!, image: Upload): Title!
 	setVideoArtwork(videoId: Int!, image: Upload): Video!
@@ -1024,9 +1030,10 @@ type Mutation {
 	"""
 	rate(kind: MusicKind!, id: Int!, rating: Int!): Boolean!
 	"""
-	Someone listened to (most of) a track.
+	Someone listened to (most of) a track, now or `at` (unix seconds) for an app catching up
+	on what it played offline.
 	"""
-	played(trackId: Int!): Boolean!
+	played(trackId: Int!, at: Int): Boolean!
 	"""
 	What's playing in tinystream's own player right now (the web's, or `client`, the app's), so
 	other apps see it; no track means it stopped.
@@ -1236,7 +1243,7 @@ input NewUser {
 	username: String!
 	password: String!
 	isAdmin: Boolean! = false
-	permissions: PermissionOverridesInput! = {allLibraries: null, libraries: null, request: null, autoApprove: null, requestLimit: null, manageRequests: null, manageShows: null, downloads: null, editMetadata: null, watchTogether: null, shareLinks: null, clip: null, clipMaxLength: null, clipLimit: null, clipStorage: null, clipLinks: null}
+	permissions: PermissionOverridesInput! = {allLibraries: null, libraries: null, request: null, autoApprove: null, requestLimit: null, manageRequests: null, manageShows: null, downloads: null, editMetadata: null, watchTogether: null, shareLinks: null, clip: null, clipMaxLength: null, clipLimit: null, clipStorage: null, clipLinks: null, offlineDownloads: null}
 }
 
 type NextUp {
@@ -1319,6 +1326,7 @@ type PermissionOverrides {
 	clipLimit: Int
 	clipStorage: Int
 	clipLinks: Boolean
+	offlineDownloads: Boolean
 }
 
 input PermissionOverridesInput {
@@ -1338,6 +1346,7 @@ input PermissionOverridesInput {
 	clipLimit: Int
 	clipStorage: Int
 	clipLinks: Boolean
+	offlineDownloads: Boolean
 }
 
 type Permissions {
@@ -1357,6 +1366,7 @@ type Permissions {
 	clipLimit: Int!
 	clipStorage: Int!
 	clipLinks: Boolean!
+	offlineDownloads: Boolean!
 }
 
 input PermissionsInput {
@@ -1376,6 +1386,7 @@ input PermissionsInput {
 	clipLimit: Int!
 	clipStorage: Int!
 	clipLinks: Boolean!
+	offlineDownloads: Boolean!
 }
 
 type PlayQueue {
@@ -2301,16 +2312,20 @@ input TracksInput {
 type TranscodeConfig {
 	hardware: Hardware!
 	vaapiDevice: String!
+	cudaDevice: Int!
 }
 
 input TranscodeConfigInput {
 	hardware: Hardware!
 	vaapiDevice: String!
+	cudaDevice: Int!
 }
 
 type Transcoding {
 	vaapi: String
 	vaapiError: String
+	nvenc: String
+	nvencError: String
 	softwareH264: Boolean!
 }
 

@@ -45,7 +45,7 @@ FROM debian:trixie AS build
 RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential pkg-config ca-certificates curl git tar \
         meson ninja-build autoconf automake libtool \
-        libclang-dev libssl-dev libdrm-dev \
+        clang libclang-dev libssl-dev libdrm-dev \
         zlib1g-dev libbz2-dev liblzma-dev \
     && rm -rf /var/lib/apt/lists/*
 

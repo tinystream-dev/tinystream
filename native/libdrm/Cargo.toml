@@ -1,0 +1,14 @@
+[package]
+name = "libdrm-src"
+# The version of libdrm it builds.
+version = "2.4.134"
+edition = "2024"
+description = "A static libdrm, without the drivers' libraries, for mpv's VA-API and DRM support"
+license = "AGPL-3.0-or-later"
+authors = ["Phrolova <me@phrolova.moe>"]
+repository = "https://github.com/phrolova/tinystream"
+publish = false
+links = "drm"
+
+[build-dependencies]
+native-support = { path = "../support" }

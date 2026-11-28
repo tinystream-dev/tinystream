@@ -692,6 +692,7 @@ export type Genre = {
 
 export type Hardware =
   | 'AUTO'
+  | 'NVENC'
   | 'SOFTWARE'
   | 'VAAPI';
 
@@ -719,6 +720,7 @@ export type ImportMode =
 export type ImportState =
   | 'DONE'
   | 'FAILED'
+  | 'PARTIAL'
   | 'PENDING'
   | 'SKIPPED';
 
@@ -945,7 +947,10 @@ export type Mutation = {
    */
   nowPlaying: Scalars['Boolean']['output'];
   pauseDownloads: Array<Download>;
-  /** Someone listened to (most of) a track. */
+  /**
+   * Someone listened to (most of) a track, now or `at` (unix seconds) for an app catching up
+   * on what it played offline.
+   */
   played: Scalars['Boolean']['output'];
   /** Shares one of your schemes with everyone here, or takes it back. */
   publishScheme: ColorScheme;
@@ -976,6 +981,10 @@ export type Mutation = {
   revokeInvite: Scalars['Boolean']['output'];
   /** Saves the queue of tinystream's own player: the web's, or `client`, the app's. */
   savePlayQueue: PlayQueue;
+  /**
+   * Where someone got to, now or `at` (unix seconds) for an app catching up on what was watched
+   * offline; an older position never replaces a newer one.
+   */
   saveProgress: Video;
   /** Where someone is in a book, in characters of its `length`; reaching the end finishes it. */
   saveReading: Book;
@@ -1253,6 +1262,7 @@ export type MutationPauseDownloadsArgs = {
 
 
 export type MutationPlayedArgs = {
+  at?: InputMaybe<Scalars['Int']['input']>;
   trackId: Scalars['Int']['input'];
 };
 
@@ -1359,6 +1369,7 @@ export type MutationSavePlayQueueArgs = {
 
 
 export type MutationSaveProgressArgs = {
+  at?: InputMaybe<Scalars['Int']['input']>;
   duration: Scalars['Float']['input'];
   position: Scalars['Float']['input'];
   videoId: Scalars['Int']['input'];
@@ -1732,6 +1743,7 @@ export type PermissionOverrides = {
   libraries?: Maybe<Array<Scalars['String']['output']>>;
   manageRequests?: Maybe<Scalars['Boolean']['output']>;
   manageShows?: Maybe<Scalars['Boolean']['output']>;
+  offlineDownloads?: Maybe<Scalars['Boolean']['output']>;
   request?: Maybe<Scalars['Boolean']['output']>;
   requestLimit?: Maybe<Scalars['Int']['output']>;
   shareLinks?: Maybe<Scalars['Boolean']['output']>;
@@ -1751,6 +1763,7 @@ export type PermissionOverridesInput = {
   libraries?: InputMaybe<Array<Scalars['String']['input']>>;
   manageRequests?: InputMaybe<Scalars['Boolean']['input']>;
   manageShows?: InputMaybe<Scalars['Boolean']['input']>;
+  offlineDownloads?: InputMaybe<Scalars['Boolean']['input']>;
   request?: InputMaybe<Scalars['Boolean']['input']>;
   requestLimit?: InputMaybe<Scalars['Int']['input']>;
   shareLinks?: InputMaybe<Scalars['Boolean']['input']>;
@@ -1770,6 +1783,7 @@ export type Permissions = {
   libraries: Array<Scalars['String']['output']>;
   manageRequests: Scalars['Boolean']['output'];
   manageShows: Scalars['Boolean']['output'];
+  offlineDownloads: Scalars['Boolean']['output'];
   request: Scalars['Boolean']['output'];
   requestLimit: Scalars['Int']['output'];
   shareLinks: Scalars['Boolean']['output'];
@@ -1789,6 +1803,7 @@ export type PermissionsInput = {
   libraries: Array<Scalars['String']['input']>;
   manageRequests: Scalars['Boolean']['input'];
   manageShows: Scalars['Boolean']['input'];
+  offlineDownloads: Scalars['Boolean']['input'];
   request: Scalars['Boolean']['input'];
   requestLimit: Scalars['Int']['input'];
   shareLinks: Scalars['Boolean']['input'];
@@ -2856,16 +2871,20 @@ export type TracksInput = {
 };
 
 export type TranscodeConfig = {
+  cudaDevice: Scalars['Int']['output'];
   hardware: Hardware;
   vaapiDevice: Scalars['String']['output'];
 };
 
 export type TranscodeConfigInput = {
+  cudaDevice: Scalars['Int']['input'];
   hardware: Hardware;
   vaapiDevice: Scalars['String']['input'];
 };
 
 export type Transcoding = {
+  nvenc?: Maybe<Scalars['String']['output']>;
+  nvencError?: Maybe<Scalars['String']['output']>;
   softwareH264: Scalars['Boolean']['output'];
   vaapi?: Maybe<Scalars['String']['output']>;
   vaapiError?: Maybe<Scalars['String']['output']>;

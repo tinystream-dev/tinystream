@@ -1,0 +1,21 @@
+[package]
+name = "mpv-src"
+# The version of mpv it builds.
+version = "0.41.0"
+edition = "2024"
+description = "A static libmpv (GPL, without libass), for the desktop app"
+license = "AGPL-3.0-or-later"
+authors = ["Phrolova <me@phrolova.moe>"]
+repository = "https://github.com/phrolova/tinystream"
+publish = false
+# Desktop only: outside the root workspace (see its Cargo.toml).
+links = "mpv"
+
+[dependencies]
+ffmpeg-src = { path = "../ffmpeg", features = ["nvdec"] }
+libdisplay-info-src = { path = "../libdisplay-info" }
+libdrm-src = { path = "../libdrm" }
+libplacebo-src = { path = "../libplacebo" }
+
+[build-dependencies]
+native-support = { path = "../support" }

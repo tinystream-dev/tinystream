@@ -1244,6 +1244,7 @@ name = "ffmpeg-src"
 version = "8.0.0"
 dependencies = [
  "dav1d-src",
+ "ffnvcodec-src",
  "lame-src",
  "libva-src",
  "nasm-src",
@@ -1255,11 +1256,18 @@ dependencies = [
 
 [[package]]
 name = "ffmpeg-sys"
-version = "0.39.0"
+version = "0.40.0"
 dependencies = [
  "bindgen",
  "ffmpeg-src",
  "pkg-config",
+]
+
+[[package]]
+name = "ffnvcodec-src"
+version = "12.1.14"
+dependencies = [
+ "native-support",
 ]
 
 [[package]]
@@ -2094,7 +2102,7 @@ dependencies = [
 
 [[package]]
 name = "libtorrent-sys"
-version = "0.39.0"
+version = "0.40.0"
 dependencies = [
  "cxx",
  "cxx-build",
@@ -2314,7 +2322,7 @@ dependencies = [
 
 [[package]]
 name = "native-support"
-version = "0.39.0"
+version = "0.40.0"
 
 [[package]]
 name = "nix"
@@ -4002,7 +4010,7 @@ dependencies = [
 
 [[package]]
 name = "tinystream"
-version = "0.39.0"
+version = "0.40.0"
 dependencies = [
  "anyhow",
  "argon2",
@@ -4044,6 +4052,7 @@ dependencies = [
  "sqlx",
  "thiserror 2.0.21",
  "time",
+ "tinystream-theme",
  "tokio",
  "tokio-util",
  "toml",
@@ -4060,7 +4069,7 @@ dependencies = [
 
 [[package]]
 name = "tinystream-decoder"
-version = "0.39.0"
+version = "0.40.0"
 dependencies = [
  "tinystream-decoder-core",
  "wasm-bindgen",
@@ -4068,7 +4077,7 @@ dependencies = [
 
 [[package]]
 name = "tinystream-decoder-core"
-version = "0.39.0"
+version = "0.40.0"
 dependencies = [
  "rubato",
  "symphonia",
@@ -4076,11 +4085,30 @@ dependencies = [
 ]
 
 [[package]]
-name = "tinystream-subtitles"
-version = "0.39.0"
+name = "tinystream-squircle"
+version = "0.40.0"
+
+[[package]]
+name = "tinystream-subtitle-renderer"
+version = "0.40.0"
 dependencies = [
  "rustyass",
+]
+
+[[package]]
+name = "tinystream-subtitles"
+version = "0.40.0"
+dependencies = [
+ "tinystream-subtitle-renderer",
  "wasm-bindgen",
+]
+
+[[package]]
+name = "tinystream-theme"
+version = "0.40.0"
+dependencies = [
+ "base64 0.22.1",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
