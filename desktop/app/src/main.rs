@@ -16,6 +16,7 @@ mod clips;
 mod images;
 mod keys;
 mod music;
+mod offline;
 mod passkeys;
 mod paths;
 mod platform;

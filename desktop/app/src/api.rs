@@ -38,9 +38,17 @@ pub struct Error {
     pub message: String,
 }
 
+/// What a request says when the server can't be reached at all.
+const UNREACHABLE: &str = "Couldn't reach the server. Check the address and your connection.";
+
 impl Error {
     pub fn message(message: impl Into<String>) -> Self {
         Self { unauthorized: false, message: message.into() }
+    }
+
+    /// The server couldn't be reached, rather than saying no.
+    pub fn unreachable(&self) -> bool {
+        self.message == UNREACHABLE
     }
 
     pub fn unauthorized() -> Self {
@@ -168,6 +176,16 @@ impl Api {
     ) -> Result<T, Error> {
         let body = Q::build_query(variables);
         let operation = body.operation_name;
+        let offline = crate::offline::Offline::new(&self.origin);
+        let asked = offline.as_ref().map(|_| serde_json::to_value(&body.variables).unwrap_or_default());
+        let answer = |offline: &crate::offline::Offline| -> Option<T> {
+            offline.answer(operation, asked.as_ref()?).and_then(|data| serde_json::from_value(data).ok())
+        };
+        if let Some(offline) = offline.as_ref().filter(|offline| offline.away())
+            && let Some(data) = answer(offline)
+        {
+            return Ok(data);
+        }
         let mut request = self.http.post(self.origin.join("api/graphql").expect("validated origin")).json(&body);
         if let Some(token) = &self.token {
             request = request.bearer_auth(&token.0);
@@ -175,15 +193,27 @@ impl Api {
         if page {
             request = request.header(reqwest::header::ORIGIN, self.origin.origin().ascii_serialization());
         }
-        let response = request
-            .send()
-            .await
-            .map_err(|_| Error::message("Couldn't reach the server. Check the address and your connection."))?;
+        let response = match request.send().await {
+            Ok(response) if !gone(response.status()) => response,
+            _ => {
+                if let Some(offline) = &offline {
+                    offline.left();
+                    if let Some(data) = answer(offline) {
+                        return Ok(data);
+                    }
+                    offline.report(operation, serde_json::to_value(&body).unwrap_or_default());
+                }
+                return Err(Error::message(UNREACHABLE));
+            },
+        };
         if response.status() == StatusCode::UNAUTHORIZED {
             return Err(Error::unauthorized());
         }
         if !response.status().is_success() {
             return Err(Error::message(format!("The server returned HTTP {}.", response.status().as_u16())));
+        }
+        if let Some(offline) = &offline {
+            offline.back();
         }
         let bytes = response.bytes().await.map_err(|_| Error::message("The server sent something unexpected."))?;
         let body: Response<T> = serde_json::from_slice(&bytes).map_err(|error| {
@@ -196,6 +226,20 @@ impl Api {
             Error::message("The server sent something unexpected.")
         })?;
         decode(body)
+    }
+
+    /// Sends a request made earlier (`body`, as JSON) as it is, for what was done offline. Only
+    /// a server that can't be reached is an error: one that says no won't say yes later.
+    pub async fn resend(&self, body: &Value) -> Result<(), Error> {
+        let mut request = self.http.post(self.origin.join("api/graphql").expect("validated origin")).json(body);
+        if let Some(token) = &self.token {
+            request = request.bearer_auth(&token.0);
+        }
+        match request.send().await {
+            Ok(response) if response.status() == StatusCode::UNAUTHORIZED => Err(Error::unauthorized()),
+            Ok(response) if !gone(response.status()) => Ok(()),
+            _ => Err(Error::message(UNREACHABLE)),
+        }
     }
 
     pub async fn artwork(&self, id: i64, kind: Option<String>, reset: bool) -> Result<(), Error> {
@@ -406,6 +450,11 @@ pub enum Live {
     Offline,
     Unauthorized,
     Event(Arc<events::ResponseData>),
+}
+
+/// What a proxy says when the server behind it is down.
+fn gone(status: StatusCode) -> bool {
+    matches!(status, StatusCode::BAD_GATEWAY | StatusCode::SERVICE_UNAVAILABLE | StatusCode::GATEWAY_TIMEOUT)
 }
 
 fn decode<T>(response: Response<T>) -> Result<T, Error> {

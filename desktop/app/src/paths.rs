@@ -20,3 +20,8 @@ pub fn state_dir() -> Option<PathBuf> {
 pub fn cache_dir() -> Option<PathBuf> {
     dirs::cache_dir().map(|dir| dir.join(APP))
 }
+
+/// What the app keeps for you, like offline downloads (#97).
+pub fn data_dir() -> Option<PathBuf> {
+    dirs::data_local_dir().map(|dir| dir.join(APP))
+}

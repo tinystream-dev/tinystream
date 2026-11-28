@@ -31,6 +31,7 @@ pub struct App {
     pub music: crate::music::Music,
     pub settings: crate::settings::Settings,
     pub clips: crate::clips::Clips,
+    pub downloads: crate::offline::Downloads,
     /// Passing notices, bottom right (`toast()`).
     pub toasts: Vec<crate::ui::overlay::Toast>,
     toast_serial: u64,
@@ -108,6 +109,7 @@ pub enum Message {
     Books(u64, crate::books::Message),
     Music(u64, crate::music::Message),
     Clips(u64, crate::clips::Message),
+    Offline(crate::offline::Message),
     /// Change a clip of this video in the player's editor, as (video, clip).
     EditClip(i64, i64),
     DismissToast(u64),
@@ -149,6 +151,7 @@ impl App {
             music: crate::music::Music::default(),
             settings: crate::settings::Settings::default(),
             clips: crate::clips::Clips::default(),
+            downloads: crate::offline::Downloads::default(),
             toasts: Vec::new(),
             toast_serial: 0,
             chrome,
@@ -342,6 +345,7 @@ impl App {
                 self.navigate(Route::Watch(video as u64, None), effects);
             },
             Message::DismissToast(id) => self.toasts.retain(|toast| toast.id != id),
+            Message::Offline(message) => self.downloads.update(message, effects),
             Message::Settings(message) => {
                 if matches!(&message, crate::settings::Message::Loaded(g,_,_,_) | crate::settings::Message::Done(g,_) if *g != self.session.generation)
                 {
