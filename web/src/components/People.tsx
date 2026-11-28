@@ -8,6 +8,7 @@ import {
   Crown,
   Gauge,
   HardDrive,
+  HardDriveDownload,
   Layers,
   Inbox,
   KeyRound,
@@ -52,6 +53,7 @@ const UsersQuery = graphql(`
         clipLimit
         clipStorage
         clipLinks
+        offlineDownloads
       }
     }
   }
@@ -155,6 +157,7 @@ function summary(p: Permissions, isAdmin: boolean, libraries: string[], download
   else if (!p.watchTogether) parts.push('can’t start watch parties')
   if (!p.clip) parts.push('can’t clip')
   else if (p.clipLinks) parts.push('shares public clips')
+  if (p.offlineDownloads) parts.push('keeps offline copies')
   return parts.join(' · ')
 }
 export function People() {
@@ -333,6 +336,15 @@ function PermissionEditor(props: EditorProps) {
           dim={!p.watchTogether}
         >
           <Toggle label="Public links" checked={p.shareLinks} onChange={(v) => onChange({ shareLinks: v })} />
+        </Setting>
+        <Setting
+          {...row(['offlineDownloads'])}
+          icon={<HardDriveDownload />}
+          label="Offline downloads"
+          hint="Keep copies in the desktop app"
+          was={(d) => onOff(d.offlineDownloads)}
+        >
+          <Toggle label="Offline downloads" checked={p.offlineDownloads} onChange={(v) => onChange({ offlineDownloads: v })} />
         </Setting>
       </Group>
 

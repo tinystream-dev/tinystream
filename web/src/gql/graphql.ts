@@ -1088,7 +1088,7 @@ export type DeleteAppPasswordMutation = { deleteAppPassword: boolean };
 export type UsersQueryVariables = Exact<{ [key: string]: never; }>;
 
 
-export type UsersQuery = { users: Array<{ createdAt: number, lastSeen: number | null, isAdmin: boolean, id: number, username: string, avatar: string | null, overrides: { allLibraries: boolean | null, libraries: Array<string> | null, request: boolean | null, autoApprove: boolean | null, requestLimit: number | null, manageRequests: boolean | null, manageShows: boolean | null, downloads: boolean | null, editMetadata: boolean | null, watchTogether: boolean | null, shareLinks: boolean | null, clip: boolean | null, clipMaxLength: number | null, clipLimit: number | null, clipStorage: number | null, clipLinks: boolean | null }, permissions: { allLibraries: boolean, libraries: Array<string>, request: boolean, autoApprove: boolean, requestLimit: number, manageRequests: boolean, manageShows: boolean, downloads: boolean, editMetadata: boolean, watchTogether: boolean, shareLinks: boolean, clip: boolean, clipMaxLength: number, clipLimit: number, clipStorage: number, clipLinks: boolean, offlineDownloads: boolean } }> };
+export type UsersQuery = { users: Array<{ createdAt: number, lastSeen: number | null, isAdmin: boolean, id: number, username: string, avatar: string | null, overrides: { allLibraries: boolean | null, libraries: Array<string> | null, request: boolean | null, autoApprove: boolean | null, requestLimit: number | null, manageRequests: boolean | null, manageShows: boolean | null, downloads: boolean | null, editMetadata: boolean | null, watchTogether: boolean | null, shareLinks: boolean | null, clip: boolean | null, clipMaxLength: number | null, clipLimit: number | null, clipStorage: number | null, clipLinks: boolean | null, offlineDownloads: boolean | null }, permissions: { allLibraries: boolean, libraries: Array<string>, request: boolean, autoApprove: boolean, requestLimit: number, manageRequests: boolean, manageShows: boolean, downloads: boolean, editMetadata: boolean, watchTogether: boolean, shareLinks: boolean, clip: boolean, clipMaxLength: number, clipLimit: number, clipStorage: number, clipLinks: boolean, offlineDownloads: boolean } }> };
 
 export type PermissionDefaultsQueryVariables = Exact<{ [key: string]: never; }>;
 
@@ -3883,6 +3883,7 @@ export const UsersDocument = new TypedDocumentString(`
       clipLimit
       clipStorage
       clipLinks
+      offlineDownloads
     }
   }
 }
