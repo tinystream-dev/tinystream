@@ -121,7 +121,7 @@ function Members({ snap }: { snap: ListenSnapshot }) {
         <span
           key={m.id}
           title={`${m.name}${m.status === 'ready' ? '' : ` (${m.status})`}`}
-          className={`relative rounded-full ring-2 ring-canvas transition-opacity ${m.status === 'ready' ? '' : 'opacity-60'}`}
+          className={`relative flex rounded-full ring-2 ring-canvas transition-opacity ${m.status === 'ready' ? '' : 'opacity-60'}`}
         >
           {m.userId ? (
             <Avatar user={{ id: m.userId, username: m.name, avatar: m.avatar }} size={28} src={`/api/listen/${room.code}/avatars/${m.userId}`} />

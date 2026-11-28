@@ -24,7 +24,8 @@ globalThis.MediaSource = MediaSourceStub as never
 URL.createObjectURL = () => 'blob:test'
 URL.revokeObjectURL = () => {}
 const video = () => Object.assign(new EventTarget(), {
-  src: '', currentTime: 0, paused: false,
+  src: '', currentTime: 0, paused: false, seeking: false, readyState: 0, error: null,
+  getVideoPlaybackQuality: () => ({ totalVideoFrames: 0, droppedVideoFrames: 0 }),
   buffered: { get length() { return bufferEnd ? 1 : 0 }, start: () => 0, end: () => bufferEnd },
   removeAttribute() {}, load() {},
 }) as unknown as HTMLVideoElement
@@ -35,7 +36,7 @@ const settle = () => new Promise(resolve => setTimeout(resolve, 10))
 test('setup failures notify the player', async () => {
   failSetup = true
   const errors: string[] = []
-  const engine = new StreamEngine(video(), '/media/1', 1800, plan, event => { if (event.error) errors.push(event.error) })
+  const engine = new StreamEngine(video(), '/media/1', 1800, plan, event => { if (event.failure) errors.push(event.failure.message) })
   const started = engine.start(0)
   source.dispatchEvent(new Event('sourceopen'))
   await started.catch(() => {})
@@ -49,7 +50,7 @@ test('early clean EOF reports an error instead of finishing the episode', async 
   ended = false
   globalThis.fetch = (async () => new Response(new Uint8Array([1]))) as never
   const errors: string[] = []
-  const engine = new StreamEngine(video(), '/media/1', 1800, plan, event => { if (event.error) errors.push(event.error) })
+  const engine = new StreamEngine(video(), '/media/1', 1800, plan, event => { if (event.failure) errors.push(event.failure.message) })
   const started = engine.start(0)
   source.dispatchEvent(new Event('sourceopen'))
   await started
@@ -73,7 +74,7 @@ test('an open stream that stops sending data retries and then reports a bounded 
     }))
   }) as never
   const errors: string[] = []
-  const engine = new StreamEngine(video(), '/media/1', 1800, plan, event => { if (event.error) errors.push(event.error) })
+  const engine = new StreamEngine(video(), '/media/1', 1800, plan, event => { if (event.failure) errors.push(event.failure.message) })
   try {
     const started = engine.start(0)
     source.dispatchEvent(new Event('sourceopen'))
@@ -94,7 +95,7 @@ test('a complete response finishes normally', async () => {
   ended = false
   globalThis.fetch = (async () => new Response(new Uint8Array([1]))) as never
   const errors: string[] = []
-  const engine = new StreamEngine(video(), '/media/1', 1, plan, event => { if (event.error) errors.push(event.error) })
+  const engine = new StreamEngine(video(), '/media/1', 1, plan, event => { if (event.failure) errors.push(event.failure.message) })
   try {
     const started = engine.start(0)
     source.dispatchEvent(new Event('sourceopen'))
@@ -114,7 +115,7 @@ test('paused playback does not restart a quiet response', async () => {
   const paused = video()
   Object.assign(paused, { paused: true })
   const errors: string[] = []
-  const engine = new StreamEngine(paused, '/media/1', 1800, plan, event => { if (event.error) errors.push(event.error) })
+  const engine = new StreamEngine(paused, '/media/1', 1800, plan, event => { if (event.failure) errors.push(event.failure.message) })
   try {
     const started = engine.start(0)
     source.dispatchEvent(new Event('sourceopen'))

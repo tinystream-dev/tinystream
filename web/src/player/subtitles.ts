@@ -9,6 +9,14 @@ export class SubtitleRenderer {
   private worker: Worker | null = null
   private replies: { resolve: () => void; reject: (error: Error) => void }[] = []
   private ready: Promise<void> = Promise.resolve()
+  private started = false
+  /** The script showing, for a worker that starts over. */
+  private script: Uint8Array | null = null
+  /** Settles when a worker that broke has been replaced. */
+  private restarted: Promise<void> | null = null
+  private restartTimer: ReturnType<typeof setTimeout> | undefined
+  private failures = 0
+  private failedAt = -Infinity
   private observer: ResizeObserver | null = null
   private frameCallback = 0
   private size = ''
@@ -37,25 +45,82 @@ export class SubtitleRenderer {
 
   private request(message: ToWorker, transfer: Transferable[] = []) {
     return new Promise<void>((resolve, reject) => {
+      if (!this.worker) return reject(new Error('the subtitles are starting over'))
       this.replies.push({ resolve, reject })
-      this.worker!.postMessage(message, transfer)
+      this.worker.postMessage(message, transfer)
     })
   }
 
-  private start(canvas: HTMLCanvasElement) {
-    const offscreen = canvas.transferControlToOffscreen()
-    this.worker = new Worker(new URL('./subtitles.worker.ts', import.meta.url), { type: 'module' })
-    this.worker.onmessage = ({ data }: MessageEvent<FromWorker>) => {
-      const reply = this.replies.shift()
-      if (data.type === 'error') reply?.reject(new Error(data.message))
-      else reply?.resolve()
-    }
-    const absolute = (url: string) => new URL(url, location.href).href
-    this.ready = this.request({ type: 'init', canvas: offscreen, defaultFont: absolute(defaultFont), fonts: this.fonts.map(absolute) }, [offscreen])
+  private start() {
+    this.started = true
     this.observer = new ResizeObserver(() => this.resize())
     this.observer.observe(this.video)
     this.video.addEventListener('resize', this.resize)
+    this.video.addEventListener('loadeddata', this.rearm)
     this.frameCallback = this.video.requestVideoFrameCallback(this.frame)
+    this.spawn()
+  }
+
+  /** Starts a worker on a new canvas, showing the script that was showing. */
+  private spawn() {
+    const canvas = document.createElement('canvas')
+    canvas.className = 'subtitles'
+    canvas.style.position = 'absolute'
+    canvas.style.pointerEvents = 'none'
+    canvas.style.visibility = this.script ? 'visible' : 'hidden'
+    this.video.insertAdjacentElement('afterend', canvas)
+    this.canvas = canvas
+    const offscreen = canvas.transferControlToOffscreen()
+    const worker = new Worker(new URL('./subtitles.worker.ts', import.meta.url), { type: 'module' })
+    this.worker = worker
+    worker.onmessage = ({ data }: MessageEvent<FromWorker>) => {
+      if (worker !== this.worker) return
+      const reply = this.replies.shift()
+      if (data.type === 'done') return reply?.resolve()
+      const error = new Error(data.message)
+      reply?.reject(error)
+      if (data.fatal) this.fail(error)
+    }
+    // When the worker's script can't even load.
+    worker.onerror = (e) => {
+      if (worker === this.worker) this.fail(new Error(e.message || 'the subtitle worker failed'))
+    }
+    const absolute = (url: string) => new URL(url, location.href).href
+    this.ready = this.request({ type: 'init', canvas: offscreen, defaultFont: absolute(defaultFont), fonts: this.fonts.map(absolute) }, [offscreen])
+    this.ready.catch(() => {})
+    this.size = ''
+    this.resize()
+    if (this.script) this.request({ type: 'track', script: this.script, ms: this.ms() }).catch(() => {})
+  }
+
+  /** Throws a broken worker away (with what it drew last) and starts another, sooner the first times. */
+  private fail(error: Error) {
+    if (this.destroyed || !this.worker) return
+    console.warn('subtitles', error)
+    this.worker.terminate()
+    this.worker = null
+    for (const reply of this.replies.splice(0)) reply.reject(error)
+    this.animation?.cancel()
+    this.clearGlint()
+    this.canvas?.remove()
+    this.canvas = null
+    const now = performance.now()
+    this.failures = now - this.failedAt > 60_000 ? 0 : this.failures + 1
+    this.failedAt = now
+    this.restarted = new Promise((resolve) => {
+      this.restartTimer = setTimeout(() => {
+        this.restarted = null
+        if (!this.destroyed) this.spawn()
+        resolve()
+      }, Math.min(30_000, 250 * 2 ** this.failures))
+    })
+  }
+
+  /** A new source can drop the frame callback, which would leave the subtitles still. */
+  private rearm = () => {
+    this.video.cancelVideoFrameCallback(this.frameCallback)
+    this.frameCallback = this.video.requestVideoFrameCallback(this.frame)
+    void this.draw(this.video.currentTime)
   }
 
   /** Lays the canvas over the video's content box, and renders at its size in device pixels. */
@@ -91,6 +156,7 @@ export class SubtitleRenderer {
 
   /** Draws a frame at a time; frames that come in meanwhile are skipped, but for the latest. */
   private async draw(time: number) {
+    if (!this.worker) return
     if (this.drawing) {
       this.behind = true
       return
@@ -137,6 +203,35 @@ export class SubtitleRenderer {
     this.glint = null
   }
 
+  /** Fetches a track's script, trying again a couple of times when the network or the server fails. */
+  private async load(track: string, signal: AbortSignal) {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        const response = await fetch(this.url(track), { signal })
+        if (!response.ok) throw new Error(`subtitle request failed: ${response.status}`)
+        return new Uint8Array(await response.arrayBuffer())
+      } catch (error) {
+        if (signal.aborted || attempt >= 2) throw error
+        await new Promise((resolve) => setTimeout(resolve, 1000 * 2 ** attempt))
+      }
+    }
+  }
+
+  /** Has the worker show a script, waiting out a worker that breaks meanwhile. */
+  private async apply(script: Uint8Array | null) {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        await this.restarted
+        await this.ready
+        await this.request({ type: 'track', script, ms: this.ms() })
+        this.script = script
+        return
+      } catch (error) {
+        if (this.destroyed || attempt >= 2 || !this.restarted) throw error
+      }
+    }
+  }
+
   async show(track: string | null) {
     if (this.destroyed || track === this.requested) return
     this.requested = track
@@ -144,47 +239,31 @@ export class SubtitleRenderer {
     this.fetch?.abort()
     this.animation?.cancel()
     this.clearGlint()
-    if (!track && !this.worker) return
-    if (!this.worker) {
-      this.canvas = document.createElement('canvas')
-      this.canvas.className = 'subtitles'
-      this.canvas.style.position = 'absolute'
-      this.canvas.style.pointerEvents = 'none'
-      this.canvas.style.visibility = 'hidden'
-      this.video.insertAdjacentElement('afterend', this.canvas)
-      this.start(this.canvas)
-      this.resize()
-    }
+    if (!track && !this.started) return
+    if (!this.started) this.start()
     const controller = new AbortController()
     this.fetch = controller
     const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches
     const blurred = { filter: 'blur(6px) brightness(1.4)', opacity: 0.55 }
     const clear = { filter: 'blur(0px) brightness(1)', opacity: 1 }
-    const fade = !reduced && this.current !== null
-      ? this.canvas!.animate([clear, blurred], { duration: 160, easing: 'ease-out', fill: 'forwards' })
+    const fade = !reduced && this.current !== null && this.canvas
+      ? this.canvas.animate([clear, blurred], { duration: 160, easing: 'ease-out', fill: 'forwards' })
       : null
     this.animation = fade
     try {
       if (fade) this.shine()
-      const content = track
-        ? fetch(this.url(track), { signal: controller.signal }).then(async (response) => {
-            if (!response.ok) throw new Error(`subtitle request failed: ${response.status}`)
-            return new Uint8Array(await response.arrayBuffer())
-          })
-        : Promise.resolve(null)
-      const [script] = await Promise.all([content, this.ready, fade?.finished])
+      const [script] = await Promise.all([track ? this.load(track, controller.signal) : null, fade?.finished])
       this.update = this.update.catch(() => {}).then(async () => {
         if (revision !== this.revision) return
-        await this.request({ type: 'track', script, ms: this.ms() }, script ? [script.buffer] : [])
-        if (revision !== this.revision) return
+        await this.apply(script)
         this.current = track
       })
       await this.update
       if (revision !== this.revision) return
       fade?.cancel()
-      this.canvas!.style.visibility = track === null ? 'hidden' : 'visible'
-      this.animation = !reduced && track !== null
-        ? this.canvas!.animate([
+      if (this.canvas) this.canvas.style.visibility = track === null ? 'hidden' : 'visible'
+      this.animation = !reduced && track !== null && this.canvas
+        ? this.canvas.animate([
             { ...blurred, filter: 'blur(6px) brightness(2)' },
             { filter: 'blur(2px) brightness(1.6)', opacity: 1, offset: 0.3 },
             clear,
@@ -208,11 +287,13 @@ export class SubtitleRenderer {
   destroy() {
     this.destroyed = true
     ++this.revision
+    clearTimeout(this.restartTimer)
     this.fetch?.abort()
     this.animation?.cancel()
     this.clearGlint()
     this.observer?.disconnect()
     this.video.removeEventListener('resize', this.resize)
+    this.video.removeEventListener('loadeddata', this.rearm)
     this.video.cancelVideoFrameCallback(this.frameCallback)
     this.worker?.terminate()
     this.worker = null

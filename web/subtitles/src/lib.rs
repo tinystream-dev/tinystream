@@ -40,9 +40,11 @@ impl Subtitles {
         self.0.add_font(data);
     }
 
+    /// False when the script isn't one. (Not an error, as the worker takes any error to mean it's
+    /// broken.)
     #[wasm_bindgen(js_name = setTrack)]
-    pub fn set_track(&mut self, script: &[u8]) -> Result<(), JsError> {
-        self.0.set_track(script).map_err(JsError::new)
+    pub fn set_track(&mut self, script: &[u8]) -> bool {
+        self.0.set_track(script).is_ok()
     }
 
     #[wasm_bindgen(js_name = freeTrack)]

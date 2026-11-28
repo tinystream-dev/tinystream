@@ -12,13 +12,15 @@ export type ToWorker =
   /** Draws the frame at `ms`, if it isn't what's drawn already. */
   | { type: 'render'; ms: number }
 
-/** One for every message, in order. */
-export type FromWorker = { type: 'done' } | { type: 'error'; message: string }
+/** One for every message, in order. A fatal error leaves the worker unusable. */
+export type FromWorker = { type: 'done' } | { type: 'error'; message: string; fatal: boolean }
 
 declare const self: {
   postMessage(m: FromWorker): void
   onmessage: ((e: MessageEvent<ToWorker>) => void) | null
 }
+
+class NotAScript extends Error {}
 
 let subtitles: Subtitles | null = null
 let canvas: OffscreenCanvas | null = null
@@ -51,7 +53,7 @@ function handle(m: ToWorker) {
   switch (m.type) {
     case 'track':
       if (m.script === null) subtitles!.freeTrack()
-      else subtitles!.setTrack(m.script)
+      else if (!subtitles!.setTrack(m.script)) throw new NotAScript('not an ASS or SSA script')
       draw(m.ms, true)
       break
     case 'resize':
@@ -75,7 +77,10 @@ self.onmessage = ({ data }) => {
       else handle(data)
       self.postMessage({ type: 'done' })
     } catch (error) {
-      self.postMessage({ type: 'error', message: error instanceof Error ? error.message : String(error) })
+      // Wasm can't carry on past an error thrown through it (a panic, say): its objects stay
+      // borrowed, so every later call throws. Only a script that isn't one leaves it as it was.
+      const fatal = !(error instanceof NotAScript)
+      self.postMessage({ type: 'error', message: error instanceof Error ? error.message : String(error), fatal })
     }
   })
 }

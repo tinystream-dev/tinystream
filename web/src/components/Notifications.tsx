@@ -64,7 +64,7 @@ function Thumb({ n, size = 36 }: { n: Notice; size?: number }) {
         </Squircle>
       )}
       {art && n.actor && (
-        <span className="absolute -right-1.5 -bottom-1.5 rounded-full ring-2 ring-float">
+        <span className="absolute -right-1.5 -bottom-1.5 flex rounded-full ring-2 ring-float">
           <Avatar user={n.actor} size={Math.round(size * 0.5)} />
         </span>
       )}

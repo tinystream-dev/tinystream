@@ -92,7 +92,7 @@ export function RoomButton({ ctx }: { ctx: RoomContext }) {
           >
             <span className="flex -space-x-2">
               {shown.map((m) => (
-                <span key={m.id} className="rounded-full ring-2 ring-media-shade/60">
+                <span key={m.id} className="flex rounded-full ring-2 ring-media-shade/60">
                   <MemberAvatar room={room} m={m} size={26} />
                 </span>
               ))}
