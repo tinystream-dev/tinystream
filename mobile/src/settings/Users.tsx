@@ -11,6 +11,7 @@ import {
   Crown,
   Gauge,
   HardDrive,
+  HardDriveDownload,
   Inbox,
   KeyRound,
   Layers,
@@ -65,6 +66,7 @@ const UsersQuery = graphql(`
         clipLimit
         clipStorage
         clipLinks
+        offlineDownloads
       }
     }
   }
@@ -153,6 +155,7 @@ function summary(p: Permissions, isAdmin: boolean, libraries: string[], download
   else if (!p.watchTogether) parts.push('can’t start watch parties')
   if (!p.clip) parts.push('can’t clip')
   else if (p.clipLinks) parts.push('shares public clips')
+  if (p.offlineDownloads) parts.push('keeps offline copies')
   return parts.join(' · ')
 }
 
@@ -262,7 +265,7 @@ function PermissionEditor(props: EditorProps) {
   const row = (keys: Key[]) => ({ keys, ...props })
   const onOff = (v: boolean) => (v ? 'On' : 'Off')
   const limit = (n: number) => (n ? String(n) : 'No limit')
-  const toggle = (key: 'watchTogether' | 'shareLinks' | 'request' | 'autoApprove' | 'clip' | 'clipLinks' | 'manageRequests' | 'manageShows' | 'downloads' | 'editMetadata', label: string) => (
+  const toggle = (key: 'watchTogether' | 'shareLinks' | 'request' | 'autoApprove' | 'clip' | 'clipLinks' | 'manageRequests' | 'manageShows' | 'downloads' | 'editMetadata' | 'offlineDownloads', label: string) => (
     <Toggle label={label} value={p[key]} onChange={(v) => onChange({ [key]: v })} disabled={disabled} />
   )
   return (
@@ -276,6 +279,9 @@ function PermissionEditor(props: EditorProps) {
       </Setting>
       <Setting {...row(['shareLinks'])} icon={Link2} label="Public links" hint="For their rooms" was={(d) => onOff(d.shareLinks)} dim={!p.watchTogether}>
         {toggle('shareLinks', 'Public links')}
+      </Setting>
+      <Setting {...row(['offlineDownloads'])} icon={HardDriveDownload} label="Offline downloads" hint="Keep copies in the desktop app" was={(d) => onOff(d.offlineDownloads)}>
+        {toggle('offlineDownloads', 'Offline downloads')}
       </Setting>
 
       {downloads && (
