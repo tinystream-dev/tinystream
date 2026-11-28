@@ -372,7 +372,10 @@ fn panel<'a>(music: &'a Music, look: &Look) -> Element<'a, Message> {
                         "{} track{} · {} left",
                         music.player.queue.len(),
                         plural(music.player.queue.len() as i64),
-                        time(music.player.queue.iter().skip(music.player.index).map(|e| e.track.duration).sum())
+                        time(
+                            music.player.queue.iter().skip(music.player.index).map(|e| e.track.duration).sum::<f64>()
+                                - music.player.shown()
+                        )
                     ),
                     ty::XS,
                     look.ink_3,
