@@ -8,7 +8,7 @@ use super::article::Article;
 use super::{Books, Message, SCROLL, model};
 use crate::route::Route;
 use crate::ui::Look;
-use crate::ui::controls::{button, icon_button, input};
+use crate::ui::controls::{button, icon_button, input, panel};
 use crate::ui::icon::{Icon, icon};
 use crate::ui::text::{self as ty, text};
 
@@ -138,35 +138,36 @@ pub fn view<'a>(books: &'a Books, reading: bool, look: &Look) -> Element<'a, Mes
     if let Some(notice) = &books.notice {
         main = main.push(container(text(notice, ty::SM, look.danger)).padding([8, 24]).boxed());
     }
-    if let Some(range) = books.selection {
+    let menu = books.selection.filter(|_| books.menu.is_some()).map(|range| {
         let count = range.end.saturating_sub(range.start);
-        let mut selected = row![
-            text(format!("{count} characters"), ty::XS, look.ink_2),
-            button("Copy", look).small().on_press(Message::CopySelection).boxed()
-        ]
-        .spacing(8)
-        .align_y(Alignment::Center);
-        if books.can_quote {
-            selected = selected.push(input("quote-note", &books.note, "Add a note", Message::Note, look).boxed()).push(
-                button("Save quote", look)
-                    .small()
-                    .primary()
-                    .on_press_maybe(
-                        (!books.busy && count > 0 && count <= model::QUOTE_LENGTH).then_some(Message::SaveQuote),
+        let mut actions = row![button("Copy", look).small().on_press(Message::CopySelection).boxed()]
+            .spacing(4)
+            .align_y(Alignment::Center);
+        if books.can_quote && count > model::QUOTE_LENGTH {
+            actions = actions.push(text("Too long to quote", ty::XS, look.ink_3).boxed());
+        } else if books.can_quote {
+            actions = actions
+                .push(
+                    container(
+                        input("quote-note", &books.note, "Add a note", Message::Note, look)
+                            .on_submit(Message::SaveQuote)
+                            .boxed(),
                     )
+                    .width(200)
                     .boxed(),
-            );
+                )
+                .push(
+                    button("Quote", look)
+                        .small()
+                        .primary()
+                        .on_press_maybe((!books.busy && count > 0).then_some(Message::SaveQuote))
+                        .boxed(),
+                );
         }
-        main = main.push(
-            container(
-                selected.push(icon_button(Icon::X, "Clear selection", Some(Message::ClearSelection), look).boxed()),
-            )
-            .padding([8, 24])
-            .boxed(),
-        );
-    }
+        panel(actions, 12.0, look).padding(4).boxed()
+    });
     let article: Element<'a, Message> = if books.document.is_some() {
-        Article { books, ink: look.ink, secondary: look.ink_2, highlight: look.highlight }.boxed()
+        Article { books, menu, ink: look.ink, secondary: look.ink_2, highlight: look.highlight }.boxed()
     } else {
         let message = books.error.as_deref().filter(|s| !s.is_empty()).unwrap_or("Opening book…");
         container(
