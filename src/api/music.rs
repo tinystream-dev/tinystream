@@ -14,6 +14,7 @@ use serde::Deserialize;
 use tower::ServiceExt;
 use tower_http::services::ServeFile;
 
+use super::media::FileQuery;
 use super::media::tokio_stream_shim::ReceiverStream;
 use super::schema::Ctx;
 use crate::auth::User;
@@ -1253,10 +1254,19 @@ pub async fn file(
     State(state): State<Arc<AppState>>,
     user: User,
     Path(id): Path<i64>,
+    Query(q): Query<FileQuery>,
     req: Request,
 ) -> ApiResult<Response> {
+    q.allowed(Some(&user))?;
     let t = visible_track(&state, &user, id).await?;
-    serve_track(&t, req).await
+    let mut res = serve_track(&t, req).await?;
+    let name = FsPath::new(&t.path).file_name().unwrap_or_default().to_string_lossy().to_string();
+    if q.download()
+        && let Ok(v) = HeaderValue::from_str(&super::clips::content_disposition("attachment", &name))
+    {
+        res.headers_mut().insert(header::CONTENT_DISPOSITION, v);
+    }
+    Ok(res)
 }
 
 /// A lossless copy of a track as FLAC, converted the first time it's asked for.

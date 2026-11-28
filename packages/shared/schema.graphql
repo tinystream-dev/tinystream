@@ -1238,7 +1238,7 @@ input NewUser {
 	username: String!
 	password: String!
 	isAdmin: Boolean! = false
-	permissions: PermissionOverridesInput! = {allLibraries: null, libraries: null, request: null, autoApprove: null, requestLimit: null, manageRequests: null, manageShows: null, downloads: null, editMetadata: null, watchTogether: null, shareLinks: null, clip: null, clipMaxLength: null, clipLimit: null, clipStorage: null, clipLinks: null}
+	permissions: PermissionOverridesInput! = {allLibraries: null, libraries: null, request: null, autoApprove: null, requestLimit: null, manageRequests: null, manageShows: null, downloads: null, editMetadata: null, watchTogether: null, shareLinks: null, clip: null, clipMaxLength: null, clipLimit: null, clipStorage: null, clipLinks: null, offlineDownloads: null}
 }
 
 type NextUp {
@@ -1321,6 +1321,7 @@ type PermissionOverrides {
 	clipLimit: Int
 	clipStorage: Int
 	clipLinks: Boolean
+	offlineDownloads: Boolean
 }
 
 input PermissionOverridesInput {
@@ -1340,6 +1341,7 @@ input PermissionOverridesInput {
 	clipLimit: Int
 	clipStorage: Int
 	clipLinks: Boolean
+	offlineDownloads: Boolean
 }
 
 type Permissions {
@@ -1359,6 +1361,7 @@ type Permissions {
 	clipLimit: Int!
 	clipStorage: Int!
 	clipLinks: Boolean!
+	offlineDownloads: Boolean!
 }
 
 input PermissionsInput {
@@ -1378,6 +1381,7 @@ input PermissionsInput {
 	clipLimit: Int!
 	clipStorage: Int!
 	clipLinks: Boolean!
+	offlineDownloads: Boolean!
 }
 
 type PlayQueue {

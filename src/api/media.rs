@@ -104,6 +104,20 @@ pub(super) struct FileQuery {
     download: Option<String>,
 }
 
+impl FileQuery {
+    /// Keeping a copy is opt-in, per person (#97).
+    pub(super) fn allowed(&self, user: Option<&User>) -> ApiResult<()> {
+        match self.download.is_none() || user.is_some_and(|u| u.permissions.offline_downloads) {
+            true => Ok(()),
+            false => Err(ApiError::forbidden()),
+        }
+    }
+
+    pub(super) fn download(&self) -> bool {
+        self.download.is_some()
+    }
+}
+
 pub async fn file(
     State(state): State<Arc<AppState>>,
     user: User,
@@ -111,6 +125,7 @@ pub async fn file(
     Query(q): Query<FileQuery>,
     req: Request,
 ) -> ApiResult<Response> {
+    q.allowed(Some(&user))?;
     let (path, _, _) = media_path(&state, &user, id).await?;
     original_file(&user.username, &path, q, req).await
 }
@@ -311,5 +326,27 @@ mod tests {
         let req = HttpRequest::builder().body(Body::empty()).unwrap();
         let err = original_file("someone", &path, FileQuery { download: None }, req).await.err().unwrap();
         assert_eq!(err.status, StatusCode::NOT_FOUND);
+    }
+
+    #[test]
+    fn keeping_a_copy_needs_the_permission() {
+        let mut user = User {
+            id: 1,
+            handle: "someone".into(),
+            username: "someone".into(),
+            is_admin: false,
+            avatar: None,
+            permissions: Default::default(),
+        };
+        let play = FileQuery { download: None };
+        let keep = FileQuery { download: Some("1".into()) };
+
+        assert!(play.allowed(None).is_ok());
+        assert!(play.allowed(Some(&user)).is_ok());
+        assert_eq!(keep.allowed(None).err().unwrap().status, StatusCode::FORBIDDEN);
+        assert_eq!(keep.allowed(Some(&user)).err().unwrap().status, StatusCode::FORBIDDEN);
+
+        user.permissions.offline_downloads = true;
+        assert!(keep.allowed(Some(&user)).is_ok());
     }
 }

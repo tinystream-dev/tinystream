@@ -434,6 +434,7 @@ pub async fn file(
     req: Request,
 ) -> ApiResult<Response> {
     let (room, user) = enter(&state, &code, req.headers()).await?;
+    q.allowed(user.as_ref())?;
     let (path, _) = room_media(&state, &room, id).await?;
     let who = user.map(|u| u.username).unwrap_or_else(|| "a guest".into());
     original_file(&who, &path, q, req).await
