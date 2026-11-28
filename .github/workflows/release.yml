@@ -160,15 +160,21 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/releases
       - uses: actions/download-artifact@v4
         with:
           pattern: tinystream-*
           path: dist
           merge-multiple: true
+      # A tag's notes are .github/releases/<tag>.md when there is one, GitHub's list of PRs otherwise.
       - uses: softprops/action-gh-release@v2
         with:
           files: dist/*
-          generate_release_notes: true
+          body_path: ${{ hashFiles(format('.github/releases/{0}.md', github.ref_name)) != '' && format('.github/releases/{0}.md', github.ref_name) || '' }}
+          generate_release_notes: ${{ hashFiles(format('.github/releases/{0}.md', github.ref_name)) == '' }}
 
   # Unlike the release, the image needs both architectures: `latest` without one would stop working there.
   docker:
