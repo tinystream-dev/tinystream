@@ -22,16 +22,25 @@ A small self-hosted media server for your shows, movies, music and books.
 
 ## Features
 
-- Shows, movies, music and books in one binary, with the web app built in
-- Subtitles drawn right, styled ASS included, on the web and on Android
-- Hardware transcoding with VA-API or NVENC, with a software fallback
-- Watch Together and Listen Together
-- Clips of any moment, shareable with a link
-- Lyrics and loudness normalization, plus OpenSubsonic for the music apps you already use
-- Requests, a calendar, and downloads from the RSS and Torznab indexers you add
-- Invite links for friends and family
-- Tailscale Serve and Funnel, set up for you
-- An Android app
+- Shows, movies, music and books, all from one binary with the web app built in.
+- Subtitles that look the way they were made to, styled ASS included, wherever you watch.
+- Hardware transcoding with VA-API or NVENC, and the CPU when there's no GPU to use.
+- Watch Together and Listen Together, for movie nights and shared albums with friends.
+- Clips of any moment, shared with a link.
+- Lyrics and loudness normalization, plus OpenSubsonic so the music apps you already like keep working.
+- Requests, a calendar, and downloads from the RSS and Torznab indexers you add.
+- Invite links for friends and family.
+- Tailscale Serve and Funnel, set up for you.
+- Apps for Android and the desktop.
+
+## Apps
+
+The web app comes with the server, so you don't need anything else to start watching. If you'd like something native:
+
+- **Desktop** (Linux for now). It plays nearly everything as-is through mpv, so the server rarely has to transcode, and subtitles keep up with the picture far better than in a browser. It also has picture-in-picture, media keys, a tray icon, and downloads for when you're away from your server.
+- **Android**, with the same library and subtitles in your pocket.
+
+Both are on the [releases page](https://github.com/tinystream-dev/tinystream/releases/latest).
 
 ## Getting started
 
@@ -42,9 +51,7 @@ mkdir -p config data && sudo chown 1000:1000 config data
 docker compose up -d
 ```
 
-Open <http://localhost:3000> and create the admin account.
-
-Linux binaries for x86_64 and arm64, and the Android app, are on the [releases page](https://github.com/tinystream-dev/tinystream/releases/latest). A [desktop app](https://github.com/tinystream-dev/tinystream/tree/feat/desktop) for Windows, Linux, and macOS is coming soon.
+Open <http://localhost:3000> and create the admin account. If you'd rather skip Docker, Linux binaries for x86_64 and arm64 are on the releases page too.
 
 ## License
 
