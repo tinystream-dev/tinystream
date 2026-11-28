@@ -514,7 +514,8 @@ impl Widget<Message, Theme, Renderer> for Article<'_> {
 /// How far the selection's menu keeps from the line it's under.
 const GAP: f32 = 8.0;
 
-/// Where the word holding `position` is drawn, in the article; the whole block for one without words.
+/// Where the word holding `position` is drawn, in the article; the whole block for one without
+/// words.
 fn word_bounds(state: &State, doc: &Document, position: usize) -> Option<Rectangle> {
     let i = doc.locate(position).0;
     let row = state.rows.get(i)?;
@@ -550,7 +551,8 @@ impl iced_core::Overlay<Message, Theme, Renderer> for Float<'_, '_> {
         shell: &mut iced_core::Shell<'_, Message>,
     ) {
         self.content.update(self.tree, event, self.layout, cursor, renderer, shell, &self.layout.bounds());
-        // A press on the menu between its controls mustn't reach the text under it and clear the selection.
+        // A press on the menu between its controls mustn't reach the text under it and clear the
+        // selection.
         if matches!(event, Event::Mouse(mouse::Event::ButtonPressed(_) | mouse::Event::ButtonReleased(_)))
             && cursor.is_over(self.layout.bounds())
         {
