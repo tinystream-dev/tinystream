@@ -3,10 +3,12 @@
 use iced_widget::{column, row};
 
 use super::*;
+use crate::offline::Key as Download;
+use crate::offline::view::{download_button, episode_button};
 use crate::ui::icon::icon;
 use crate::ui::text::inherit;
 
-pub(super) fn title<'a>(b: &'a Browsing, id: i64, look: &Look) -> View<'a> {
+pub(super) fn title<'a>(b: &'a Browsing, kept: &crate::offline::Downloads, id: i64, look: &Look) -> View<'a> {
     let key = Key::Title(id);
     let Some(d) = b.data(&key) else { return pending(b, &key, look) };
     let Some(t) = &d.title else { return layout::empty("This title isn't here anymore", None, look) };
@@ -73,6 +75,17 @@ pub(super) fn title<'a>(b: &'a Browsing, id: i64, look: &Look) -> View<'a> {
         actions.push(
             button("Watch together", look).large().icon(Icon::Users).on_press(AppMessage::HostRoom(video)).boxed(),
         );
+    }
+    if let Some(v) = &t.movie {
+        actions.extend(download_button(
+            kept,
+            vec![Download::Video(v.id)],
+            "Download",
+            true,
+            AppMessage::Offline,
+            AppMessage::Navigate,
+            look,
+        ));
     }
     actions.push(title_menu(b, t, done, look));
     let mut meta = Row::<View<'a>>::new().spacing(16);
@@ -175,6 +188,15 @@ pub(super) fn title<'a>(b: &'a Browsing, id: i64, look: &Look) -> View<'a> {
         bar = bar.push(space().width(Fill).boxed());
         if let Some(s) = current.filter(|s| !s.episodes.is_empty()) {
             let ids: Vec<_> = s.episodes.iter().map(|e| e.id).collect();
+            bar = bar.extend(download_button(
+                kept,
+                ids.iter().copied().map(Download::Video).collect(),
+                "Download season",
+                false,
+                AppMessage::Offline,
+                AppMessage::Navigate,
+                look,
+            ));
             let all = s.episodes.iter().all(|e| e.finished);
             bar = bar.push(
                 button(if all { "Mark season not watched" } else { "Mark season watched" }, look)
@@ -190,7 +212,7 @@ pub(super) fn title<'a>(b: &'a Browsing, id: i64, look: &Look) -> View<'a> {
         }
         if let Some(s) = current {
             for (i, v) in s.episodes.iter().enumerate() {
-                episodes = episodes.push(episode(b, t, v, i, look));
+                episodes = episodes.push(episode(b, kept, t, v, i, look));
             }
         }
         if let Some(series) = b.data(&Key::Series(id)).and_then(|d| d.title.as_ref()).and_then(|t| t.series.as_ref()) {
@@ -259,7 +281,14 @@ fn initial_season(t: &Title) -> i64 {
         .or_else(|| t.seasons.first())
         .map_or(0, |s| s.number)
 }
-fn episode<'a>(b: &'a Browsing, t: &'a Title, v: &'a Video, order: usize, look: &Look) -> View<'a> {
+fn episode<'a>(
+    b: &'a Browsing,
+    kept: &crate::offline::Downloads,
+    t: &'a Title,
+    v: &'a Video,
+    order: usize,
+    look: &Look,
+) -> View<'a> {
     let next = t.next_up.as_ref().is_some_and(|n| n.video.id == v.id)
         && !t.seasons.iter().all(|s| s.episodes.iter().all(|e| e.finished));
     let value = v
@@ -363,6 +392,7 @@ fn episode<'a>(b: &'a Browsing, t: &'a Title, v: &'a Video, order: usize, look: 
         .map(|e| e.id)
         .collect::<Vec<_>>();
     let mut buttons = Row::<View<'a>>::new().spacing(1);
+    buttons = buttons.extend(episode_button(kept, Download::Video(v.id), look));
     let mut menu = vec![(
         if v.finished { "Mark unwatched" } else { "Mark watched" }.into(),
         act(b, Action::Watched(vec![v.id], !v.finished)),

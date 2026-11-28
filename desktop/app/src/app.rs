@@ -291,6 +291,7 @@ impl App {
             self.music.save(effects);
         }
         match message {
+            Message::Music(_, crate::music::Message::Offline(message)) => self.downloads.update(message, effects),
             Message::Music(generation, message) => {
                 if generation != self.session.generation {
                     return;

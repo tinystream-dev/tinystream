@@ -102,6 +102,8 @@ pub enum Tab {
 }
 #[derive(Clone)]
 pub enum Message {
+    /// For the app's downloads (#97), which it takes before the music sees it.
+    Offline(crate::offline::Message),
     Picture(String, Option<iced_widget::image::Handle>),
     Mosaic(String, Option<iced_widget::image::Handle>),
     RoomChanged,
@@ -578,6 +580,7 @@ impl Music {
 
     fn handle(&mut self, message: Message, effects: &mut Vec<Effect>) -> Option<Route> {
         match message {
+            Message::Offline(_) => {},
             Message::Edited(result) => match result {
                 Ok(_) => self.fetch(effects),
                 Err(e) => self.error = Some(e.message),

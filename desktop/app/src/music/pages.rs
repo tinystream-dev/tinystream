@@ -26,12 +26,17 @@ const NAME: ty::Size = ty::Size { px: 48.0, line: 52.8 };
 
 /// The music page for the route: a library, an album, an artist or a playlist. `counts` are the
 /// library's albums and songs.
-pub fn page<'a>(music: &'a Music, counts: Option<(i64, i64)>, look: &Look) -> View<'a> {
+pub fn page<'a>(
+    music: &'a Music,
+    kept: &crate::offline::Downloads,
+    counts: Option<(i64, i64)>,
+    look: &Look,
+) -> View<'a> {
     let detail = music.detail.as_ref();
     let (content, glow) = match &music.route {
-        Some(Route::Album(_)) => (album(music, look), Some((640.0, (0.7, 0.6), (0.15, 0.0)))),
+        Some(Route::Album(_)) => (album(music, kept, look), Some((640.0, (0.7, 0.6), (0.15, 0.0)))),
         Some(Route::Artist(_)) => (artist(music, look), Some((576.0, (0.6, 0.6), (0.5, 0.0)))),
-        Some(Route::Playlist(_)) => (playlist(music, look), None),
+        Some(Route::Playlist(_)) => (playlist(music, kept, look), None),
         Some(Route::Library(name)) => (library(music, name, counts, look), None),
         _ => (space().boxed(), None),
     };
@@ -188,7 +193,7 @@ fn waiting<'a>(music: &Music, empty: &'a str, look: &Look) -> View<'a> {
     if music.loading { space().height(240).boxed() } else { layout::empty(empty, None, look) }
 }
 
-fn album<'a>(music: &'a Music, look: &Look) -> View<'a> {
+fn album<'a>(music: &'a Music, kept: &crate::offline::Downloads, look: &Look) -> View<'a> {
     let Some(album) = &music.detail else { return missing(music, "This album isn't here anymore", look) };
     let tracks = &music.songs;
     let best =
@@ -255,7 +260,8 @@ fn album<'a>(music: &'a Music, look: &Look) -> View<'a> {
         menu(tracks, None, look),
     ]
     .spacing(8)
-    .align_y(Alignment::Center);
+    .align_y(Alignment::Center)
+    .extend(download(kept, crate::offline::Key::Album(album.id), look));
     let info = column![
         text(kind(&album.release_types, album.compilation).to_uppercase(), ty::XS, look.ink_3).font(MEDIUM),
         container(text(&album.name, HEADING, look.ink).font(SEMIBOLD)).padding(top(6.0)),
@@ -382,7 +388,12 @@ fn artist<'a>(music: &'a Music, look: &Look) -> View<'a> {
     page.boxed()
 }
 
-fn playlist<'a>(music: &'a Music, look: &Look) -> View<'a> {
+/// Keeps an album or a playlist to play offline (#97).
+fn download<'a>(kept: &crate::offline::Downloads, key: crate::offline::Key, look: &Look) -> Option<View<'a>> {
+    crate::offline::view::download_button(kept, vec![key], "Download", true, Message::Offline, Message::Go, look)
+}
+
+fn playlist<'a>(music: &'a Music, kept: &crate::offline::Downloads, look: &Look) -> View<'a> {
     let Some(list) = &music.detail else { return missing(music, "This playlist isn't here anymore", look) };
     let tracks = &music.songs;
     let playable = !tracks.is_empty();
@@ -418,7 +429,8 @@ fn playlist<'a>(music: &'a Music, look: &Look) -> View<'a> {
             .boxed(),
     ]
     .spacing(8)
-    .align_y(Alignment::Center);
+    .align_y(Alignment::Center)
+    .extend(download(kept, crate::offline::Key::Playlist(list.id), look));
     if list.mine {
         actions = actions
             .push(

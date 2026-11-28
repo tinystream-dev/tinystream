@@ -293,6 +293,9 @@ fn sidebar<'a>(app: &'a App, route: &Route, look: &Look) -> Element<'a, Message>
     if app.browsing.data(&crate::browsing::Key::Shell).and_then(|d| d.server.as_ref()).is_some_and(|s| s.clips) {
         nav = nav.push(nav_link("Clips", Icon::Scissors, Route::Clips, route, look));
     }
+    if app.downloads.any() {
+        nav = nav.push(nav_link("Downloaded", Icon::HardDriveDownload, Route::Offline, route, look));
+    }
     if app.browsing.features() {
         nav = nav.push(
             container(text("Shows", type_::XS, look.ink_3))
@@ -436,7 +439,9 @@ fn page<'a>(app: &'a App, look: &Look) -> Element<'a, Message> {
         Some((false, _, from)) => from,
         _ => &app.history.current().route,
     };
-    let content: Element<'a, Message> = if *route == Route::Settings {
+    let content: Element<'a, Message> = if *route == Route::Offline {
+        crate::offline::view::page(app, look)
+    } else if *route == Route::Settings {
         crate::settings::view::view(app, look)
     } else if matches!(route, Route::Clips | Route::Clip(_)) && crate::browsing::allowed(&app.browsing, route) {
         let page = crate::ui::layout::page(crate::clips::view::page(app, look), false);
@@ -453,7 +458,7 @@ fn page<'a>(app: &'a App, look: &Look) -> Element<'a, Message> {
             },
             _ => None,
         };
-        crate::music::page(&app.music, counts, look).map(move |m| Message::Music(generation, m)).boxed()
+        crate::music::page(&app.music, &app.downloads, counts, look).map(move |m| Message::Music(generation, m)).boxed()
     } else if let Some(content) = crate::browsing::view(app, route, look) {
         content
     } else {
@@ -556,6 +561,7 @@ fn route_title(route: &Route) -> String {
         Route::Clips | Route::Clip(_) => "Clips".into(),
         Route::Discover => "Add shows".into(),
         Route::Downloads => "Downloads".into(),
+        Route::Offline => "Downloaded".into(),
         Route::Requests => "Requests".into(),
         Route::Settings => "Settings".into(),
         Route::Wanted => "Wanted".into(),

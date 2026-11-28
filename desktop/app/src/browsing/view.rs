@@ -299,7 +299,7 @@ pub fn view<'a>(app: &'a App, route: &'a Route, look: &Look) -> Option<View<'a>>
         Route::Home => home(b, look),
         Route::Library(name) => library(b, route, name, look),
         Route::Series { library: name, series } => books(b, name, Some(series), look),
-        Route::Title(id) => title(b, *id as i64, look),
+        Route::Title(id) => title(b, &app.downloads, *id as i64, look),
         Route::Discover => discover(b, look),
         Route::Calendar => calendar(b, look),
         Route::Requests => requests(b, look),
