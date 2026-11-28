@@ -947,7 +947,10 @@ export type Mutation = {
    */
   nowPlaying: Scalars['Boolean']['output'];
   pauseDownloads: Array<Download>;
-  /** Someone listened to (most of) a track. */
+  /**
+   * Someone listened to (most of) a track, now or `at` (unix seconds) for an app catching up
+   * on what it played offline.
+   */
   played: Scalars['Boolean']['output'];
   /** Shares one of your schemes with everyone here, or takes it back. */
   publishScheme: ColorScheme;
@@ -978,6 +981,10 @@ export type Mutation = {
   revokeInvite: Scalars['Boolean']['output'];
   /** Saves the queue of tinystream's own player: the web's, or `client`, the app's. */
   savePlayQueue: PlayQueue;
+  /**
+   * Where someone got to, now or `at` (unix seconds) for an app catching up on what was watched
+   * offline; an older position never replaces a newer one.
+   */
   saveProgress: Video;
   /** Where someone is in a book, in characters of its `length`; reaching the end finishes it. */
   saveReading: Book;
@@ -1255,6 +1262,7 @@ export type MutationPauseDownloadsArgs = {
 
 
 export type MutationPlayedArgs = {
+  at?: InputMaybe<Scalars['Int']['input']>;
   trackId: Scalars['Int']['input'];
 };
 
@@ -1361,6 +1369,7 @@ export type MutationSavePlayQueueArgs = {
 
 
 export type MutationSaveProgressArgs = {
+  at?: InputMaybe<Scalars['Int']['input']>;
   duration: Scalars['Float']['input'];
   position: Scalars['Float']['input'];
   videoId: Scalars['Int']['input'];
