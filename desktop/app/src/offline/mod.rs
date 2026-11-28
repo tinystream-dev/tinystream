@@ -645,6 +645,68 @@ async fn download(
     Ok(())
 }
 
+/// Downloads to show in a snapshot (`--scene offline`): some kept, one coming in, one waiting.
+#[cfg(debug_assertions)]
+pub fn preview(app: &mut crate::app::App) {
+    app.session.config.offline_downloads = true;
+    let api = app.session.api.clone().filter(|api| api.token.is_some());
+    app.downloads.follow(true, api.as_ref(), &mut Vec::new());
+    let show = json!({ "id": 1, "name": "The quiet orbit", "kind": "SHOW", "backdrop": "poster" });
+    let mut index = Index::default();
+    let mut put = |key: Key, state: State, answer: (&str, Value), size: u64, parts: Vec<Key>| {
+        index.add(key, !key.is_track());
+        let item = index.items.get_mut(&key).expect("just added");
+        item.state = state;
+        item.size = size;
+        item.parts = parts;
+        item.answers.insert(store::answer_key(answer.0, &json!({ "id": key_id(key) })), answer.1);
+    };
+    for (id, label, name, state, size) in [
+        (10, "S01E04", "A signal from the shore", State::Done, 412_000_000),
+        (11, "S01E05", "The other side", State::Done, 398_000_000),
+        (12, "S01E06", "Low tide", State::Queued, 0),
+        (13, "S01E07", "Night trains", State::Queued, 0),
+    ] {
+        let video = json!({ "video": { "id": id, "label": label, "name": name, "still": "poster", "title": show, "media": { "duration": 1440.0 } } });
+        put(Key::Video(id), state, ("Playback", video), size, Vec::new());
+    }
+    let film = json!({ "video": { "id": 20, "name": "Paper skies", "still": "poster", "title": { "id": 2, "name": "Paper skies", "kind": "MOVIE" }, "media": { "duration": 6420.0 } } });
+    put(Key::Video(20), State::Done, ("Playback", film), 2_140_000_000, Vec::new());
+    for id in [1, 2, 5] {
+        let state = if id == 5 { State::Paused } else { State::Done };
+        put(
+            Key::Track(id),
+            state,
+            ("MusicTrack", json!({ "track": { "id": id, "title": "Song" } })),
+            38_000_000,
+            Vec::new(),
+        );
+    }
+    let album = json!({ "album": { "id": 3, "name": "Low hum", "artist": "The Northern Lights", "cover": "poster", "trackCount": 2 } });
+    put(Key::Album(3), State::Done, ("MusicAlbum", album), 0, vec![Key::Track(1), Key::Track(2)]);
+    let playlist = json!({ "playlist": { "id": 4, "name": "Train rides", "covers": ["poster"], "trackCount": 1 } });
+    put(Key::Playlist(4), State::Done, ("MusicPlaylist", playlist), 0, vec![Key::Track(5)]);
+    let downloads = &mut app.downloads;
+    downloads.allowed = true;
+    downloads.index = Arc::new(index);
+    downloads.active = Some(Active {
+        key: Key::Video(12),
+        done: 181_000_000,
+        total: Some(402_000_000),
+        serial: 0,
+        stop: Arc::new(AtomicBool::new(false)),
+    });
+    downloads.measured = true;
+    downloads.usage = BTreeMap::from([("https://tv.example.com/".to_owned(), 3_064_000_000)]);
+}
+
+#[cfg(debug_assertions)]
+fn key_id(key: Key) -> i64 {
+    match key {
+        Key::Video(id) | Key::Track(id) | Key::Album(id) | Key::Playlist(id) => id,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -141,6 +141,9 @@ fn main() -> ExitCode {
                 app.history = route::History::new(Route::Settings);
                 app.settings.tab = settings::Tab::Desktop;
             }
+            if scene == "settings" {
+                offline::preview(&mut app);
+            }
             browsing::preview::prepare(&mut app, scene, flags.style, flags.custom, flags.still);
             app.history.set_scroll(flags.scroll);
             if scene == "credits" {
