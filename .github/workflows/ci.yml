@@ -34,14 +34,15 @@ jobs:
     name: Changes
     runs-on: ubuntu-24.04
     outputs:
-      server: ${{ steps.filter.outputs.server }}
-      web: ${{ steps.filter.outputs.web }}
-      mobile: ${{ steps.filter.outputs.mobile }}
-      desktop: ${{ steps.filter.outputs.desktop }}
+      server: ${{ steps.server.outputs.server }}
+      web: ${{ steps.apps.outputs.web }}
+      mobile: ${{ steps.apps.outputs.mobile }}
+      desktop: ${{ steps.apps.outputs.desktop }}
     steps:
       - uses: actions/checkout@v4
+      # The server's exclusions need a file to match every pattern, the apps' paths any one of them.
       - uses: dorny/paths-filter@v3
-        id: filter
+        id: server
         with:
           predicate-quantifier: every
           filters: |
@@ -55,6 +56,10 @@ jobs:
               - '!bun.lock'
               - '!bunfig.toml'
               - '!.github/actions/android/**'
+      - uses: dorny/paths-filter@v3
+        id: apps
+        with:
+          filters: |
             web:
               - '{web,packages,subtitles}/**'
               - '{package.json,bun.lock,bunfig.toml}'
